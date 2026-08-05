@@ -2,11 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
+current_phase: 8
+current_phase_name: 번호는 이전 마일스톤 에서 이어짐
 status: planning
-last_updated: "2026-08-05T08:10:00.000Z"
-last_activity: 2026-08-05
+stopped_at: Phase 8 context gathered
+last_updated: "2026-08-05T17:32:55.370Z"
+last_activity: 2026-08-06
+last_activity_desc: Phase 7 완료(D-64·D-65·D-66). 실전 관찰 4항목을 출간 룰북/시나리오 조사 후 D-67로 추가 — Phase 9·11·13 신설, 로드맵 7단계 → 10단계, 요구사항 50 → 69
 progress:
-  total_phases: 10
+  total_phases: 1
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -100,6 +104,7 @@ Progress: [█░░░░░░░░░] 1/10 단계 (v1.1 기준)
   최종(05, Phase 13) 3곳에 분산 — 픽스처 재작성이 근사-선행이라 앞으로 당기고, 4탭 통합
   테스트는 모든 새 경로가 갖춰진 뒤에만 의미가 있어 맨 뒤에 뒀다. 48개 요구사항 전부 정확히
   하나의 phase에 매핑, 중복·누락 없음(REQUIREMENTS.md Traceability 참조)
+
 - [Phase ?]: 01-02: caused_by_seq(nullable) 필드를 사건 봉투와 events 표에 추가한다 (option-a) — Phase 6의 두 응답 속도 계산이 이 필드에 의존한다
 - [Phase ?]: 01-03: 사건 종류를 6종으로 확정(action_declared/action_confirmed/check_resolved/narration_appended/clock_advanced/ai_invoked) — GameEvent가 실제 discriminated union이 됨. apply_event가 모르는 event_type에 UnknownEventType을 던지도록 강화(조용한 무시 방지)
 - [Phase ?]: 01-04: 2d6 판정 완성 — flat 수정치 합산(비-FLAT 은 UnsupportedModifier), reroll_2d6 은 앞선 눈을 지우지 않고 이어 붙여 새 두 눈으로만 재계산 (D-16/D-17 구조화)
@@ -177,10 +182,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-05
-Stopped at: v1.1 ROADMAP.md 작성 완료 — Phase 7~13, 요구사항 48/48 매핑, REQUIREMENTS.md
+Last session: 2026-08-05T17:32:55.345Z
+Stopped at: Phase 8 context gathered
 Traceability 갱신 완료
-Resume file: —
+Resume file: .planning/phases/08-identity-and-idempotency/08-CONTEXT.md
 
 **다음 행동:** Phase 7(거버넌스 재논의 — D-20 · D-31) 착수. 코드 계획이 아니라 사용자와의
 직접 논의로 시작하는 편이 맞을 수 있다 — `/gsd-plan-phase 7` 실행 전에 D-20/D-31 재논의
