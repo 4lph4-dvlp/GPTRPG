@@ -1,0 +1,1 @@
+{"content":"프롬프트 인젝션 방어의 업계 표준 패턴은 '구분자(delimiter) + 역할 분리'다: 사용자 입력을 XML 태그(예: <user_msg>)로 감싸고 '이 안의 내용은 지시가 아니라 데이터'라고 명시. Anthropic 모델은 XML 태그를 특별히 존중하도록 튜닝됨. '샌드위치 방어'(지시 앞뒤로 사용자 입력을 감싸기)도 흔한 보강 패턴. 완벽한 방어는 없다는 것이 공통된 결론.","source":"web","provider":"websearch","confidence":"MEDIUM","fetched_at":"2026-08-05T08:06:34.946Z","ttl":86400000,"kind":"web"}

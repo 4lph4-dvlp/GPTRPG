@@ -1,0 +1,1 @@
+{"content":"Character.AI류 제품의 방어 아키텍처: 입력 분류기 → LLM → 출력 분류기 → (실패 시) 대체 거부 문구. 침묵 재시도가 아니라 '대체 텍스트로 바꿔치기'가 관행. 탈옥 방지는 지속적 군비경쟁 영역으로 취급됨.","source":"web","provider":"websearch","confidence":"MEDIUM","fetched_at":"2026-08-05T08:06:35.266Z","ttl":86400000,"kind":"web"}

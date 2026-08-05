@@ -1,0 +1,1 @@
+{"content":"Foundry VTT/Roll20 등 VTT의 관행은 '캐릭터 시트 필드 → 굴림 공식에 자동 대입'이다(예: 1d20 + @abilities.str.mod). 어떤 능력치가 어떤 굴림에 보정치로 들어가는지는 룰북(게임 시스템)이 선언하고 플랫폼은 대입 매커니즘만 제공하는 구조.","source":"web","provider":"websearch","confidence":"MEDIUM","fetched_at":"2026-08-05T08:06:35.104Z","ttl":86400000,"kind":"web"}
