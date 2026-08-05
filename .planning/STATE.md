@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-08-05T08:10:00.000Z"
 last_activity: 2026-08-05
 progress:
-  total_phases: 8
+  total_phases: 10
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -26,12 +26,12 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 8 of 14 (신원 검증과 멱등성) — 번호는 이전 마일스톤(Phase 1~6)에서 이어짐
+Phase: 8 of 16 (신원 검증과 멱등성) — 번호는 이전 마일스톤(Phase 1~6)에서 이어짐
 Plan: 미작성
 Status: Ready to plan — Phase 7(거버넌스 재논의) 완료, `/gsd-plan-phase 8` 대기
-Last activity: 2026-08-05 — Phase 7 완료. D-64·D-65·D-66 확정, 그 결과로 Phase 9(에이전트 구조 재편) 신설 및 로드맵 재작성(7단계 → 8단계, 요구사항 50 → 58)
+Last activity: 2026-08-06 — Phase 7 완료(D-64·D-65·D-66). 실전 관찰 4항목을 출간 룰북/시나리오 조사 후 D-67로 추가 — Phase 9·11·13 신설, 로드맵 7단계 → 10단계, 요구사항 50 → 69
 
-Progress: [█░░░░░░░░░] 1/8 단계 (v1.1 기준)
+Progress: [█░░░░░░░░░] 1/10 단계 (v1.1 기준)
 
 ## Performance Metrics
 

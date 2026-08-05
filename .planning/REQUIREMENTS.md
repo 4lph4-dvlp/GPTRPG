@@ -84,6 +84,37 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 - [ ] **RULE-09**: 「판정 결과가 자원을 얼마나 바꾸는가」의 선언 형식이 **효과 표현(D7)의 첫 원자 연산으로 자랄 수 있는 모양**이다 — 나중에 나머지 원자 연산을 붙일 때 이 형식을 다시 쓰지 않아도 된다. 원자 연산 목록 전체를 만드는 것은 이번 범위가 아니다
 - [ ] **RULE-10**: 룰북에 선언이 없는 상황에서도 자원이 변할 수 있다 — **AI가 제안하고 사람이 확인하면** 코드가 계산해 반영한다. 룰북이 부실해도 게임이 멈추지 않고, **AI는 여전히 수치를 직접 못 바꾼다** (D-65 · D7의 `requires_ruling`)
 
+> **아래 여섯은 2026-08-06 룰북 서베이의 결과다** (`.planning/research/RULEBOOK-SURVEY.md`).
+> 실제 출간작 스펙트럼의 한쪽 끝은 **언제나 「이 개념 자체가 없음」**이다 — *Wanderhome*은
+> 소지품을 안 세고, *Ten Candles*는 캐릭터 쪽 변하는 숫자가 없다. **`값 0`과 `개념 없음`을
+> 같게 두면 그릇이 깨진다.**
+
+- [ ] **RULE-11**: 체력 · 소지품 · 스트레스 · 진행 원을 **하나의 「이름 붙은 자원 축」 그릇**으로 담는다 — 인벤토리는 전용 필드가 아니라 이 그릇의 특수 사례다. 표현 형태(숫자+상한 / 세그먼트 / 명명 슬롯 / 태그 목록 / 자원 주사위 / 없음)를 룰북이 고른다
+- [ ] **RULE-12**: 룰북이 **「이 개념을 안 쓴다」를 명시적으로 선언**할 수 있고, 선언하면 관련 화면과 판정 훅이 **완전히 사라진다** — 빈 인벤토리 패널을 회색으로 보여주는 것은 실패다. 빠뜨려서 비어 있는 것과 의도적으로 없다고 선언한 것이 구분된다
+- [ ] **RULE-13**: 실패(또는 대가가 붙는 성공)의 **결과 카테고리를 닫힌 목록에서 먼저 고른 뒤**에야 서술을 쓴다 — 던전월드의 「GM 대응 목록」 같은 형태. **목록이 없는 룰북은 전부 재량 판정으로 간다** (빈 목록이 정상값)
+- [ ] **RULE-14**: 「성공했는가」와 「대가가 붙는가」가 **서로 다른 두 축**으로 표현된다 — 한 필드에 뭉치면 부분 성공(성공했지만 뭔가를 잃음)을 쓰는 룰북을 표현할 수 없다
+- [ ] **RULE-15**: 판정이 필요한지를 룰북의 트리거 목록이 정하고, **목록이 비어 있는 것이 정상값**이다 — 「문을 연다」·「눈을 뜬다」에 주사위를 강제하지 않는다. 목록이 비면 그 행동은 재량 판정으로 떨어지고, 플랫폼이 트리거를 억지로 만들어내지 않는다
+- [ ] **RULE-16**: 소지품에 없는 것을 쓰겠다고 선언하면 **재량 판정으로 간다** — 룰북이 소급 선언(「사실 챙겨왔었다」)을 허용하면 그 비용이 어느 자원 축에서 빠지는지도 룰북이 선언한다
+
+### 장면 (SCENE) — 세션을 열고, 무엇이 있는지 정한다
+
+> 출처: 2026-08-06 시나리오 서베이 (`.planning/research/SCENARIO-SURVEY.md`) · 세션1 실전
+> **지금은 주사위가 굴러야만 서사가 나온다** — 서사 함수가 판정 결과를 필수 입력으로
+> 받게 되어 있어서, 판정 없이 장면을 여는 경로가 코드에 아예 없다. 그래서 세션이
+> 빈 화면에서 시작한다.
+>
+> **「AI가 없는 인물을 지어낸 것」은 어떤 전통에서는 정상 플레이다** — 아포칼립스 월드
+> 계열은 GM의 즉흥 추가를 명시적으로 권장한다. 문제는 즉흥 자체가 아니라 **시나리오가
+> 「우리는 어느 쪽이다」를 선언하지 않은 채 AI가 임의로 즉흥한 것**이다. 그리고 대상을
+> 닫힌 목록으로 강제하면 1980년대 텍스트 어드벤처의 「여기서 그런 건 안 보입니다」를
+> 재현한다.
+
+- [ ] **SCENE-01**: 판정 없이 장면을 여는 경로가 **정식 경로로** 있다 — 우회책이 아니라 서사 함수의 두 번째 진입점이다
+- [ ] **SCENE-02**: 세션이 열리면 진행자가 먼저 상황을 제시하고, 그 안에 **비경험자가 규칙 용어 없이 행동할 수 있는 것**이 들어 있다 — 내가 누구인지 / 지금 보이고 들리는 구체적인 것 / 지금이 왜 중요한지 / **잡을 수 있는 실마리 최소 하나** / 규칙 용어 없는 열린 초대
+- [ ] **SCENE-03**: 지금 장면에 무엇이 있는지가 **세 층**으로 관리된다 — 시나리오가 적어 둔 것 / 이번 장면에서 이미 등장해 확정된 것 / 그 밖
+- [ ] **SCENE-04**: 플레이어가 세 층 밖의 것을 지목했을 때의 처리가 **시나리오가 선언한 대로 결정론적으로** 일어난다 — AI가 그때그때 지어내지 않는다. **즉흥을 허용한다고 선언한 시나리오에서는 즉흥이 정상 동작이고, 그 결과가 확정 목록에 쌓인다**
+- [ ] **SCENE-05**: 만난 인물이 장면이 바뀌어도 명부에 남는다 — 재등장했을 때 같은 인물로 인식된다
+
 ### 기억 유지 (MEM) — 세션 후반에도 앞을 기억한다
 
 > 출처: M1-12 · M1-13(D-63으로 v1.1에 당김) / 리서치 Pitfall 5
@@ -277,43 +308,54 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 | SAFE-06 | Phase 10 | Pending |
 | QUAL-08 | Phase 10 | Pending |
 | TEST-03 | Phase 10 | Pending |
-| RULE-02 | Phase 11 | Pending |
-| RULE-03 | Phase 11 | Pending |
-| RULE-04 | Phase 11 | Pending |
-| RULE-05 | Phase 11 | Pending |
-| RULE-06 | Phase 11 | Pending |
-| RULE-07 | Phase 11 | Pending |
-| RULE-08 | Phase 11 | Pending |
-| RULE-09 | Phase 11 | Pending |
-| RULE-10 | Phase 11 | Pending |
-| QUAL-01 | Phase 11 | Pending |
-| QUAL-02 | Phase 11 | Pending |
+| RULE-11 | Phase 11 | Pending |
+| RULE-12 | Phase 11 | Pending |
+| RULE-15 | Phase 11 | Pending |
 | QUAL-03 | Phase 11 | Pending |
-| QUAL-06 | Phase 11 | Pending |
-| TEST-04 | Phase 11 | Pending |
-| MEM-02 | Phase 12 | Pending |
-| MEM-03 | Phase 12 | Pending |
-| MEM-04 | Phase 12 | Pending |
-| MEM-05 | Phase 12 | Pending |
-| MEM-06 | Phase 12 | Pending |
-| MEM-07 | Phase 12 | Pending |
-| QUAL-07 | Phase 12 | Pending |
-| CLOCK-01 | Phase 13 | Pending |
-| CLOCK-02 | Phase 13 | Pending |
-| CLOCK-03 | Phase 13 | Pending |
-| CLOCK-04 | Phase 13 | Pending |
-| CLOCK-05 | Phase 13 | Pending |
-| FE-01 | Phase 14 | Pending |
-| FE-02 | Phase 14 | Pending |
-| FE-03 | Phase 14 | Pending |
-| FE-04 | Phase 14 | Pending |
-| FE-05 | Phase 14 | Pending |
-| TEST-05 | Phase 14 | Pending |
+| RULE-02 | Phase 12 | Pending |
+| RULE-03 | Phase 12 | Pending |
+| RULE-04 | Phase 12 | Pending |
+| RULE-05 | Phase 12 | Pending |
+| RULE-06 | Phase 12 | Pending |
+| RULE-07 | Phase 12 | Pending |
+| RULE-08 | Phase 12 | Pending |
+| RULE-09 | Phase 12 | Pending |
+| RULE-10 | Phase 12 | Pending |
+| RULE-13 | Phase 12 | Pending |
+| RULE-14 | Phase 12 | Pending |
+| RULE-16 | Phase 12 | Pending |
+| QUAL-01 | Phase 12 | Pending |
+| QUAL-02 | Phase 12 | Pending |
+| QUAL-06 | Phase 12 | Pending |
+| TEST-04 | Phase 12 | Pending |
+| SCENE-01 | Phase 13 | Pending |
+| SCENE-02 | Phase 13 | Pending |
+| SCENE-03 | Phase 13 | Pending |
+| SCENE-04 | Phase 13 | Pending |
+| SCENE-05 | Phase 13 | Pending |
+| MEM-02 | Phase 14 | Pending |
+| MEM-03 | Phase 14 | Pending |
+| MEM-04 | Phase 14 | Pending |
+| MEM-05 | Phase 14 | Pending |
+| MEM-06 | Phase 14 | Pending |
+| MEM-07 | Phase 14 | Pending |
+| QUAL-07 | Phase 14 | Pending |
+| CLOCK-01 | Phase 15 | Pending |
+| CLOCK-02 | Phase 15 | Pending |
+| CLOCK-03 | Phase 15 | Pending |
+| CLOCK-04 | Phase 15 | Pending |
+| CLOCK-05 | Phase 15 | Pending |
+| FE-01 | Phase 16 | Pending |
+| FE-02 | Phase 16 | Pending |
+| FE-03 | Phase 16 | Pending |
+| FE-04 | Phase 16 | Pending |
+| FE-05 | Phase 16 | Pending |
+| TEST-05 | Phase 16 | Pending |
 
 **Coverage:**
 
-- v1.1 requirements: 58 total
-- Mapped to phases: 58 (100%)
+- v1.1 requirements: 69 total
+- Mapped to phases: 69 (100%)
 - Unmapped: 0
 
 **보류(EXP-02·03, MEAS-05, HYP-01·02·04·05·06)와 Future Requirements(M1-*, M2-*, LAW-*)는
