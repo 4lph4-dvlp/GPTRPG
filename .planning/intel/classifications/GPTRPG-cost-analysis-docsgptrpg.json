@@ -1,0 +1,13 @@
+{
+  "source_path": "/home/alpha-pi/GPTRPG/docs/GPTRPG-cost-analysis.md",
+  "type": "DOC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "[GPTRPG] 원가 및 수익 모델 분석",
+  "summary": "LLM 호출 원가, 캐싱 설계, 대체 모델 비교, 가격·수익 모델, 레이턴시 재산정을 다루는 참고용 분석 문서.",
+  "scope": ["LLM 원가", "프롬프트 캐싱", "action_classifier", "master_gm", "자체 호스팅", "가격 정책", "무료 티어", "코스메틱 판매", "UGC 마켓", "레이턴시"],
+  "cross_refs": ["GPTRPG-M0-decisions.md"],
+  "locked": false,
+  "precedence": null,
+  "notes": "문서 스스로 '상태: 참고용 분석'이며 '이 절은 결정의 출처가 아니다 ... 권위는 GPTRPG-M0-decisions.md에 있다'고 명시. 권고(5.5)·확정 방향(6.2) 섹션이 있어 ADR/PRD 신호가 일부 있으나, 결정 권위를 외부 ADR 문서로 위임하므로 DOC(맥락)으로 분류. 6.2/6.3의 확정 방향은 D21 등 결정 참조로 기록됨. 파일명/경로에 adr·prd·spec 규약 없음."
+}

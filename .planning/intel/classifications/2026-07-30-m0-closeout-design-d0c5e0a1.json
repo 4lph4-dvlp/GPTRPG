@@ -1,0 +1,13 @@
+{
+  "source_path": "/home/alpha-pi/GPTRPG/docs/superpowers/specs/2026-07-30-m0-closeout-design.md",
+  "type": "ADR",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "[GPTRPG] 마일스톤 0 종결 설계안",
+  "summary": "M0 설계 종결을 위한 변경 명세 — 새 결정 D31·D32·D33, 로드맵/추적 표 정정, 문서 상태 전환.",
+  "scope": ["기억 주입 규칙 (D31)", "적·NPC 상태값 표현 (D32)", "응답 속도 목표 (D33)", "정답 데이터 개수 단위", "마일스톤 로드맵 M0~M4", "M0 실측 항목", "문서 상태 전환"],
+  "cross_refs": ["docs/GPTRPG-M0-decisions.md", "docs/GPTRPG-design-plan.md", "docs/GPTRPG-cost-analysis.md", "docs/GPTRPG-design-plan-v1-archive.md"],
+  "locked": false,
+  "precedence": null,
+  "notes": "경로는 specs/이지만 내용은 SPEC이 아니라 결정 기록이다 — 문제/결정/대가/폐기한 대안 구조의 아키텍처 결정 3건(D31·D32·D33)을 담고 있어 ADR로 분류. status 필드가 없어 locked=false. 중요: 이 문서는 변경 명세(change spec)이며 §6에 따라 그 내용이 이미 docs/GPTRPG-M0-decisions.md, docs/GPTRPG-design-plan.md, docs/GPTRPG-cost-analysis.md에 반영되었다. §7은 이 문서가 수집 대상이 아니며 권위는 GPTRPG-M0-decisions.md에 있다고 명시한다. 따라서 synthesizer는 이 문서를 GPTRPG-M0-decisions.md보다 낮은 precedence(중복 출처)로 다루고, 충돌 시 GPTRPG-M0-decisions.md를 우선해야 한다. 또한 §7은 docs/GPTRPG-design-plan-v1-archive.md를 수집에서 제외할 것을 요구한다."
+}

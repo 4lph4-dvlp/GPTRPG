@@ -1,0 +1,56 @@
+[importlinter]
+root_package = gptrpg
+include_external_packages = True
+
+[importlinter:contract:1]
+name = rules_core는 시간·무작위·파일·네트워크·비동기를 모른다
+type = forbidden
+source_modules =
+    gptrpg.rules_core
+forbidden_modules =
+    time
+    random
+    os
+    socket
+    datetime
+    secrets
+    sqlite3
+    asyncio
+    pathlib
+    urllib
+    http
+
+[importlinter:contract:2]
+name = cli -> agents -> session_actor -> rulebooks -> (rules_core | event_log)
+type = layers
+layers =
+    gptrpg.cli | gptrpg.web
+    gptrpg.turn
+    gptrpg.agents | gptrpg.imagery
+    gptrpg.session_actor
+    gptrpg.rulebooks
+    gptrpg.rules_core | gptrpg.event_log
+
+[importlinter:contract:3]
+name = agents는 사건 저장소를 모른다
+type = forbidden
+source_modules =
+    gptrpg.agents
+forbidden_modules =
+    gptrpg.event_log
+    gptrpg.session_actor
+    sqlite3
+
+# 그림 층에도 `agents`와 똑같은 금지를 건다. 이유도 같다: 사건을 쓸 수단이
+# 없어야 모델 출력이 게임 상태로 새어 들어갈 통로가 구조적으로 막힌다.
+# 그림이 사건으로 남는 유일한 길은 `web`이 반환값을 받아 명령으로 조립하는
+# 것뿐이다(`RecordSceneIllustration`).
+[importlinter:contract:4]
+name = imagery는 사건 저장소를 모른다
+type = forbidden
+source_modules =
+    gptrpg.imagery
+forbidden_modules =
+    gptrpg.event_log
+    gptrpg.session_actor
+    sqlite3

@@ -1,0 +1,32 @@
+{
+  "source_path": "/home/alpha-pi/GPTRPG/docs/GPTRPG-M0-decisions.md",
+  "type": "ADR",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "[GPTRPG] 마일스톤 0 — 설계 결정 로그",
+  "summary": "마일스톤 0에서 확정된 GPTRPG 설계 결정(D1~D23+)을 기록한 결정 로그. 상태는 설계 확정·실험 미실시.",
+  "scope": [
+    "플레이 모델 (실시간 동기 파티)",
+    "캠페인/세션 개념",
+    "이벤트 소싱 + Session Actor + PacingPolicy",
+    "첫 타깃 룰북 던전월드(PbtA)",
+    "판정 커널 로드맵",
+    "효과 DSL 및 자동화율",
+    "시나리오 계층 / 시나리오 포맷 (Fronts)",
+    "위협 시계 데이터 구조",
+    "재개(Recap)",
+    "Ruling 계층",
+    "서브에이전트 아키텍처",
+    "모델 티어 및 모델 전략",
+    "수익 모델",
+    "캐릭터 생성",
+    "안전 장치"
+  ],
+  "cross_refs": [
+    "GPTRPG-design-plan.md",
+    "GPTRPG-cost-analysis.md"
+  ],
+  "locked": true,
+  "precedence": null,
+  "notes": "다중 결정을 담은 결정 로그(ADR 컬렉션). 파일명·경로에 adr 규약은 없으나 상태 필드('설계 확정'), 결정 번호(D1~D23+), 각 항목의 근거·사유 구조가 ADR 신호로 우세. 상태 '설계 확정'을 Accepted로 해석해 locked=true. 단, 문서 스스로 '완료가 아니다', 킬 크리테리아 실험 미실시, §6에 미결 항목이 남아 있다고 명시하므로 synthesizer는 §6 미결 항목을 locked로 다루면 안 됨. 문서가 커서 본 분류는 앞부분(§0~D23 초반) 스캔 기준."
+}

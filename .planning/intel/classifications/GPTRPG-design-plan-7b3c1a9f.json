@@ -1,0 +1,32 @@
+{
+  "source_path": "/home/alpha-pi/GPTRPG/docs/GPTRPG-design-plan.md",
+  "type": "SPEC",
+  "confidence": "medium",
+  "manifest_override": false,
+  "title": "[GPTRPG] 기획 명세서 v2",
+  "summary": "GPTRPG 플랫폼의 제품 정의, 4계층 아키텍처, 룰북·위협 시계·캐릭터·진행 정책, 수익 모델과 마일스톤 로드맵을 담은 v2 명세서.",
+  "scope": [
+    "제품 정의",
+    "설계 원칙",
+    "4계층 아키텍처",
+    "이벤트 소싱",
+    "진행 정책",
+    "에이전트 4개",
+    "룰북 시스템",
+    "위협 시계",
+    "캐릭터",
+    "플레이 운영",
+    "저작 도구",
+    "수익 모델",
+    "라이선스",
+    "마일스톤 로드맵"
+  ],
+  "cross_refs": [
+    "GPTRPG-design-plan-v1-archive.md",
+    "GPTRPG-M0-decisions.md",
+    "GPTRPG-cost-analysis.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "PRD 신호(타깃 유저, 해결하는 문제, 수익 모델, 마일스톤)와 SPEC 신호(4계층 아키텍처, 이벤트 소싱, 진행 정책 표, 에이전트 표)가 비슷한 강도로 공존. 모호성 규칙(ADR > SPEC > PRD)에 따라 SPEC으로 분류. 결정 사유는 GPTRPG-M0-decisions.md에 분리되어 있어 이 문서 자체는 ADR이 아님."
+}

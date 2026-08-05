@@ -1,0 +1,29 @@
+{
+  "source_path": "/home/alpha-pi/GPTRPG/docs/GPTRPG-design-plan-v1-archive.md",
+  "type": "SPEC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "[GPTRPG] 코어 엔진 기획 명세서 (Core Engine Spec Sheets)",
+  "summary": "LLM 멀티 에이전트 + 하드코딩 규칙 엔진 하이브리드 온라인 TRPG 플랫폼의 코어 엔진 및 통합 개발 핸드오프 기술 명세.",
+  "scope": [
+    "RulebookAdapter 인터페이스",
+    "SceneContext / ParsedAction 계약",
+    "하이브리드 전투 엔진 (15x15 그리드)",
+    "Provably Fair 주사위",
+    "멀티 서브에이전트 오케스트레이션",
+    "에이전트 통신 프로토콜 (gRPC/Redis Streams)",
+    "상태 관리 및 격리 (PostgreSQL+JSONB, Redis)",
+    "토큰 예산 관리",
+    "WebSocket 청크 프로토콜",
+    "구조화 서사 기억 매니저 / Entity Ledger",
+    "스포트라이트 및 리액션 큐",
+    "AFK 타임아웃",
+    "인터랙티브 온보딩",
+    "스타터 룰북 세트",
+    "프로토타입 검증 기준"
+  ],
+  "cross_refs": [],
+  "locked": false,
+  "precedence": null,
+  "notes": "파일명이 'v1-archive'로 표기되어 있어 이전 버전/아카이브 문서일 가능성이 높음 — 후속 버전에 의해 대체되었을 수 있음. 단, 문서 본문에는 superseded/status 명시가 없음. 문서는 두 개의 명세서(코어 엔진 기획 명세서 + 통합 개발 핸드오프 명세서)가 하나의 파일에 연결된 형태. 인터페이스 정의, JSON 스키마, 상태 저장소 표, 타임아웃/토큰 예산 등 구현 계약 신호가 지배적이므로 SPEC. 6장 프로토타입 검증 기준(성공 기준 13케이스)은 PRD성 수용 기준 신호이나 부차적. 원본 파일 경로 SHA-256을 계산할 Bash 도구가 없어 파일명 접미사는 경로 기반 토큰으로 대체함."
+}

@@ -1,0 +1,82 @@
+[project]
+name = "gptrpg"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "alpha-pi", email = "alpha030520@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.120.2",
+    "fastapi>=0.141.1",
+    "google-genai>=2.16.0",
+    "openai>=2.52.0",
+    "pydantic>=2.13.4",
+    "uvicorn>=0.52.1",
+]
+
+[project.optional-dependencies]
+# 그림 생성(로컬 SDXL Turbo). **기본 설치에 넣지 않는다** — 두 꾸러미가 합쳐
+# 2.5GB가 넘고, 그림을 쓰지 않는 사람과 시험 묶음 전체가 그 무게를 질 이유가
+# 없다. `gptrpg.imagery.renderer`가 이 둘을 함수 안에서만 import하므로, 설치
+# 하지 않아도 나머지 코드와 시험은 그대로 돈다.
+#     uv sync --extra imagery
+imagery = [
+    "diffusers>=0.39.0",
+    "torch>=2.13.0",
+    "transformers>=5.14.1",
+    "accelerate>=1.0.0",
+    "safetensors>=0.8.0",
+    "pillow>=12.0.0",
+]
+
+[project.scripts]
+gptrpg = "gptrpg.cli.main:main"
+
+[build-system]
+requires = ["uv_build>=0.11.28,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "hypothesis>=6.164.0",
+    "import-linter>=2.13",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "TID251"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"time".msg = "규칙 코어는 시각을 알 수 없다 — 시각이 필요하면 호출자가 값으로 넘긴다."
+"random".msg = "규칙 코어는 무작위성을 직접 가져다 쓸 수 없다 — 굴림은 재생 가능한 굴림 도구를 거쳐야 한다."
+"os".msg = "규칙 코어는 파일·환경에 접근하지 않는다."
+"socket".msg = "규칙 코어는 네트워크를 모른다."
+"datetime".msg = "규칙 코어는 시각을 알 수 없다 — 시각이 필요하면 호출자가 값으로 넘긴다."
+"secrets".msg = "규칙 코어는 무작위성을 직접 가져다 쓸 수 없다 — 굴림은 재생 가능한 굴림 도구를 거쳐야 한다."
+"sqlite3".msg = "규칙 코어는 저장소를 직접 건드리지 않는다 — 사건 기록 계층의 책임이다."
+"asyncio".msg = "규칙 코어는 순수 동기 계산이다."
+"pathlib".msg = "규칙 코어는 파일 경로를 다루지 않는다."
+"urllib".msg = "규칙 코어는 네트워크를 모른다."
+"http".msg = "규칙 코어는 네트워크를 모른다."
+
+[tool.ruff.lint.per-file-ignores]
+"src/gptrpg/event_log/*" = ["TID251"]
+"src/gptrpg/session_actor/*" = ["TID251"]
+"src/gptrpg/cli/*" = ["TID251"]
+"src/gptrpg/agents/*" = ["TID251"]
+"tests/*" = ["TID251"]
+"src/gptrpg/web/*" = ["TID251"]
+"src/gptrpg/turn/*" = ["TID251"]
+# 그림 층은 `agents`와 같은 자리다 — 외부/로컬 모델을 부르므로 시각·파일
+# 경로가 필요하다. 이 금지 목록은 `rules_core`를 순수하게 지키기 위한 것이고
+# 이 층은 그 아래가 아니다(.importlinter contract:2/4가 경계를 따로 강제한다).
+"src/gptrpg/imagery/*" = ["TID251"]
