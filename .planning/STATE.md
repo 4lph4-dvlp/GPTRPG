@@ -6,11 +6,11 @@ current_phase: 8
 current_phase_name: 번호는 이전 마일스톤 에서 이어짐
 status: planning
 stopped_at: Phase 8 context gathered
-last_updated: "2026-08-05T17:32:55.370Z"
+last_updated: "2026-08-05T17:39:52.337Z"
 last_activity: 2026-08-06
 last_activity_desc: Phase 7 완료(D-64·D-65·D-66). 실전 관찰 4항목을 출간 룰북/시나리오 조사 후 D-67로 추가 — Phase 9·11·13 신설, 로드맵 7단계 → 10단계, 요구사항 50 → 69
 progress:
-  total_phases: 1
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -171,6 +171,10 @@ v1.1이 완료되면 조건을 갖춘 재실험을 새로 설계할지 결정한
 수동 경로, Phase 12) · M1-12(`context_summarizer`, Phase 11) · M1-13(관계 장부 주입,
 Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-11(D-11의 3주 재개
 검증) · M1-14(동적 파티).
+
+### Roadmap Evolution
+
+- Phase 12.1 inserted after Phase 12: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22). Phase 8 논의 중 사용자가 지적해 발견: D22가 잠긴 결정인데도 v1.1·M1~M4 어디에도 배정된 적이 없었음. CHAR-01~05 요구사항 신설, REQUIREMENTS.md 69→74건 (URGENT)
 
 ## Deferred Items
 
