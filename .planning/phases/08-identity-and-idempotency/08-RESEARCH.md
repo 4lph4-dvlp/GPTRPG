@@ -428,20 +428,20 @@ async def test_two_browsers_selecting_same_character_only_one_wins(web_app):
 
 ## Open Questions
 
-1. **`ActionDeclared`/`ActionConfirmed`에 `character_id`를 추가하는 스키마 확장 범위를 사용자가 승인하는가?**
+1. **(RESOLVED — 2026-08-06, plan-phase 체크포인트) `ActionDeclared`/`ActionConfirmed`에 `character_id`를 추가하는 스키마 확장 범위를 사용자가 승인하는가?**
    - What we know: 코드를 읽어 확인한 결과 이 확장 없이는 TRUST-03이 재시작 후에도 성립하지 않는다(Pitfall 1).
-   - What's unclear: CONTEXT.md의 D-12/D-13이 이 확장까지 의도했는지, 아니면 계획 단계에서 처음 제기되는 결정인지.
-   - Recommendation: 계획 단계 시작 시 `checkpoint:human-verify`로 이 발견을 사용자에게 제시하고 승인받는다.
+   - What's unclear: ~~CONTEXT.md의 D-12/D-13이 이 확장까지 의도했는지, 아니면 계획 단계에서 처음 제기되는 결정인지.~~
+   - **Resolution:** 사용자가 `/gsd-plan-phase 8` 진행 중 체크포인트에서 확장 범위를 승인했다. `08-01-PLAN.md` Task 1(`checkpoint:decision`)이 승인 사실을 기록하고, Task 2가 4개 항목(ActionDeclared·ActionConfirmed·CheckResolved·CharacterOccupied) 전부를 같은 판 올리기(4→5)에 구현한다.
 
-2. **점유 충돌·신원 불일치의 정확한 HTTP 상태 코드는?**
+2. **(RESOLVED — 계획 단계에서 확정) 점유 충돌·신원 불일치의 정확한 HTTP 상태 코드는?**
    - What we know: 기존 코드는 `CommandRejected`를 예외 없이 400으로 매핑한다.
-   - What's unclear: 이번 단계에서 403/409로 세분화할지, 기존 400 통일을 유지할지는 CONTEXT.md가 "Claude's Discretion"으로 명시적으로 위임했다.
-   - Recommendation: 403(신원/권한) · 409(점유 충돌, 기존 `SequenceConflict`와 같은 계열) · 400(입력 형식) 세 갈래로 나누는 것을 권고하되, 계획 단계에서 최종 확정한다.
+   - What's unclear: ~~이번 단계에서 403/409로 세분화할지, 기존 400 통일을 유지할지는 CONTEXT.md가 "Claude's Discretion"으로 명시적으로 위임했다.~~
+   - **Resolution:** 권고안대로 403(신원/권한)·409(점유 충돌)·400(입력 형식) 세 갈래로 확정. `08-01-PLAN.md` §scope_decisions 1이 기존 400-단언 테스트 5곳을 전부 확인해 이 확장이 기존 테스트를 깨지 않음을 기록했다.
 
-3. **브라우저 식별자(`browser_id`)를 어디서·언제 발급하는가?**
+3. **(RESOLVED — 계획 단계에서 확정) 브라우저 식별자(`browser_id`)를 어디서·언제 발급하는가?**
    - What we know: `select-character`가 처음 성공할 때 발급하는 것이 D-01/D-03/D-05와 가장 잘 맞는다(Architecture Patterns 다이어그램 참조).
-   - What's unclear: 세션 진입 시점(캐릭터 선택 전)에 이미 `browser_id`가 필요한 화면 동작이 있는지(예: "누가 지금 보고 있는지"를 캐릭터 선택 전에도 구분해야 하는 요구가 있는지) — CONTEXT.md에 명시가 없다.
-   - Recommendation: 이 단계 범위(캐릭터 선택 이후의 신원·점유·멱등성)로 한정하면 select-character 시점 발급으로 충분하다.
+   - What's unclear: ~~세션 진입 시점(캐릭터 선택 전)에 이미 `browser_id`가 필요한 화면 동작이 있는지~~
+   - **Resolution:** 권고안대로 select-character 시점 발급으로 확정(`08-01-PLAN.md` §scope_decisions 2). 단, 유효한 기존 쿠키가 있으면 browser_id를 재사용하고 재발급하지 않는다는 제약이 계획 단계에서 추가됐다 — 그렇지 않으면 D-05의 "본인 재접속은 그대로 통과" 보장이 깨진다.
 
 ## Environment Availability
 

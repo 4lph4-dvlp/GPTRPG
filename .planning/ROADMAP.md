@@ -183,9 +183,20 @@ QUAL-05, TEST-01, TEST-02
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 08-01-PLAN.md — [tracer] 서명 쿠키가 캐릭터 선택 → 선언 → 확인 → 판정까지 끝까지 도는 한 줄기 + 기록 형식 판 4→5 + 옛 기록 읽는 길 (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 08-02-PLAN.md — 캐릭터 점유: 먼저 잡은 사람이 임자다, 겹치는 점유 요청 재현 (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 08-03-PLAN.md — 멱등성과 「이야기만 다시 쓰기」: 재시도가 주사위를 다시 굴리지 않는다 (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 08-04-PLAN.md — 다중 캐릭터 픽스처, API 경계 입력 상한 전수 훑기, 문구 위생 관문 (wave 4)
 
 > **왜 이것이 코드의 첫 단계인가.** 이후 모든 단계의 검증이 여기서 고치는 테스트 픽스처
