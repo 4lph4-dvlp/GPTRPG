@@ -25,6 +25,17 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 
 ## v1.1 Requirements
 
+### 구조 재논의 (ARCH) — 코드보다 먼저 다시 내리는 결정
+
+> 출처: D17(에이전트 10개 → 4개) · D7(효과 표현) · 2026-08-05 사장님 제기
+> 원 설계는 **서브에이전트 10개**가 각자 상황·룰북·아이템을 판단해 진행자에게 넘기는
+> 구조였다. D17이 이를 4개로 줄였고(턴당 호출 3~4회 → 2회), 실제 코드에는 2개만 있다.
+> 축소의 **대가로 하기로 한 것이 정형화**였는데 — 효과 표현(D7)·시나리오 형식
+> 플러그인(D9)·룰북 파일(D26·D27) — 그중 판정 커널 2종 말고는 코드에 없다.
+> 이 어긋남을 코드 작업 전에 정면으로 확인한다.
+
+- [ ] **ARCH-01**: D17(에이전트를 4개로 줄인 결정)의 재검토 결과가 사유와 함께 문서에 남는다 — 지금 2개(+계획된 2개)로 갈지, 역할을 나눈 에이전트를 더 둘지. **응답 속도 목표와 원가 상한을 근거로 판단하고, 늘리지 않기로 하면 그 몫을 무엇이 받는지 함께 적는다**
+
 ### 신원 검증 (TRUST) — 누가 무엇을 했는지 서버가 확인한다
 
 > 출처: 감사 C1 · H1 · M1 / 리서치 Pitfall 1·5
@@ -65,6 +76,7 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 - [ ] **RULE-06**: 캐릭터 시트가 지금 상태를 보여준다 — 캐릭터를 만든 시점의 값이 아니라
 - [ ] **RULE-07**: 자원이 크게 깎이면 화면에서 바로 보인다
 - [ ] **RULE-08**: AI가 지금 행동한 사람뿐 아니라 파티 전원의 상태를 본다
+- [ ] **RULE-09**: 「판정 결과가 자원을 얼마나 바꾸는가」의 선언 형식이 **효과 표현(D7)의 첫 원자 연산으로 자랄 수 있는 모양**이다 — 나중에 나머지 원자 연산을 붙일 때 이 형식을 다시 쓰지 않아도 된다. 원자 연산 목록 전체를 만드는 것은 이번 범위가 아니다
 
 ### 기억 유지 (MEM) — 세션 후반에도 앞을 기억한다
 
@@ -231,14 +243,67 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| *(로드맵 작성 시 채워진다)* | | |
+| ARCH-01 | Phase 7 | Pending |
+| RULE-01 | Phase 7 | Pending |
+| MEM-01 | Phase 7 | Pending |
+| TRUST-01 | Phase 8 | Pending |
+| TRUST-02 | Phase 8 | Pending |
+| TRUST-03 | Phase 8 | Pending |
+| TRUST-04 | Phase 8 | Pending |
+| TRUST-05 | Phase 8 | Pending |
+| TRUST-06 | Phase 8 | Pending |
+| QUAL-04 | Phase 8 | Pending |
+| QUAL-05 | Phase 8 | Pending |
+| TEST-01 | Phase 8 | Pending |
+| TEST-02 | Phase 8 | Pending |
+| SAFE-01 | Phase 9 | Pending |
+| SAFE-02 | Phase 9 | Pending |
+| SAFE-03 | Phase 9 | Pending |
+| SAFE-04 | Phase 9 | Pending |
+| SAFE-05 | Phase 9 | Pending |
+| SAFE-06 | Phase 9 | Pending |
+| QUAL-08 | Phase 9 | Pending |
+| TEST-03 | Phase 9 | Pending |
+| RULE-02 | Phase 10 | Pending |
+| RULE-03 | Phase 10 | Pending |
+| RULE-04 | Phase 10 | Pending |
+| RULE-05 | Phase 10 | Pending |
+| RULE-06 | Phase 10 | Pending |
+| RULE-07 | Phase 10 | Pending |
+| RULE-08 | Phase 10 | Pending |
+| RULE-09 | Phase 10 | Pending |
+| QUAL-01 | Phase 10 | Pending |
+| QUAL-02 | Phase 10 | Pending |
+| QUAL-03 | Phase 10 | Pending |
+| QUAL-06 | Phase 10 | Pending |
+| TEST-04 | Phase 10 | Pending |
+| MEM-02 | Phase 11 | Pending |
+| MEM-03 | Phase 11 | Pending |
+| MEM-04 | Phase 11 | Pending |
+| MEM-05 | Phase 11 | Pending |
+| QUAL-07 | Phase 11 | Pending |
+| CLOCK-01 | Phase 12 | Pending |
+| CLOCK-02 | Phase 12 | Pending |
+| CLOCK-03 | Phase 12 | Pending |
+| CLOCK-04 | Phase 12 | Pending |
+| CLOCK-05 | Phase 12 | Pending |
+| FE-01 | Phase 13 | Pending |
+| FE-02 | Phase 13 | Pending |
+| FE-03 | Phase 13 | Pending |
+| FE-04 | Phase 13 | Pending |
+| FE-05 | Phase 13 | Pending |
+| TEST-05 | Phase 13 | Pending |
 
 **Coverage:**
 
-- v1.1 requirements: 48 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 48
+- v1.1 requirements: 50 total
+- Mapped to phases: 50 (100%)
+- Unmapped: 0
+
+**보류(EXP-02·03, MEAS-05, HYP-01·02·04·05·06)와 Future Requirements(M1-*, M2-*, LAW-*)는
+이 마일스톤의 로드맵 대상이 아니므로 이 표에 넣지 않는다 — 위 각 절의 사유를 그대로 따른다.**
 
 ---
 *Requirements defined: 2026-07-30 (v1.0) · Redefined: 2026-08-05 (v1.1)*
 *출처: `docs/session1-code-review.md` 전수 감사 + `.planning/research/SUMMARY.md` 리서치 종합*
+*Traceability 갱신: 2026-08-05 — ROADMAP.md 작성, Phase 7~13에 48개 요구사항 100% 매핑*

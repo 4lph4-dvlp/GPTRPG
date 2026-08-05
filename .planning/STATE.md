@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 status: planning
-last_updated: "2026-08-05T07:56:19.587Z"
+last_updated: "2026-08-05T08:10:00.000Z"
 last_activity: 2026-08-05
 progress:
-  total_phases: 0
+  total_phases: 7
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,33 +20,36 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** v1.1 돌아가는 프로토타입 — 요구사항 정의 중
+**Current focus:** v1.1 돌아가는 프로토타입 — 로드맵 작성 완료, Phase 7 착수 대기
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-08-05 — Milestone v1.1 started
+Phase: 7 of 13 (거버넌스 재논의 — D-20 · D-31) — 번호는 이전 마일스톤(Phase 1~6)에서 이어짐
+Plan: TBD (Phase 7은 계획 없이 사용자 직접 논의로 처리될 수 있음)
+Status: Ready to plan — ROADMAP.md 작성 완료, `/gsd-plan-phase 7` 또는 사용자 논의 대기
+Last activity: 2026-08-05 — ROADMAP.md v1.1 작성 완료 (Phase 7~13, 요구사항 48/48 매핑)
+
+Progress: [░░░░░░░░░░] 0% (v1.1 기준. 이전 마일스톤 M0은 Phase 1~4 완료, Phase 5는 4/6에서 보류)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 22
+- Total plans completed: 22 (M0 누적)
 - Average duration: -
-- Total execution time: 0.0 hours
+- Total execution time: 0.0 hours (v1.1 기준 — 아직 실행 없음)
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01 | 6 | - | - |
-| 02 | 4 | - | - |
-| 03 | 6 | - | - |
-| 04 | 6 | - | - |
+| 01 (M0) | 6 | - | - |
+| 02 (M0) | 4 | - | - |
+| 03 (M0) | 6 | - | - |
+| 04 (M0) | 6 | - | - |
+| 05 (M0) | 4/6, 보류 | - | - |
 
 **Recent Trend:**
 
@@ -87,6 +90,16 @@ Last activity: 2026-08-05 — Milestone v1.1 started
 - 프롬프트 조립 순서를 안정성 순서로 짜는 것은 최적화가 아니라 설계 제약이다 (캐싱 유무가 원가를 3.7배 가른다)
 - M0은 최상급 모델 고정 — 재는 것은 원가가 아니라 품질 상한선이다
 - 실행 환경 = Python 백엔드 + TypeScript 프런트엔드. **원본 문서가 아니라 이번 정리에서 새로 고른 결정이다**
+- [ROADMAP] 2026-08-05: v1.1 로드맵 확정 — Phase 번호는 6에서 끊기지 않고 7부터 이어진다.
+  RULE-01(D-20 재논의)·MEM-01(D-31 재논의)을 Phase 7 하나로 묶어 가장 먼저 배치(코드 없음).
+  TRUST 6건 + 멱등성 + 테스트 픽스처 앞단(TEST-01·02)을 Phase 8로 묶어 신원·재시도 문제를
+  한 번에 닫는다. RULE-02~08(읽기+쓰기)을 Phase 10 하나로 묶어 C4(능력치 미반영/자원 불변)를
+  한 단계에서 닫는다 — 능력치 읽기는 D-20 없이도 시작 가능하지만 같은 파일을 반복해서 열게
+  되므로 자원 쓰기와 합쳤다. QUAL 8건은 전부 가장 관련 있는 코드 경로에 흩어 배정했다(단독
+  phase를 만들지 않음). TEST는 앞단(01·02, Phase 8)·중간(03, Phase 9 / 04, Phase 10)·
+  최종(05, Phase 13) 3곳에 분산 — 픽스처 재작성이 근사-선행이라 앞으로 당기고, 4탭 통합
+  테스트는 모든 새 경로가 갖춰진 뒤에만 의미가 있어 맨 뒤에 뒀다. 48개 요구사항 전부 정확히
+  하나의 phase에 매핑, 중복·누락 없음(REQUIREMENTS.md Traceability 참조)
 - [Phase ?]: 01-02: caused_by_seq(nullable) 필드를 사건 봉투와 events 표에 추가한다 (option-a) — Phase 6의 두 응답 속도 계산이 이 필드에 의존한다
 - [Phase ?]: 01-03: 사건 종류를 6종으로 확정(action_declared/action_confirmed/check_resolved/narration_appended/clock_advanced/ai_invoked) — GameEvent가 실제 discriminated union이 됨. apply_event가 모르는 event_type에 UnknownEventType을 던지도록 강화(조용한 무시 방지)
 - [Phase ?]: 01-04: 2d6 판정 완성 — flat 수정치 합산(비-FLAT 은 UnsupportedModifier), reroll_2d6 은 앞선 눈을 지우지 않고 이어 붙여 새 두 눈으로만 재계산 (D-16/D-17 구조화)
@@ -128,28 +141,31 @@ Last activity: 2026-08-05 — Milestone v1.1 started
 
 **[v1.1이 풀어야 하는 것] 세션1(2026-08-04)에서 드러난 코어 결함.**
 전수 감사는 `docs/session1-code-review.md`. 심각도 순으로 C1~C4 · H1~H2 · M1~M8 · L1~L10.
+로드맵은 이 전부를 Phase 7~13에 매핑했다(REQUIREMENTS.md Traceability 참조).
 
 세 가지가 실전에서 동시에 터졌다 — ① 네 명의 행동이 AI 컨텍스트에서 한 사람으로 뭉뚱그려짐
-(라벨은 고쳤으나 **신원 검증 부재라는 근본 구조는 그대로**) ② 참가자 한 문장에 AI가 캐릭터
-이탈(탈옥) ③ 진행자 지시문 전체가 서사로 유출. 여기에 재검증에서 C4가 새로 발견됐다 —
-**능력치가 판정 계산에 전혀 안 들어가고, 캐릭터 상태가 플레이로 절대 안 바뀐다.**
+(라벨은 고쳤으나 **신원 검증 부재라는 근본 구조는 그대로**, Phase 8이 닫는다) ② 참가자 한
+문장에 AI가 캐릭터 이탈(탈옥, Phase 9가 닫는다) ③ 진행자 지시문 전체가 서사로 유출(Phase 9).
+여기에 재검증에서 C4가 새로 발견됐다 — **능력치가 판정 계산에 전혀 안 들어가고, 캐릭터
+상태가 플레이로 절대 안 바뀐다(Phase 10이 닫는다).**
 
-**[먼저 결정해야 하는 것] D-20 재논의.** C4를 고치려면 「캐릭터 시트는 4칸, 쓰기 경로 없음」
-이라는 잠금 결정을 다시 열어야 한다. **코드보다 결정이 먼저다.**
+**[다음 행동] Phase 7(D-20/D-31 재논의)이 v1.1의 진입점이다.** 코드보다 결정이 먼저다.
+잠금 결정을 코드가 조용히 우회하지 않는다는 것이 이 프로젝트의 규약이다.
 
 **[보류 — 폐기 아님] 킬 크리테리아 실험 (D-62).** EXP-01~04 · HYP-01~06.
 D-59·D-60·D-61은 그 실험의 채점 규칙을 좁힌 결정이라 실험과 함께 보류 상태로 들어간다.
-프로토타입이 완성되면 조건을 갖춘 재실험을 새로 설계할지 결정한다.
+v1.1이 완료되면 조건을 갖춘 재실험을 새로 설계할지 결정한다.
 
 **[문서 정리 — 여전히 미해결] 3건.** 상세는 `.planning/INGEST-CONFLICTS.md`.
 
-1. **원가 수치의 계산 전제가 결정과 어긋난다.** 원가 문서는 「최근 대화 20턴」으로 1인 1시간당 $0.30을 뽑았는데 확정 규칙은 「초기값 10턴」이다. → 실험 보류로 실측 시점이 미뤄졌다. 계측 코드는 살아 있으므로 프로토타입을 돌릴 때마다 쌓인다. **v1.1이 문맥 압축기(M1-12)를 구현하므로 「압축 없는 상태의 값」이라는 유보는 v1.1 이후 해소된다**
+1. **원가 수치의 계산 전제가 결정과 어긋난다.** 원가 문서는 「최근 대화 20턴」으로 1인 1시간당 $0.30을 뽑았는데 확정 규칙은 「초기값 10턴」이다. → 실험 보류로 실측 시점이 미뤄졌다. 계측 코드는 살아 있으므로 프로토타입을 돌릴 때마다 쌓인다. **Phase 11(문맥 압축기)이 구현되면 「압축 없는 상태의 값」이라는 유보는 해소된다**
 2. **v1에만 있고 유지·폐기 진술이 없는 구현 약속 2건.** ① 에이전트 응답 껍데기 + 가벼운/중간 모델 타임아웃·재시도 ② 연결 유지 신호 주기와 스트리밍 중 재연결 이어붙이기
 3. **폐기된 v1 기획서에 폐기 표기가 없다.** 파일명 말고 단서가 없어서 그 파일만 연 사람은 폐기된 설계를 유효한 명세로 읽는다
 
-**[v1.1로 당긴 M1 항목 — D-63]** M1-09(시계 진행 규칙 ②③ + 진행자 수동 경로) ·
-M1-12(`context_summarizer`) · M1-13(관계 장부 주입).
-**M1에 남는 것:** M1-10(폴링 읽기 비용) · M1-11(D-11의 3주 재개 검증).
+**[v1.1로 당긴 M1 항목 — D-63, 로드맵에 반영 완료]** M1-09(시계 진행 규칙 ②③ + 진행자
+수동 경로, Phase 12) · M1-12(`context_summarizer`, Phase 11) · M1-13(관계 장부 주입,
+Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-11(D-11의 3주 재개
+검증) · M1-14(동적 파티).
 
 ## Deferred Items
 
@@ -162,8 +178,11 @@ M1-12(`context_summarizer`) · M1-13(관계 장부 주입).
 ## Session Continuity
 
 Last session: 2026-08-05
-Stopped at: Milestone v1.1 requirements definition
+Stopped at: v1.1 ROADMAP.md 작성 완료 — Phase 7~13, 요구사항 48/48 매핑, REQUIREMENTS.md
+Traceability 갱신 완료
 Resume file: —
 
-**다음 행동:** v1.1 요구사항 정의 후 로드맵 작성. 이전 마일스톤의 단계 산출물은
+**다음 행동:** Phase 7(거버넌스 재논의 — D-20 · D-31) 착수. 코드 계획이 아니라 사용자와의
+직접 논의로 시작하는 편이 맞을 수 있다 — `/gsd-plan-phase 7` 실행 전에 D-20/D-31 재논의
+결과를 먼저 정하고 PROJECT.md에 기록한다. 이전 마일스톤의 단계 산출물은
 `.planning/milestones/v1.0-phases/`에 보관되어 있다.
