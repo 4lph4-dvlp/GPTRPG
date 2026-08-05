@@ -1,19 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-current_phase: 05
-current_phase_name: 실험 실행 — 두 번, 1주 간격
-status: executing
-stopped_at: Phase 5 context gathered
-last_updated: "2026-08-03T16:15:34.476Z"
-last_activity: 2026-08-04
-last_activity_desc: Phase 05 execution started
+milestone: v1.1
+milestone_name: 돌아가는 프로토타입
+status: planning
+last_updated: "2026-08-05T07:56:19.587Z"
+last_activity: 2026-08-05
 progress:
-  total_phases: 5
-  completed_phases: 4
-  total_plans: 28
-  completed_plans: 22
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -29,12 +26,10 @@ See: .planning/PROJECT.md (updated 2026-07-30)
 
 ## Current Position
 
-Phase: 05 (실험 실행 — 두 번, 1주 간격) — EXECUTING
-Plan: 1 of 6
-Status: Executing Phase 05
-Last activity: 2026-08-04 — Phase 05 execution started
-
-Progress: [██████████] 100% (all 6 plans in Phase 1 complete)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-08-05 — Milestone v1.1 started
 
 ## Performance Metrics
 
