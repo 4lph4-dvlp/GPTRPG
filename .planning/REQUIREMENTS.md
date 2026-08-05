@@ -34,7 +34,12 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 > 플러그인(D9)·룰북 파일(D26·D27) — 그중 판정 커널 2종 말고는 코드에 없다.
 > 이 어긋남을 코드 작업 전에 정면으로 확인한다.
 
-- [ ] **ARCH-01**: D17(에이전트를 4개로 줄인 결정)의 재검토 결과가 사유와 함께 문서에 남는다 — 지금 2개(+계획된 2개)로 갈지, 역할을 나눈 에이전트를 더 둘지. **응답 속도 목표와 원가 상한을 근거로 판단하고, 늘리지 않기로 하면 그 몫을 무엇이 받는지 함께 적는다**
+- [x] **ARCH-01**: D17(에이전트를 4개로 줄인 결정)의 재검토 결과가 사유와 함께 문서에 남는다 — **완료: D-64** (진행자를 상황 판단/서술로 쪼개고 배경층을 연다. 원가는 이번 판단 기준에서 내렸고, D14 경계는 안 내린다)
+- [ ] **ARCH-02**: 진행자가 「상황 판단」과 「서술」로 나뉜다 — **서술 담당은 진행자 지시문·규칙·시나리오 원문을 받지 않는다.** 유출할 것을 애초에 안 주는 것이 방어의 1차선이다
+- [ ] **ARCH-03**: 사람이 기다리지 않는 작업을 돌리는 배경층이 구조로 있다 — 그리고 **배경 작업의 산출물도 사건으로 기록되어**, 다시 재생하면 같은 상태가 나온다
+- [ ] **ARCH-04**: 무엇을 병렬로 돌릴지 **런타임에 판단하지 않는다** — 의존 관계가 코드에 정적으로 박혀 있어서, AI도 로직도 그것을 틀릴 기회가 없다
+- [ ] **ARCH-05**: 병렬 참조 수집에 타임아웃이 있고, 하나가 늦어도 턴이 멈추지 않는다 — 「없으면 없는 대로 진행」이 정상 경로다
+- [ ] **ARCH-06**: 에이전트별로 무엇을 받는지가 코드에 명시되고 각자 상한이 있다 — **D31의 목적은 그대로다.** 주입량이 세션 길이에 비례해 늘지 않고, AI가 저장소 전체를 훑는 경로는 여전히 없다
 
 ### 신원 검증 (TRUST) — 누가 무엇을 했는지 서버가 확인한다
 
@@ -68,7 +73,7 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 > **RULE-01이 먼저다.** 「캐릭터 시트는 4칸, 쓰기 경로 없음」은 잠금 결정(D-20)이고,
 > 코드가 잠금 결정을 조용히 우회하는 경로를 만들지 않는다는 것이 이 프로젝트의 규약이다.
 
-- [ ] **RULE-01**: D-20(캐릭터 시트 쓰기 경로)의 재논의 결과가 사유와 함께 문서에 남는다 — **코드보다 먼저**
+- [x] **RULE-01**: D-20(캐릭터 시트 쓰기 경로)의 재논의 결과가 사유와 함께 문서에 남는다 — **완료: D-65** (쓰기 경로를 열고 상태는 사건에서 접어 만든다. 변화량은 룰북 표 우선 + 없으면 재량 판정. `StatEntry` 네 칸은 그대로 두고 불변성과 쓰기 경로만 바뀐다)
 - [ ] **RULE-02**: 플레이어가 고른 능력치가 판정 계산에 실제로 반영된다 — 같은 행동이라도 능력치가 높은 캐릭터가 유리하다
 - [ ] **RULE-03**: 능력치를 보정치로 바꾸는 규칙을 **룰북이 선언한다** — 플랫폼 코드에 특정 룰북의 변환식을 박지 않는다
 - [ ] **RULE-04**: 판정 결과가 캐릭터의 자원(체력 등)을 실제로 바꾸고, 그 변화가 사건 기록에 남아 다시 재생된다
@@ -77,6 +82,7 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 - [ ] **RULE-07**: 자원이 크게 깎이면 화면에서 바로 보인다
 - [ ] **RULE-08**: AI가 지금 행동한 사람뿐 아니라 파티 전원의 상태를 본다
 - [ ] **RULE-09**: 「판정 결과가 자원을 얼마나 바꾸는가」의 선언 형식이 **효과 표현(D7)의 첫 원자 연산으로 자랄 수 있는 모양**이다 — 나중에 나머지 원자 연산을 붙일 때 이 형식을 다시 쓰지 않아도 된다. 원자 연산 목록 전체를 만드는 것은 이번 범위가 아니다
+- [ ] **RULE-10**: 룰북에 선언이 없는 상황에서도 자원이 변할 수 있다 — **AI가 제안하고 사람이 확인하면** 코드가 계산해 반영한다. 룰북이 부실해도 게임이 멈추지 않고, **AI는 여전히 수치를 직접 못 바꾼다** (D-65 · D7의 `requires_ruling`)
 
 ### 기억 유지 (MEM) — 세션 후반에도 앞을 기억한다
 
@@ -84,11 +90,13 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 > 최근 10턴은 3~4시간 세션에서 **20~30분 분량**이다. 세션 후반에 촌장과 나눈 대화를
 > AI가 기억하지 못한다.
 
-- [ ] **MEM-01**: D31(매 턴 넣는 것은 네 가지로 고정)의 재논의 결과가 사유와 함께 문서에 남는다 — 관계 기록을 다섯 번째 칸으로 열지, 기존 칸에 흡수시킬지
+- [x] **MEM-01**: D31(매 턴 넣는 것은 네 가지로 고정)의 재논의 결과가 사유와 함께 문서에 남는다 — **완료: D-66** (「네 가지 고정」을 「에이전트별 문맥 명세 + 각자 상한」으로 바꾸되 D31의 목적은 유지. 칸 위치는 캐싱에 영향이 없고 진짜 레버는 갱신 빈도라는 것이 근거)
 - [ ] **MEM-02**: 「그 인물과 무슨 일이 있었는지」가 최근 10턴 밖으로 나가도 사라지지 않는다
 - [ ] **MEM-03**: 오래된 대화가 잘려나가지 않고 요약으로 접힌다
 - [ ] **MEM-04**: 요약이 무엇을 버렸는지 나중에 추적할 수 있다
 - [ ] **MEM-05**: 기억 유지를 붙이기 전과 후의 캐시 적중률·토큰 소모가 비교 가능하게 계측된다 — **캐싱 유무가 원가를 3.7배 가르고, 이 침식은 없앨 수 없고 감시할 수만 있다**
+- [ ] **MEM-06**: 저장소에 무엇이 있는지 **한 줄 색인**이 AI에게 보인다 — 상세는 안 보인다
+- [ ] **MEM-07**: AI가 특정 항목의 상세를 요청하면 **코드가 꺼내서 다음 턴에 넣는다** — 아이템·룰북 상세를 매 턴 다 밀어 넣지 않고 쓰는 장치다 (D31이 설계해 놓고 안 만든 경로)
 
 ### 위협 시계 (CLOCK) — 이야기에 반응한다
 
@@ -243,9 +251,9 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ARCH-01 | Phase 7 | Pending |
-| RULE-01 | Phase 7 | Pending |
-| MEM-01 | Phase 7 | Pending |
+| ARCH-01 | Phase 7 | Complete |
+| RULE-01 | Phase 7 | Complete |
+| MEM-01 | Phase 7 | Complete |
 | TRUST-01 | Phase 8 | Pending |
 | TRUST-02 | Phase 8 | Pending |
 | TRUST-03 | Phase 8 | Pending |
@@ -256,48 +264,56 @@ AI가 네 명을 한 사람으로 인식했고, 참가자 한 명의 문장에 �
 | QUAL-05 | Phase 8 | Pending |
 | TEST-01 | Phase 8 | Pending |
 | TEST-02 | Phase 8 | Pending |
-| SAFE-01 | Phase 9 | Pending |
-| SAFE-02 | Phase 9 | Pending |
-| SAFE-03 | Phase 9 | Pending |
-| SAFE-04 | Phase 9 | Pending |
-| SAFE-05 | Phase 9 | Pending |
-| SAFE-06 | Phase 9 | Pending |
-| QUAL-08 | Phase 9 | Pending |
-| TEST-03 | Phase 9 | Pending |
-| RULE-02 | Phase 10 | Pending |
-| RULE-03 | Phase 10 | Pending |
-| RULE-04 | Phase 10 | Pending |
-| RULE-05 | Phase 10 | Pending |
-| RULE-06 | Phase 10 | Pending |
-| RULE-07 | Phase 10 | Pending |
-| RULE-08 | Phase 10 | Pending |
-| RULE-09 | Phase 10 | Pending |
-| QUAL-01 | Phase 10 | Pending |
-| QUAL-02 | Phase 10 | Pending |
-| QUAL-03 | Phase 10 | Pending |
-| QUAL-06 | Phase 10 | Pending |
-| TEST-04 | Phase 10 | Pending |
-| MEM-02 | Phase 11 | Pending |
-| MEM-03 | Phase 11 | Pending |
-| MEM-04 | Phase 11 | Pending |
-| MEM-05 | Phase 11 | Pending |
-| QUAL-07 | Phase 11 | Pending |
-| CLOCK-01 | Phase 12 | Pending |
-| CLOCK-02 | Phase 12 | Pending |
-| CLOCK-03 | Phase 12 | Pending |
-| CLOCK-04 | Phase 12 | Pending |
-| CLOCK-05 | Phase 12 | Pending |
-| FE-01 | Phase 13 | Pending |
-| FE-02 | Phase 13 | Pending |
-| FE-03 | Phase 13 | Pending |
-| FE-04 | Phase 13 | Pending |
-| FE-05 | Phase 13 | Pending |
-| TEST-05 | Phase 13 | Pending |
+| ARCH-02 | Phase 9 | Pending |
+| ARCH-03 | Phase 9 | Pending |
+| ARCH-04 | Phase 9 | Pending |
+| ARCH-05 | Phase 9 | Pending |
+| ARCH-06 | Phase 9 | Pending |
+| SAFE-01 | Phase 10 | Pending |
+| SAFE-02 | Phase 10 | Pending |
+| SAFE-03 | Phase 10 | Pending |
+| SAFE-04 | Phase 10 | Pending |
+| SAFE-05 | Phase 10 | Pending |
+| SAFE-06 | Phase 10 | Pending |
+| QUAL-08 | Phase 10 | Pending |
+| TEST-03 | Phase 10 | Pending |
+| RULE-02 | Phase 11 | Pending |
+| RULE-03 | Phase 11 | Pending |
+| RULE-04 | Phase 11 | Pending |
+| RULE-05 | Phase 11 | Pending |
+| RULE-06 | Phase 11 | Pending |
+| RULE-07 | Phase 11 | Pending |
+| RULE-08 | Phase 11 | Pending |
+| RULE-09 | Phase 11 | Pending |
+| RULE-10 | Phase 11 | Pending |
+| QUAL-01 | Phase 11 | Pending |
+| QUAL-02 | Phase 11 | Pending |
+| QUAL-03 | Phase 11 | Pending |
+| QUAL-06 | Phase 11 | Pending |
+| TEST-04 | Phase 11 | Pending |
+| MEM-02 | Phase 12 | Pending |
+| MEM-03 | Phase 12 | Pending |
+| MEM-04 | Phase 12 | Pending |
+| MEM-05 | Phase 12 | Pending |
+| MEM-06 | Phase 12 | Pending |
+| MEM-07 | Phase 12 | Pending |
+| QUAL-07 | Phase 12 | Pending |
+| CLOCK-01 | Phase 13 | Pending |
+| CLOCK-02 | Phase 13 | Pending |
+| CLOCK-03 | Phase 13 | Pending |
+| CLOCK-04 | Phase 13 | Pending |
+| CLOCK-05 | Phase 13 | Pending |
+| FE-01 | Phase 14 | Pending |
+| FE-02 | Phase 14 | Pending |
+| FE-03 | Phase 14 | Pending |
+| FE-04 | Phase 14 | Pending |
+| FE-05 | Phase 14 | Pending |
+| TEST-05 | Phase 14 | Pending |
 
 **Coverage:**
 
-- v1.1 requirements: 50 total
-- Mapped to phases: 50 (100%)
+- v1.1 requirements: 58 total
+- Mapped to phases: 58 (100%)
 - Unmapped: 0
 
 **보류(EXP-02·03, MEAS-05, HYP-01·02·04·05·06)와 Future Requirements(M1-*, M2-*, LAW-*)는

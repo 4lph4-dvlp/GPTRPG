@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-08-05T08:10:00.000Z"
 last_activity: 2026-08-05
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,18 +20,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** v1.1 돌아가는 프로토타입 — 로드맵 작성 완료, Phase 7 착수 대기
+**Current focus:** v1.1 돌아가는 프로토타입 — Phase 7(거버넌스) 완료, Phase 8 착수 대기
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 7 of 13 (거버넌스 재논의 — D-20 · D-31) — 번호는 이전 마일스톤(Phase 1~6)에서 이어짐
-Plan: TBD (Phase 7은 계획 없이 사용자 직접 논의로 처리될 수 있음)
-Status: Ready to plan — ROADMAP.md 작성 완료, `/gsd-plan-phase 7` 또는 사용자 논의 대기
-Last activity: 2026-08-05 — ROADMAP.md v1.1 작성 완료 (Phase 7~13, 요구사항 48/48 매핑)
+Phase: 8 of 14 (신원 검증과 멱등성) — 번호는 이전 마일스톤(Phase 1~6)에서 이어짐
+Plan: 미작성
+Status: Ready to plan — Phase 7(거버넌스 재논의) 완료, `/gsd-plan-phase 8` 대기
+Last activity: 2026-08-05 — Phase 7 완료. D-64·D-65·D-66 확정, 그 결과로 Phase 9(에이전트 구조 재편) 신설 및 로드맵 재작성(7단계 → 8단계, 요구사항 50 → 58)
 
-Progress: [░░░░░░░░░░] 0% (v1.1 기준. 이전 마일스톤 M0은 Phase 1~4 완료, Phase 5는 4/6에서 보류)
+Progress: [█░░░░░░░░░] 1/8 단계 (v1.1 기준)
 
 ## Performance Metrics
 
