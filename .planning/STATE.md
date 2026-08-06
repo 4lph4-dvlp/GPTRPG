@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 8
-current_phase_name: 번호는 이전 마일스톤 에서 이어짐
-status: planning
-stopped_at: Phase 8 context gathered
-last_updated: "2026-08-05T19:56:16.428Z"
+current_phase: 08
+current_phase_name: identity-and-idempotency
+status: executing
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-08-06T00:32:35.434Z"
 last_activity: 2026-08-06
-last_activity_desc: Phase 7 완료(D-64·D-65·D-66). 실전 관찰 4항목을 출간 룰북/시나리오 조사 후 D-67로 추가 — Phase 9·11·13 신설, 로드맵 7단계 → 10단계, 요구사항 50 → 69
+last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 4
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -24,18 +24,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** v1.1 돌아가는 프로토타입 — Phase 7(거버넌스) 완료, Phase 8 착수 대기
+**Current focus:** Phase 08 — identity-and-idempotency
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 8 of 16 (신원 검증과 멱등성) — 번호는 이전 마일스톤(Phase 1~6)에서 이어짐
-Plan: 미작성
-Status: Ready to plan — Phase 7(거버넌스 재논의) 완료, `/gsd-plan-phase 8` 대기
-Last activity: 2026-08-06 — Phase 7 완료(D-64·D-65·D-66). 실전 관찰 4항목을 출간 룰북/시나리오 조사 후 D-67로 추가 — Phase 9·11·13 신설, 로드맵 7단계 → 10단계, 요구사항 50 → 69
+Phase: 08 (identity-and-idempotency) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-08-06 — Phase 08 execution started
 
-Progress: [█░░░░░░░░░] 1/10 단계 (v1.1 기준)
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -80,6 +80,7 @@ Progress: [█░░░░░░░░░] 1/10 단계 (v1.1 기준)
 | Phase 03 P04 | ~180min | 3 tasks | 12 files |
 | Phase 03 P05 | 15min | 2 tasks | 3 files |
 | Phase 03 P06 | 45min | 3 tasks | 13 files |
+| Phase 08 P01 | unspecified | 4 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -137,6 +138,9 @@ Progress: [█░░░░░░░░░] 1/10 단계 (v1.1 기준)
 - [Phase ?]: 03-05: 다섯 어댑터를 PROVIDER_FACTORIES로 순회하며 헤더 ASCII 인코딩 가능성을 그물질하는 회귀 시험 패턴 확립 — 여섯 번째 어댑터가 같은 실수를 하면 자동으로 잡힌다
 - [Phase ?]: 03-06: Provider 프로토콜에 note_result() 메서드 추가 — 위임 어댑터(nim/openrouter)에서 사적 속성 직접 대입으로 실패 껍데기가 사라지던 것을 고침(03-03이 범위 밖으로 미룬 판단을 실측 근거로 뒤집음, G-03-3 실제 크래시 원인)
 - [Phase ?]: 03-06: turn_flow._turn_flow()의 서사 구간을 Exception 포착으로 감싸고 last_result() 무조건 호출을 합성 실패 껍데기 도우미로 교체 — RecordAiCall은 성공/실패 모두 제출(MEAS-02 실패 턴 보존), _cmd_turn의 예외 허용 목록은 넓히지 않음
+- [Phase ?]: 08-01 Task 1 checkpoint(approved-scope) 기록: 판 5는 ActionDeclared/ActionConfirmed.character_id(선택)·CheckResolved.person_id/character_id(schema_version>=5 필수)·CharacterOccupied 신설 넷을 한 커밋에 묶는다 — TRUST-03이 서버 재시작을 넘어 성립하는 유일한 범위
+- [Phase ?]: 08-01: CookieIdentity/read_identity를 routes_characters.py가 아니라 cookie_auth.py에 둠 — 계획 원문대로 하면 routes_characters<->routes_actions 순환 import가 생겨서 자리를 옮겨 해소함
+- [Phase ?]: 08-01: ResolveCheck.person_id/character_id를 액터에서 무조건 필수로 만들면서, 브라우저 쿠키 개념이 없는 CLI(cli/main.py submit roll, cli/turn_flow.py turn)에는 고정 자리표시자('cli' 또는 args.player 재사용)를 채워 기존 CLI 동작을 그대로 보존함
 
 ### Pending Todos
 
@@ -186,10 +190,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-05T17:32:55.345Z
-Stopped at: Phase 8 context gathered
+Last session: 2026-08-06T00:32:35.409Z
+Stopped at: Completed 08-01-PLAN.md
 Traceability 갱신 완료
-Resume file: .planning/phases/08-identity-and-idempotency/08-CONTEXT.md
+Resume file: None
 
 **다음 행동:** Phase 7(거버넌스 재논의 — D-20 · D-31) 착수. 코드 계획이 아니라 사용자와의
 직접 논의로 시작하는 편이 맞을 수 있다 — `/gsd-plan-phase 7` 실행 전에 D-20/D-31 재논의
