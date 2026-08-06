@@ -6,8 +6,13 @@
 검증한다.
 """
 
+from pathlib import Path
+
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ActionDeclared, utc_now_iso
+from gptrpg.event_log.store import EventStore
 from gptrpg.web.characters_data import (
     CHARACTER_ARCHETYPES,
     NEW_CHARACTER_HP_BASE,
@@ -250,3 +255,161 @@ def test_identity_mismatch_response_has_no_secret_leak(web_client: TestClient) -
     assert secret_hex not in body_text
     assert signature_fragment not in body_text
     assert browser_id not in body_text
+
+
+# ---------------------------------------------------------------------------
+# 08-02 Task 2 — 캐릭터 점유가 select-character보다 먼저 제출된다.
+# 「먼저 잡은 사람이 임자다」(D-05), 놓기는 없다(D-07), D-14가 옛/새 세션을
+# 가른다.
+# ---------------------------------------------------------------------------
+
+
+def _character_occupied_event_count(tmp_db_path: Path, session_id: str = "s1") -> int:
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    try:
+        events = store.read_events(session_id)
+    finally:
+        store.close()
+    return sum(1 for event in events if event.event_type == "character_occupied")
+
+
+def test_occupancy_first_select_appends_one_character_occupied_event(
+    web_client: TestClient, tmp_db_path: Path
+) -> None:
+    response = web_client.post(
+        "/api/sessions/s1/select-character", json={"character_id": "bram"}
+    )
+
+    assert response.status_code == 200
+    assert _character_occupied_event_count(tmp_db_path) == 1
+
+
+def test_occupancy_second_browser_without_cookie_gets_409_no_cookie_no_new_event(
+    web_app: FastAPI, tmp_db_path: Path
+) -> None:
+    """빈 세션에서 다른 브라우저가 같은 캐릭터를 고르면 409이고, 쿠키가
+    걸리지 않고 사건도 늘지 않는다."""
+    with TestClient(web_app) as client_a:
+        first = client_a.post(
+            "/api/sessions/s1/select-character", json={"character_id": "bram"}
+        )
+        assert first.status_code == 200
+
+        client_b = TestClient(web_app)
+        second = client_b.post(
+            "/api/sessions/s1/select-character", json={"character_id": "bram"}
+        )
+
+        assert second.status_code == 409
+        assert "set-cookie" not in second.headers
+        assert _character_occupied_event_count(tmp_db_path) == 1
+
+
+def test_occupancy_second_browser_can_select_a_different_character(web_app: FastAPI) -> None:
+    """진 쪽은 다른 캐릭터를 고를 수 있다(D-05)."""
+    with TestClient(web_app) as client_a:
+        first = client_a.post(
+            "/api/sessions/s1/select-character", json={"character_id": "bram"}
+        )
+        assert first.status_code == 200
+
+        client_b = TestClient(web_app)
+        second = client_b.post(
+            "/api/sessions/s1/select-character", json={"character_id": "nari"}
+        )
+        assert second.status_code == 200
+
+
+def test_occupancy_own_reselect_returns_200_and_does_not_duplicate_event(
+    web_client: TestClient, tmp_db_path: Path
+) -> None:
+    """본인 재접속은 그대로 통과하고 사건은 늘지 않는다(D-05)."""
+    first = web_client.post(
+        "/api/sessions/s1/select-character", json={"character_id": "bram"}
+    )
+    assert first.status_code == 200
+
+    second = web_client.post(
+        "/api/sessions/s1/select-character", json={"character_id": "bram"}
+    )
+    assert second.status_code == 200
+    assert _character_occupied_event_count(tmp_db_path) == 1
+
+
+def test_occupancy_reselecting_a_different_character_returns_409(
+    web_client: TestClient,
+) -> None:
+    """한 브라우저는 한 캐릭터만(D-07) — 이미 bram을 쥔 쿠키로 nari를 고르면 409."""
+    first = web_client.post(
+        "/api/sessions/s1/select-character", json={"character_id": "bram"}
+    )
+    assert first.status_code == 200
+
+    second = web_client.post(
+        "/api/sessions/s1/select-character", json={"character_id": "nari"}
+    )
+    assert second.status_code == 409
+
+
+def test_occupancy_409_response_has_no_holder_identity_leak(web_app: FastAPI) -> None:
+    """QUAL-05: 409 응답 본문 어디에도 점유자의 browser_id가 실려 나가지 않는다."""
+    with TestClient(web_app) as client_a:
+        first = client_a.post(
+            "/api/sessions/s1/select-character", json={"character_id": "bram"}
+        )
+        assert first.status_code == 200
+        cookie_value = client_a.cookies.get(COOKIE_NAME)
+        assert cookie_value is not None
+        secret = client_a.app.state.cookie_secret
+        payload = verify_cookie(cookie_value, secret=secret)
+        assert payload is not None
+        holder_browser_id = payload["browser_id"]
+
+        client_b = TestClient(web_app)
+        second = client_b.post(
+            "/api/sessions/s1/select-character", json={"character_id": "bram"}
+        )
+
+    assert second.status_code == 409
+    assert holder_browser_id not in second.text
+
+
+def test_occupancy_old_session_rejects_select_but_polling_still_succeeds(
+    tmp_db_path: Path, web_app: FastAPI
+) -> None:
+    """D-14 옛 세션: 사건은 있는데(action_declared) 점유 사건이 없으면
+    select-character는 409지만 폴링(GET /events)은 여전히 200이다 — 다시보기는
+    된다."""
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    store.append(
+        ActionDeclared(
+            session_id="s1",
+            seq=0,
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="action_declared",
+            player_id="p1",
+            raw_text="문을 두드린다",
+        )
+    )
+    store.close()
+
+    with TestClient(web_app) as client:
+        select_response = client.post(
+            "/api/sessions/s1/select-character", json={"character_id": "bram"}
+        )
+        assert select_response.status_code == 409
+
+        poll_response = client.get("/api/sessions/s1/events")
+        assert poll_response.status_code == 200
+
+
+def test_occupancy_new_session_with_zero_events_select_succeeds(web_client: TestClient) -> None:
+    """D-14 새 세션: 사건이 하나도 없는 세션에서는 언제나 정상적으로 잡힌다."""
+    response = web_client.post(
+        "/api/sessions/s1/select-character", json={"character_id": "bram"}
+    )
+    assert response.status_code == 200
