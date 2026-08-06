@@ -14,7 +14,7 @@
 자체가 다르다(D-32가 둘을 따로 설정하게 한 것과 같은 이유).
 """
 
-from gptrpg.agents.context import TurnContext
+from gptrpg.agents.context import ClockJudgeContext, TurnContext
 from gptrpg.rulebooks.moves import MoveDecl
 
 _CACHE_CONTROL = {"type": "ephemeral"}
@@ -161,6 +161,86 @@ def build_gm_prompt(
     turn = (
         f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"
         f"방금 판정 결과: {check_summary}"
+    )
+    messages = [{"role": "user", "content": turn}]
+    return system, messages
+
+
+def _clock_judge_session_block_text(ctx: ClockJudgeContext) -> str:
+    """`ClockJudgeContext`용 세션 조각 — 시계 위치와 다음 칸 설명 두 줄뿐이다.
+
+    `_session_block_text`(TurnContext용)와 달리 장면 대상·캐릭터 상태를
+    담지 않는다 — 조건 검사는 그 둘을 볼 필요가 없다(이 값 객체 자체가
+    그 칸을 애초에 갖고 있지 않다)."""
+    return (
+        f"위협 시계 위치: {ctx.clock_position}\n"
+        f"다음 칸: {ctx.next_segment_description or '(다음 칸 없음)'}"
+    )
+
+
+def build_clock_signal_prompt(
+    *,
+    rulebook_display_name: str,
+    ctx: ClockJudgeContext,
+) -> tuple[list[dict], list[dict]]:
+    """`judge_clock_signal`(문지기, DP-01) 프롬프트를 조립한다.
+
+    **닫힌 출력 계약** — 응답은 원소가 정확히 하나인 JSON 배열이고, 그
+    원소는 `signal`(`"check"` 또는 `"skip"` 두 값만)과 `why` 칸을 갖는
+    객체다. 칸 번호·수치·판정 결과를 절대 돌려주지 않는다(D14) — 칸을
+    실제로 넘기는 것은 시스템이 하고, 이 호출은 "이번 턴에 조건을 들여다볼
+    필요가 있는가"만 판단한다.
+    """
+    permanent = (
+        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 위협 시계 관문 판단자다. "
+        "이번 턴에 위협 시계의 다음 칸 조건을 깊이 들여다볼 필요가 있는지만 "
+        "가볍게 거른다 — 실제로 조건이 충족됐는지 판정하지 않는다. 칸 번호나 "
+        "수치를 계산하지 않는다 — 그것은 네 몫이 아니라 시스템이 한다. 응답은 "
+        "원소가 정확히 하나인 JSON 배열로만 한다 — 예: "
+        '[{"signal": "check", "why": "판정 결과가 다음 칸 설명과 관련 있어 보인다"}]. '
+        '`signal`은 "check" 또는 "skip" 두 값만 허용한다. 설명 문장을 덧붙이지 '
+        "않는다."
+    )
+    session = _clock_judge_session_block_text(ctx)
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = (
+        f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"
+        f"방금 판정 결과: {ctx.check_summary}"
+    )
+    messages = [{"role": "user", "content": turn}]
+    return system, messages
+
+
+def build_clock_condition_prompt(
+    *,
+    rulebook_display_name: str,
+    ctx: ClockJudgeContext,
+    narration_text: str,
+) -> tuple[list[dict], list[dict]]:
+    """`judge_clock_condition`(깊은 판단, DP-01) 프롬프트를 조립한다.
+
+    `build_clock_signal_prompt`와 같은 모양이되 더 깊은 지시문이다 — "다음
+    칸에 적힌 일이 실제로 일어났다고 볼 수 있는가"를 묻는다. 출력 계약은
+    `verdict`(`"advance"` 또는 `"hold"`)와 `why` 칸이다. 배경 작업은 서사가
+    끝난 뒤에 돌므로 `narration_text`(이번 턴에 실제로 나간 서사)를 함께
+    본다 — `judge_clock_signal`은 이 값을 볼 수 없다(서사 전에 도는 관문이라).
+    """
+    permanent = (
+        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 위협 시계 조건 판단자다. "
+        "이번 턴의 판정 결과와 서사를 보고, 위협 시계의 다음 칸에 적힌 일이 "
+        "실제로 일어났다고 볼 수 있는지 판단한다. 칸 번호나 다음에 무슨 일이 "
+        "일어나야 하는지는 네가 정하지 않는다 — 그것은 시스템이 이미 갖고 있고, "
+        "너는 참/거짓 판단과 이유만 낸다. 응답은 원소가 정확히 하나인 JSON "
+        '배열로만 한다 — 예: [{"verdict": "advance", "why": "판정 실패로 '
+        '우물물이 실제로 검게 변했다"}]. `verdict`는 "advance" 또는 "hold" 두 '
+        "값만 허용한다. 설명 문장을 덧붙이지 않는다."
+    )
+    session = _clock_judge_session_block_text(ctx)
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = (
+        f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"
+        f"방금 판정 결과: {ctx.check_summary}\n\n"
+        f"이번 턴 서사: {narration_text}"
     )
     messages = [{"role": "user", "content": turn}]
     return system, messages

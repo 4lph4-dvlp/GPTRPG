@@ -16,6 +16,7 @@ Open Question 3 권고, `key_links` 참조) — 그래서 `load_config`/`resolve
 """
 
 import json
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,8 +24,38 @@ from pathlib import Path
 from gptrpg.agents.providers import PROVIDER_ENV_VARS, get_provider
 from gptrpg.agents.providers.base import Provider
 
-AGENT_ROLES: tuple[str, ...] = ("action_classifier", "master_gm")
-"""D-32가 요구하는 두 에이전트 역할 — 각자 따로 제공자·모델을 고른다."""
+AGENT_ROLES: tuple[str, ...] = (
+    "action_classifier",
+    "master_gm",
+    "situation_judge",
+    "scene_entity_judge",
+    "clock_judge",
+)
+"""D-32가 요구한 두 역할(`action_classifier`/`master_gm`)이 D-64로 다섯이
+됐다(09-01) — 각자 따로 제공자·모델을 고른다.
+
+- `action_classifier`: 자유 문장을 닫힌 무브 목록과 대조한다.
+- `master_gm`: 판정 결과를 받아 서술한다.
+- `situation_judge`: 상황판단(서술과 분리된 판단 조각) — 구현은 09-02.
+- `scene_entity_judge`: 장면에 새 대상이 등장했는지 판단 — 구현은 09-03.
+- `clock_judge`: 위협 시계 조건 검사(관문 + 깊은 판단) — 이 계획이 구현한다.
+"""
+
+STRICT_AGENT_ROLES: tuple[str, ...] = ("action_classifier", "master_gm")
+"""대체 역할이 없는 두 역할 — 설정 파일에 없으면 지금처럼 `InvalidAgentConfig`로
+큰 소리로 실패한다. D-32가 잠근 두 역할 그대로다."""
+
+ROLE_FALLBACKS: dict[str, str] = {
+    "situation_judge": "master_gm",
+    "scene_entity_judge": "action_classifier",
+    "clock_judge": "action_classifier",
+}
+"""새 역할 셋의 대체 표 — 설정 파일에 없으면 이 역할의 선택을 그대로 물려받는다.
+
+대체 대상 선택 근거: `situation_judge`는 서술과 같은 급의 추론이 필요하므로
+`master_gm`을 물려받는다. `scene_entity_judge`/`clock_judge`는 닫힌 목록에서
+고르는 경량 판단이므로 `action_classifier`와 같은 급이라 그것을 물려받는다.
+"""
 
 DEFAULT_CONFIG_PATH = Path(".gptrpg/agents.json")
 """저장 파일의 기본 경로. `.gitignore`에 `.gptrpg/`가 있어 저장소에 안 들어간다."""
@@ -67,8 +98,21 @@ def save_config(path: Path, choices: Mapping[str, AgentChoice]) -> None:
 def load_config(path: Path) -> dict[str, AgentChoice]:
     """저장된 역할별 선택을 읽는다.
 
-    파일이 없으면 `ConfigNotFound`. 두 역할 중 하나라도 빠졌거나 제공자
-    이름이 `PROVIDER_ENV_VARS`에 없으면 `InvalidAgentConfig`.
+    파일이 없으면 `ConfigNotFound`. `STRICT_AGENT_ROLES`에 든 역할이 하나라도
+    빠졌거나 제공자 이름이 `PROVIDER_ENV_VARS`에 없으면 `InvalidAgentConfig` —
+    지금처럼 큰 소리로 실패한다.
+
+    `ROLE_FALLBACKS`에 든 역할(`situation_judge`/`scene_entity_judge`/
+    `clock_judge`)이 파일에 없으면 대체 역할의 `AgentChoice`를 그대로 물려주고
+    **표준오류에 한 줄** 찍는다 — 이것은 조용한 대체가 아니다: 대체가 일어났다는
+    사실이 stderr에 보이고, `gptrpg agents set --role <역할>`로 따로 정할 수
+    있다는 안내를 함께 담는다. 실제로 어느 모델을 썼는지는 `RecordAiCall`이
+    역할별로 계속 정확히 기록하므로 계측이 흐려지지 않는다 — 이 대체는 값을
+    빌려 쓸 뿐, 기록에 "다른 역할인데 이 역할인 척"하지 않는다.
+
+    기존 두 역할짜리 설정 파일(`STRICT_AGENT_ROLES`만 있는 파일)이 예외 없이
+    그대로 로드되는 것이 이 함수의 핵심 회귀 방지 대상이다 — 새 역할 셋이
+    `AGENT_ROLES`에 추가됐다고 해서 예전 설정 파일이 깨지면 안 된다.
     """
     if not path.exists():
         raise ConfigNotFound(path)
@@ -79,7 +123,7 @@ def load_config(path: Path) -> dict[str, AgentChoice]:
         raise InvalidAgentConfig(path, f"JSON 형식이 아니다: {exc}") from exc
 
     choices: dict[str, AgentChoice] = {}
-    for role in AGENT_ROLES:
+    for role in STRICT_AGENT_ROLES:
         entry = raw.get(role)
         if not isinstance(entry, dict) or "provider" not in entry or "model" not in entry:
             raise InvalidAgentConfig(path, f"역할 {role!r}의 선택이 없다")
@@ -87,6 +131,24 @@ def load_config(path: Path) -> dict[str, AgentChoice]:
         if provider_name not in PROVIDER_ENV_VARS:
             raise InvalidAgentConfig(path, f"알 수 없는 제공자 이름: {provider_name!r}")
         choices[role] = AgentChoice(provider=provider_name, model=entry["model"])
+
+    for role, fallback_role in ROLE_FALLBACKS.items():
+        entry = raw.get(role)
+        if isinstance(entry, dict) and "provider" in entry and "model" in entry:
+            provider_name = entry["provider"]
+            if provider_name not in PROVIDER_ENV_VARS:
+                raise InvalidAgentConfig(path, f"알 수 없는 제공자 이름: {provider_name!r}")
+            choices[role] = AgentChoice(provider=provider_name, model=entry["model"])
+            continue
+        fallback_choice = choices[fallback_role]
+        choices[role] = fallback_choice
+        print(
+            f"안내: 역할 {role!r}의 선택이 없어 {fallback_role!r}의 선택"
+            f"({fallback_choice.provider}/{fallback_choice.model})을 물려받는다 — "
+            f"'gptrpg agents set --role {role}'로 따로 정할 수 있다",
+            file=sys.stderr,
+        )
+
     return choices
 
 

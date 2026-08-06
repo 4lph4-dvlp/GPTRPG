@@ -848,7 +848,12 @@ def _make_app_with_fake_provider(
     providers = {"action_classifier": action_classifier, "master_gm": master_gm}
 
     def _resolver(role: str, choices, env):
-        return providers[role]
+        # 09-01: 새 역할(`clock_judge` 등)이 대역 사전에 없으면 `action_classifier`
+        # 대역을 그대로 돌려준다 — `conftest.web_client_with_fake_provider`의
+        # `_resolver`와 같은 관례(`ROLE_FALLBACKS`가 실제로 채우는 것과 별개로,
+        # 이 시험 전용 조립 함수는 `clock_judge` provider 자체를 대역으로 받지
+        # 않으므로 여기서 대신 채운다).
+        return providers.get(role, providers["action_classifier"])
 
     return create_app(
         db_path=tmp_db_path,

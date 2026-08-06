@@ -517,7 +517,10 @@ def web_client_with_fake_provider(
     """
 
     def _make(
-        *, action_classifier: FakeProvider, master_gm: FakeProvider | None = None
+        *,
+        action_classifier: FakeProvider,
+        master_gm: FakeProvider | None = None,
+        clock_judge: FakeProvider | None = None,
     ) -> TestClient:
         config_path = tmp_path / "agents.json"
         config_path.write_text(
@@ -532,9 +535,15 @@ def web_client_with_fake_provider(
         providers: dict[str, FakeProvider] = {"action_classifier": action_classifier}
         if master_gm is not None:
             providers["master_gm"] = master_gm
+        if clock_judge is not None:
+            providers["clock_judge"] = clock_judge
 
         def _resolver(role: str, choices, env):
-            return providers[role]
+            """등록되지 않은 역할(`situation_judge`/`scene_entity_judge`/`clock_judge`
+            등)이 오면 `action_classifier` 대역을 그대로 돌려준다 — `ROLE_FALLBACKS`가
+            나머지를 채운다는 것이 이 시험 도우미로도 함께 검증된다. 개별 역할
+            대역을 주입하고 싶으면 그 이름으로 `_make`에 넘기면 된다."""
+            return providers.get(role, providers["action_classifier"])
 
         app = create_app(
             db_path=tmp_db_path,

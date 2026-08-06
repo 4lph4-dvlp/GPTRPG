@@ -33,6 +33,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from gptrpg.agents.action_classifier import UnknownMove, classify
+from gptrpg.agents.clock_judge import judge_clock_signal
 from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
@@ -65,7 +66,8 @@ from gptrpg.session_actor.actor import (
     ResolveCheck,
 )
 from gptrpg.session_actor.actor import SessionActor
-from gptrpg.turn.context import build_turn_context
+from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
+from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
 from gptrpg.web.characters_data import get_character, list_characters
 from gptrpg.web.cookie_auth import read_identity
 from gptrpg.web.media import media_file_path, media_url, scene_relative_path
@@ -458,6 +460,30 @@ async def confirm(
         character_names=_CHARACTER_NAMES,
     )
 
+    # 시계 신호 관문(문지기, DP-01) — narrate() 호출 **전**에 한 번 부른다
+    # (09-RESEARCH.md Pitfall 3이 지목한 정확한 구간). `choices`를 재사용하고
+    # `load_config`를 다시 부르지 않는다 — `clock_judge`가 설정 파일에 없어도
+    # `ROLE_FALLBACKS`가 이미 `action_classifier`의 선택을 물려줬다. 이 호출
+    # 구간 전체를 `try`로 감싸 실패 시 stderr 한 줄만 남기고 신호를 거짓으로
+    # 취급한다 — 판단 실패가 확인 요청을 막지 않는다(D-05).
+    clock_judge_choice = choices["clock_judge"]
+    clock_provider: Provider = request.app.state.provider_resolver(
+        "clock_judge", choices, os.environ
+    )
+    judge_ctx = build_clock_judge_context(ctx, check_summary)
+    should_check_clock = False
+    try:
+        clock_signal = await asyncio.to_thread(
+            judge_clock_signal,
+            provider=clock_provider,
+            model=clock_judge_choice.model,
+            ctx=judge_ctx,
+            rulebook_display_name=rulebook.display_name,
+        )
+        should_check_clock = clock_signal.should_check
+    except Exception as exc:  # noqa: BLE001 - D-05, 판단 실패가 확인 요청을 막지 않는다
+        print(f"경고: 시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}", file=sys.stderr)
+
     # ⑤ 서사 — 판정 결과가 이미 기록된 뒤에야 시작한다.
     #
     # 예외 포착은 AI 스트림 자체(narrate() 생성/첫 조각/이후 조각 이어받기)만
@@ -471,6 +497,9 @@ async def confirm(
     narration_start = time.monotonic()
     narration_error: Exception | None = None
     chunk_index = 0
+    narration_texts: list[str] = []
+    """이번 턴에 실제로 나간 서사 조각을 모아 둔다 — 배경 시계 조건 검사가
+    서사가 끝난 뒤의 `narration_text`로 이걸 이어 붙여 받는다."""
     try:
         narration_iter = narrate(
             provider=gm_provider,
@@ -490,6 +519,7 @@ async def confirm(
                 text=first_sentence, chunk_index=chunk_index, caused_by_seq=resolve_seq
             )
         )
+        narration_texts.append(first_sentence)
         chunk_index += 1
         while True:
             try:
@@ -506,6 +536,7 @@ async def confirm(
             await actor.submit(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
                 AppendNarration(text=sentence, chunk_index=chunk_index, caused_by_seq=resolve_seq)
             )
+            narration_texts.append(sentence)
             chunk_index += 1
 
     # ⑥ 두 번째 AI 호출 기록 — 성공·실패 어느 쪽에서도 항상 제출한다. 실패한
@@ -543,6 +574,23 @@ async def confirm(
             target=check_event.target,
             narration_chunk_count=chunk_index,
             narration_failed=True,
+        )
+
+    # 시계 조건 검사 배경 등록 — 관문 신호가 참일 때만 건다(ARCH-03/D-01).
+    # 깊은 판단용 제공자 호출은 신호가 거짓이면 아예 일어나지 않는다 — 값싼
+    # 관문이 값비싼 판단을 거른다는 DP-01의 구조가 여기서 그대로 지켜진다.
+    if should_check_clock:
+        background.add_task(
+            run_clock_condition_check,
+            actor=actor,
+            provider=clock_provider,
+            model=clock_judge_choice.model,
+            judge_ctx=judge_ctx,
+            rulebook_display_name=rulebook.display_name,
+            narration_text="\n".join(narration_texts),
+            resolve_seq=resolve_seq,
+            clock_id=ctx.clock_state.clock_id,
+            clock_segment_count=CLOCK_SEGMENT_COUNT,
         )
 
     # ⑦ 장면 삽화 — **성공한 턴에만, 응답을 보낸 뒤에.** 위 서사 실패 분기가

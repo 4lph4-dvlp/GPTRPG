@@ -299,7 +299,11 @@ def _imagery_client(
     }
     app = create_app(
         db_path=tmp_db_path,
-        provider_resolver=lambda role, choices, env: providers[role],
+        # 09-01: `clock_judge` 등 대역 사전에 없는 새 역할은 `action_classifier`
+        # 대역으로 대신한다(conftest.web_client_with_fake_provider와 같은 관례).
+        provider_resolver=lambda role, choices, env: providers.get(
+            role, providers["action_classifier"]
+        ),
         agent_config_path=config_path,
         imagery_config=ImageryConfig(
             enabled=enabled,

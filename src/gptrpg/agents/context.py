@@ -65,3 +65,51 @@ class TurnContext:
 # 칸이 정확히 넷임을 코드로도 고정한다 — `entities.py`의 `ENTITY_FIELD_NAMES`
 # 관례를 그대로 따른다.
 TURN_CONTEXT_FIELD_NAMES = frozenset(f.name for f in fields(TurnContext))
+
+
+class ContextCapExceeded(Exception):
+    """역할별 문맥 값 객체 중 하나가 스스로 정한 상한을 넘겼을 때 던진다(D-66/ARCH-06).
+
+    `TooMuchContext`(위, `TurnContext` 전용)와 달리 이 예외는 새로 생기는
+    역할별 값 객체들이 공유한다 — 어느 칸이 몇 개로 몇을 넘겼는지 세 속성에
+    그대로 남긴다.
+    """
+
+    def __init__(self, field_name: str, length: int, limit: int) -> None:
+        super().__init__(f"{field_name} 길이가 {length}로 상한({limit})을 넘었다")
+        self.field_name = field_name
+        self.length = length
+        self.limit = limit
+
+
+CLOCK_JUDGE_RECENT_TURNS_LIMIT = 4
+"""시계 판단이 받는 최근 대화 상한(ARCH-06 "각자 상한"의 첫 조각). 조건 검사는
+"방금 무슨 일이 있었나"만 보면 되므로 서술용 `RECENT_TURNS_LIMIT`(10)보다
+좁다 — 시계 판단은 다음 칸 조건이 이번 턴 판정으로 충족됐는지만 보고,
+그 앞의 맥락 전체가 필요한 서술과는 다른 급의 문맥이다."""
+
+
+@dataclass(frozen=True)
+class ClockJudgeContext:
+    """`clock_judge` 역할(judge_clock_signal/judge_clock_condition)이 받는 문맥 — 딱 네 칸.
+
+    **정체·원하는 것·파국 문장을 담는 칸이 아예 없다** — 조건 검사는 "다음
+    칸에 적힌 일이 일어났는가"만 판단하면 되고, 시나리오 원문 전체는 필요
+    없다. 이 값 객체의 칸을 넷으로 좁힌 것 자체가 그 필요 없음을 타입
+    차원에서 막는다(ARCH-02와 같은 원리 — 필요 이상을 애초에 못 받게
+    설계한다).
+    """
+
+    clock_position: str
+    """예 `"2/4"` — 현재 칸/전체 칸 수를 한 줄로 표시."""
+    next_segment_description: str
+    """다음 칸의 자연어 설명. 없으면 빈 문자열."""
+    recent_turns: tuple[str, ...]
+    check_summary: str
+    """이번 턴 판정 결과 요약 한 줄 — "방금 무슨 일이 있었나"의 핵심."""
+
+    def __post_init__(self) -> None:
+        if len(self.recent_turns) > CLOCK_JUDGE_RECENT_TURNS_LIMIT:
+            raise ContextCapExceeded(
+                "recent_turns", len(self.recent_turns), CLOCK_JUDGE_RECENT_TURNS_LIMIT
+            )
