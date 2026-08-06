@@ -180,7 +180,7 @@ QUAL-05, TEST-01, TEST-02
 
   5. API 요청의 입력 길이 상한이 빠짐없이 걸리고, 예외 메시지가 자격 증명을 실어 나르지 않는다
 
-**Plans**: 3/4 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
@@ -197,7 +197,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 08-04-PLAN.md — 다중 캐릭터 픽스처, API 경계 입력 상한 전수 훑기, 문구 위생 관문 (wave 4)
+- [x] 08-04-PLAN.md — 다중 캐릭터 픽스처, API 경계 입력 상한 전수 훑기, 문구 위생 관문 (wave 4)
 
 > **왜 이것이 코드의 첫 단계인가.** 이후 모든 단계의 검증이 여기서 고치는 테스트 픽스처
 > 위에서 돈다. 지금 스위트는 `player_id`를 `"p1"`으로 고정해서 신원 버그 클래스를 구조적으로
@@ -650,7 +650,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 5. 실험 실행 — 두 번, 1주 간격 | M0 | 4/6 | Deferred (D-62) | - |
 | 6. 가설 판정 게이트 | M0 | 0/TBD | Deferred (D-62) | - |
 | 7. 거버넌스 재논의 — D17 · D-20 · D31 | v1.1 | — (논의) | **Complete** | 2026-08-05 |
-| 8. 신원 검증과 멱등성 | v1.1 | 3/4 | In Progress|  |
+| 8. 신원 검증과 멱등성 | v1.1 | 4/4 | In Progress|  |
 | 9. 에이전트 구조 재편 | v1.1 | 0/TBD | Not started | - |
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 0/TBD | Not started | - |
 | 11. 룰북 표현 어휘 확장 | v1.1 | 0/TBD | Not started | - |

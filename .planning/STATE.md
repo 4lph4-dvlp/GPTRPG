@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 08
 current_phase_name: identity-and-idempotency
-status: executing
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-08-06T01:23:00.194Z"
+status: verifying
+stopped_at: Completed 08-04-PLAN.md (Phase 08 fully complete)
+last_updated: "2026-08-06T01:45:21.480Z"
 last_activity: 2026-08-06
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 2
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
-  percent: 0
+  completed_plans: 4
+  percent: 50
 ---
 
 # Project State
@@ -32,10 +32,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 08 (identity-and-idempotency) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-06 — Phase 08 execution started
 
-Progress: [████████░░] 75%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -83,6 +83,7 @@ Progress: [████████░░] 75%
 | Phase 08 P01 | unspecified | 4 tasks | 20 files |
 | Phase 08 P02 | unspecified | 3 tasks | 5 files |
 | Phase 08 P03 | 20min | 4 tasks | 8 files |
+| Phase 08 P04 | 13min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -149,6 +150,8 @@ Progress: [████████░░] 75%
 - [Phase ?]: 08-03: GameState.confirmed_declares/confirm_to_declare fold from action_confirmed/check_resolved events; SessionActor.AlreadyConfirmed short-circuits same-move re-confirm (no new event), different move/stat gets CommandRejected (D-10)
 - [Phase ?]: 08-03: confirm route catches AlreadyConfirmed before CommandRejected and reuses prior.resolve_seq when present; narration-only failure is now 200 + narration_failed=true with rolls/grade/target intact instead of discarding the roll via 502 (TRUST-06, D-08)
 - [Phase ?]: 08-03 [deviation, Rule 1 bug found in Task 4]: route-level resolve-reuse decision left a TOCTOU window under concurrent confirms (reproduced: two distinct resolve_seq from one confirm). Fixed with actor-level AlreadyResolved(CommandRejected) in _prepare_resolve_check, mirroring the AlreadyConfirmed two-tier defense pattern one step further (D-11)
+- [Phase ?]: 08-04: fake_session_log/test_web_actions.py player_id defaults changed p1/p2 -> bram/nari to match production's player_id===character_id convention (D-42) — this is what makes context.py's speaker-label lookup (keyed by event.player_id) attach each character's own display name
+- [Phase ?]: 08-04: ConfirmRequest.target bounded ge=-200/le=200 (covers d100 skill 0-100 + OpenQuest difficulty shifts, and 2d6's low-teens targets); new MAX_MODIFIERS_COUNT=20/MAX_MODIFIER_LEN=128 constants cap ConfirmRequest.modifiers list length + item length; DeclareRequest/ConfirmRequest.rulebook_id reuse existing MAX_ID_LEN
 
 ### Pending Todos
 
@@ -198,8 +201,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-06T01:23:00.167Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-08-06T01:45:21.452Z
+Stopped at: Completed 08-04-PLAN.md (Phase 08 fully complete)
 Traceability 갱신 완료
 Resume file: None
 
