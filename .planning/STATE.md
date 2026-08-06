@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 12.1
-current_phase_name: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+current_phase: 9
+current_phase_name: 에이전트 구조 재편
 status: planning
 stopped_at: Completed 08-04-PLAN.md (Phase 08 fully complete)
 last_updated: "2026-08-06T12:57:54.761Z"
 last_activity: 2026-08-06
-last_activity_desc: Phase 08 complete, transitioned to Phase 12.1
+last_activity_desc: Phase 08 complete. next_phase pointer corrected from 12.1 to 9 — phase.complete's directory-based lookup picked 12.1 because its folder already exists (created early when D22 was discovered during Phase 8 discussion) while Phase 9-12 have no folders yet; ROADMAP.md's own numeric/dependency ordering (Phase 9 depends only on 7+8; 12.1 depends on 8+11+12, unmet) makes Phase 9 the correct next phase
 progress:
   total_phases: 2
   completed_phases: 1
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 08 — identity-and-idempotency
+**Current focus:** Phase 08 complete — next up Phase 9 — 에이전트 구조 재편
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 12.1 — 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+Phase: 9 of 16 (에이전트 구조 재편) — Phase 8 완료, `/gsd-discuss-phase 9` 또는 `/gsd-plan-phase 9` 대기
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-08-06 — Phase 08 complete, transitioned to Phase 12.1
+Last activity: 2026-08-06 — Phase 08 complete (identity-and-idempotency, 4/4 plans, verification passed). next_phase pointer corrected 12.1 → 9 (see frontmatter note)
 
 Progress: [██████████] 100%
 
