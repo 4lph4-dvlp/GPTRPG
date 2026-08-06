@@ -13,6 +13,8 @@ from gptrpg.agents.action_classifier import UnknownMove
 from gptrpg.agents.config import (
     AGENT_ROLES,
     DEFAULT_CONFIG_PATH,
+    ROLE_FALLBACKS,
+    STRICT_AGENT_ROLES,
     AgentChoice,
     ConfigNotFound,
     InvalidAgentConfig,
@@ -416,10 +418,26 @@ def _cmd_agents_set(args: argparse.Namespace) -> int:
     missing = [role for role in AGENT_ROLES if role not in choices]
     print(f"저장됨: {config_path} — {args.role}: {args.provider}/{args.model}")
     if missing:
-        # 두 역할이 다 차기 전까지 `load_config`는 여전히 InvalidAgentConfig를
-        # 던진다. 그 사실을 지금 알려 주지 않으면 운영자는 "저장됨"만 보고
-        # 끝났다고 믿는다.
-        print(f"아직 안 정해진 역할: {', '.join(missing)} — 이 역할까지 정해야 서버가 행동을 받는다")
+        # `STRICT_AGENT_ROLES`(대체가 없는 역할)가 빠졌으면 지금까지와 같은
+        # 문구를 쓴다 — 이 역할까지 정해야 `load_config`가 성공한다.
+        # `ROLE_FALLBACKS`에 든 역할(situation_judge/scene_entity_judge/
+        # clock_judge)이 빠진 경우는 09-01부터 사실이 아니게 됐다 — 정하지
+        # 않아도 대체 역할의 선택을 물려받아 서버는 그대로 행동을 받는다.
+        # 두 종류를 한 문구로 뭉뚱그리면 운영자가 "서버가 안 뜬다"로 오해한다.
+        strict_missing = [role for role in missing if role in STRICT_AGENT_ROLES]
+        fallback_missing = [role for role in missing if role in ROLE_FALLBACKS]
+        if strict_missing:
+            print(
+                f"아직 안 정해진 역할: {', '.join(strict_missing)} — "
+                "이 역할까지 정해야 서버가 행동을 받는다"
+            )
+        for role in fallback_missing:
+            fallback_role = ROLE_FALLBACKS[role]
+            print(
+                f"안내: 역할 {role!r}을 정하지 않으면 {fallback_role!r}의 선택을 "
+                "물려받는다 — 따로 정하려면 'gptrpg agents set --role "
+                f"{role}'을 쓰세요"
+            )
     return 0
 
 

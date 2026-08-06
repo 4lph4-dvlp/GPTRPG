@@ -166,9 +166,13 @@ def test_classifier_system_prompt_is_byte_identical_across_calls_with_different_
     assert _run_turn(db, "s1", "문을 두드린다", monkeypatch=monkeypatch) == 0
     assert _run_turn(db, "s1", "창문으로 넘어간다", monkeypatch=monkeypatch) == 0
 
-    # calls 순서: [턴1 분류(complete), 턴1 서사(stream), 턴2 분류(complete), 턴2 서사(stream)]
+    # calls 순서(09-01: clock_judge 관문 호출이 분류와 서사 사이에 끼어들며
+    # 턴당 셋으로 늘었다 — fake_provider의 fixture 기본값이 clock_judge의
+    # `signal` 계약을 만족하지 않아 배경 깊은 판단은 호출되지 않는다):
+    # [턴1 분류(complete), 턴1 시계 신호 관문(complete), 턴1 서사(stream),
+    #  턴2 분류(complete), 턴2 시계 신호 관문(complete), 턴2 서사(stream)]
     turn1_classifier_system, _turn1_messages = fake_provider.calls[0]
-    turn2_classifier_system, _turn2_messages = fake_provider.calls[2]
+    turn2_classifier_system, _turn2_messages = fake_provider.calls[3]
 
     assert turn1_classifier_system == turn2_classifier_system
 
@@ -191,8 +195,9 @@ def test_second_turn_prompt_labels_prior_turn_with_speaker_prefixes(
     assert _run_turn(db, "s1", "문을 두드린다", monkeypatch=monkeypatch) == 0
     assert _run_turn(db, "s1", "창문으로 넘어간다", monkeypatch=monkeypatch) == 0
 
-    # calls 순서: [턴1 분류, 턴1 서사, 턴2 분류, 턴2 서사]
-    _turn2_classifier_system, turn2_classifier_messages = fake_provider.calls[2]
+    # calls 순서(09-01: 턴당 [분류, 시계 신호 관문, 서사] 셋 — 위
+    # `test_classifier_system_prompt_is_byte_identical_...`의 주석과 같은 이유)
+    _turn2_classifier_system, turn2_classifier_messages = fake_provider.calls[3]
     turn2_classifier_turn_text = turn2_classifier_messages[0]["content"]
 
     assert "플레이어: 문을 두드린다" in turn2_classifier_turn_text
@@ -200,7 +205,7 @@ def test_second_turn_prompt_labels_prior_turn_with_speaker_prefixes(
     # 진행자 화자 표시와 함께 실려 있어야 한다.
     assert "진행자: 문이 요란하게 부서진다." in turn2_classifier_turn_text
 
-    _turn2_gm_system, turn2_gm_messages = fake_provider.calls[3]
+    _turn2_gm_system, turn2_gm_messages = fake_provider.calls[5]
     turn2_gm_turn_text = turn2_gm_messages[0]["content"]
     assert "플레이어: 문을 두드린다" in turn2_gm_turn_text
 

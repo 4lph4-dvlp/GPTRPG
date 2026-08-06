@@ -7,6 +7,7 @@
 """
 
 import argparse
+import asyncio
 import os
 import sys
 import threading
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from gptrpg.agents.action_classifier import MoveCandidate, classify
+from gptrpg.agents.clock_judge import judge_clock_signal
 from gptrpg.agents.config import AgentChoice, load_config, resolve_provider
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
@@ -33,7 +35,8 @@ from gptrpg.session_actor.actor import (
     SessionActor,
     SessionRegistry,
 )
-from gptrpg.turn.context import build_turn_context
+from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
+from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
 
 _T = TypeVar("_T")
 
@@ -288,6 +291,30 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
 
     check_summary = f"{picked.move} 판정 결과 {check_event.grade} (목표 {check_event.target})"
 
+    # 시계 신호 관문(문지기, DP-01) — narrate() 호출 **전**에 한 번 부른다.
+    # 웹과 달리 여기서는 이벤트 루프를 막아도 되는 자리가 아니다(액터의 큐
+    # 소비 태스크가 같은 루프에 있다) — `asyncio.to_thread`로 감싼다. 이 호출
+    # 구간 전체를 `try`로 감싸 실패 시 stderr 한 줄만 남기고 신호를 거짓으로
+    # 취급한다(D-05) — 조건 검사가 실패해도 `_turn_flow`의 종료 코드는
+    # 영향받지 않는다.
+    clock_judge_choice = _resolve_role_choice(args, "clock_judge")
+    clock_provider = resolve_provider(
+        "clock_judge", {"clock_judge": clock_judge_choice}, os.environ
+    )
+    judge_ctx = build_clock_judge_context(ctx, check_summary)
+    clock_signal_should_check = False
+    try:
+        clock_signal = await asyncio.to_thread(
+            judge_clock_signal,
+            provider=clock_provider,
+            model=clock_judge_choice.model,
+            ctx=judge_ctx,
+            rulebook_display_name=rulebook.display_name,
+        )
+        clock_signal_should_check = clock_signal.should_check
+    except Exception as exc:  # noqa: BLE001 - D-05, 판단 실패가 턴을 막지 않는다
+        print(f"경고: 시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}", file=sys.stderr)
+
     gm_choice = _resolve_role_choice(args, "master_gm")
     gm_provider = resolve_provider("master_gm", {"master_gm": gm_choice}, os.environ)
 
@@ -309,6 +336,10 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     narration_start = time.monotonic()
     narration_error: Exception | None = None
     chunk_index = 0
+    narration_texts: list[str] = []
+    """이번 턴에 실제로 화면에 나간 서사 조각을 모아 둔다 — 배경 시계 조건
+    검사가 서사가 끝난 뒤의 `narration_text`로 이걸 이어 붙여 받는다(웹과
+    같은 방식)."""
     try:
         narration_iter = narrate(
             provider=gm_provider,
@@ -333,6 +364,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
                 text=first_sentence, chunk_index=chunk_index, caused_by_seq=resolve_seq
             )
         )
+        narration_texts.append(first_sentence)
         chunk_index += 1
         while True:
             try:
@@ -348,6 +380,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
                     text=sentence, chunk_index=chunk_index, caused_by_seq=resolve_seq
                 )
             )
+            narration_texts.append(sentence)
             chunk_index += 1
 
     # ⑥ 두 번째 AI 호출 기록 — 성공·실패 어느 쪽에서도 항상 제출한다. 실패한
@@ -387,6 +420,26 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         reason = str(narration_error) if narration_error is not None else "제공자가 last_result() 규약을 어겼다"
         print(f"오류: 서사가 끝까지 나오지 못했다 — {reason}", file=sys.stderr)
         return 1
+
+    if clock_signal_should_check:
+        # **CLI/웹 비대칭(Pitfall 1)** — 웹은 응답을 보낸 뒤 `BackgroundTasks`로
+        # 시계 조건 검사를 던지지만, CLI는 `asyncio.run()`이 반환하는 순간
+        # 이벤트 루프가 닫히므로 "응답 후 배경"이 성립하지 않는다. 여기서
+        # 반드시 `await`로 끝내야 한다 — `run_turn`의 `finally: await
+        # actor.stop()`보다 먼저다. `asyncio.create_task`로 던지고 기다리지
+        # 않으면 프로세스가 곧 끝나 배경 산출물이 스케줄되다 말거나 아예
+        # 스케줄되지 못한 채 사라지고, ARCH-03이 CLI 경로에서 조용히 깨진다.
+        await run_clock_condition_check(
+            actor=actor,
+            provider=clock_provider,
+            model=clock_judge_choice.model,
+            judge_ctx=judge_ctx,
+            rulebook_display_name=rulebook.display_name,
+            narration_text="\n".join(narration_texts),
+            resolve_seq=resolve_seq,
+            clock_id=ctx.clock_state.clock_id,
+            clock_segment_count=CLOCK_SEGMENT_COUNT,
+        )
 
     return 0
 

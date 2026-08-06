@@ -12,6 +12,8 @@ import pytest
 from gptrpg.agents import providers as providers_module
 from gptrpg.agents.config import (
     AGENT_ROLES,
+    ROLE_FALLBACKS,
+    STRICT_AGENT_ROLES,
     AgentChoice,
     ConfigNotFound,
     InvalidAgentConfig,
@@ -23,8 +25,29 @@ from gptrpg.agents.providers import MissingApiKey
 from gptrpg.cli.main import main
 
 
-def test_agent_roles_are_exactly_the_two_locked_roles():
-    assert AGENT_ROLES == ("action_classifier", "master_gm")
+def test_agent_roles_are_exactly_the_five_roles_in_order():
+    assert AGENT_ROLES == (
+        "action_classifier",
+        "master_gm",
+        "situation_judge",
+        "scene_entity_judge",
+        "clock_judge",
+    )
+
+
+def test_strict_agent_roles_are_still_the_original_two():
+    assert STRICT_AGENT_ROLES == ("action_classifier", "master_gm")
+
+
+def test_role_fallbacks_cover_exactly_the_three_new_roles():
+    assert set(ROLE_FALLBACKS.keys()) == {
+        "situation_judge",
+        "scene_entity_judge",
+        "clock_judge",
+    }
+    assert ROLE_FALLBACKS["situation_judge"] == "master_gm"
+    assert ROLE_FALLBACKS["scene_entity_judge"] == "action_classifier"
+    assert ROLE_FALLBACKS["clock_judge"] == "action_classifier"
 
 
 # ---------------------------------------------------------------------------
@@ -33,13 +56,42 @@ def test_agent_roles_are_exactly_the_two_locked_roles():
 
 
 def test_save_then_load_round_trips_both_roles(tmp_path):
+    """두 역할짜리 저장 파일이 `load_config`를 거쳐도 그 두 역할의 값은
+    글자 그대로 그대로 돌아온다 — `ROLE_FALLBACKS`가 나머지 세 역할을 채우기
+    때문에 09-01부터는 `load_config(path) == choices`(사전 전체 비교)가
+    더 이상 성립하지 않는다(반환값에 세 역할이 더 들어 있다)."""
     path = tmp_path / "agents.json"
     choices = {
         "action_classifier": AgentChoice(provider="anthropic", model="claude-haiku"),
         "master_gm": AgentChoice(provider="openai", model="gpt-5"),
     }
     save_config(path, choices)
-    assert load_config(path) == choices
+    loaded = load_config(path)
+    assert loaded["action_classifier"] == choices["action_classifier"]
+    assert loaded["master_gm"] == choices["master_gm"]
+
+
+def test_two_role_config_file_loads_with_fallbacks_and_logs_three_stderr_lines(tmp_path, capsys):
+    """회귀 방지 시험 — 기존 두 역할짜리 `agents.json`이 09-01 이후에도 예외
+    없이 그대로 로드된다. `clock_judge`/`scene_entity_judge`는
+    `action_classifier`의 선택을, `situation_judge`는 `master_gm`의 선택을
+    물려받고, 대체가 일어났다는 사실이 표준오류에 세 줄로 남는다."""
+    path = tmp_path / "agents.json"
+    choices = {
+        "action_classifier": AgentChoice(provider="anthropic", model="claude-haiku"),
+        "master_gm": AgentChoice(provider="openai", model="gpt-5"),
+    }
+    save_config(path, choices)
+
+    loaded = load_config(path)
+
+    assert set(loaded.keys()) == set(AGENT_ROLES)
+    assert loaded["clock_judge"] == loaded["action_classifier"]
+    assert loaded["scene_entity_judge"] == loaded["action_classifier"]
+    assert loaded["situation_judge"] == loaded["master_gm"]
+
+    err_lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
+    assert len(err_lines) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +185,9 @@ def test_two_roles_can_hold_different_provider_and_model(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_agents_show_prints_both_roles_without_key_values(tmp_path, capsys, monkeypatch):
+def test_agents_show_prints_all_five_roles_without_key_values(tmp_path, capsys, monkeypatch):
+    """09-01: 두 역할짜리 파일로도 `agents show`는 다섯 줄을 찍는다 —
+    `ROLE_FALLBACKS`가 나머지 세 역할을 채우기 때문이다."""
     secret = "sk-super-secret-value-should-not-leak"
     monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
     path = tmp_path / "agents.json"
@@ -149,8 +203,10 @@ def test_agents_show_prints_both_roles_without_key_values(tmp_path, capsys, monk
     assert exit_code == 0
 
     out = capsys.readouterr().out
-    assert "action_classifier" in out
-    assert "master_gm" in out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == len(AGENT_ROLES) == 5
+    for role in AGENT_ROLES:
+        assert role in out
     assert "claude-haiku" in out
     assert "gpt-5" in out
     assert secret not in out
@@ -191,6 +247,11 @@ class _StubProvider:
 
 
 def test_agents_select_lets_each_role_pick_independently(tmp_path, monkeypatch, capsys):
+    """09-01: `AGENT_ROLES`가 다섯으로 늘어난 뒤로 `--role` 없는 `agents select`는
+    다섯 역할을 전부 돈다(그 자체가 맞는 동작 — 490~451줄대 파서 관례). 이
+    시험의 원래 뜻(「두 역할을 각각 따로 돈다」)은 `--role`을 하나씩 지정해
+    두 번 부르는 것으로 그대로 유지한다 — 다섯 역할 전체를 다 채워야 하는
+    입력 목록에 새 역할이 늘 때마다 이 시험이 다시 깨지는 것을 막는다."""
     provider_a = _StubProvider("stub-a", ["model-a1", "model-a2"])
     provider_b = _StubProvider("stub-b", ["model-b1"])
 
@@ -203,14 +264,21 @@ def test_agents_select_lets_each_role_pick_independently(tmp_path, monkeypatch, 
     # os.environ 자체를 두 스텁 키만 있는 값으로 완전히 바꿔치기한다.
     monkeypatch.setattr(os, "environ", {"STUB_A_KEY": "x", "STUB_B_KEY": "y"})
 
-    # available_providers는 이름을 정렬해 돌려준다 -> ["stub-a", "stub-b"]
-    # 역할1(action_classifier): stub-a(1번) 고르고 모델 2번(model-a2)
-    # 역할2(master_gm): stub-b(2번) 고르고 모델 1번(model-b1)
-    answers = iter(["1", "2", "2", "1"])
-    monkeypatch.setattr("builtins.input", lambda *_args: next(answers))
-
     path = tmp_path / "agents.json"
-    exit_code = main(["agents", "select", "--config", str(path)])
+
+    # available_providers는 이름을 정렬해 돌려준다 -> ["stub-a", "stub-b"]
+    # action_classifier: stub-a(1번) 고르고 모델 2번(model-a2)
+    answers_a = iter(["1", "2"])
+    monkeypatch.setattr("builtins.input", lambda *_args: next(answers_a))
+    exit_code = main(
+        ["agents", "select", "--config", str(path), "--role", "action_classifier"]
+    )
+    assert exit_code == 0
+
+    # master_gm: stub-b(2번) 고르고 모델 1번(model-b1)
+    answers_b = iter(["2", "1"])
+    monkeypatch.setattr("builtins.input", lambda *_args: next(answers_b))
+    exit_code = main(["agents", "select", "--config", str(path), "--role", "master_gm"])
     assert exit_code == 0
 
     loaded = load_config(path)

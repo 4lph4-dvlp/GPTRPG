@@ -1,0 +1,153 @@
+"""같은 배경 검사를 CLI에서도 돌린다 — 09-01 Task 2.
+
+Pitfall 1 회귀 방지가 목적이다: `run_clock_condition_check`을 `await`하지
+않고 `asyncio.create_task`로 던지면, `asyncio.run()`이 반환하는 순간
+이벤트 루프가 닫혀 배경 산출물이 스케줄되다 말거나 아예 스케줄되지 못한
+채 사라진다 — `run_turn` **반환 이후** 새로 연 `EventStore`로 다시 읽어야
+이 회귀를 실제로 잡을 수 있다.
+
+`tests/test_turn_flow_failure.py`의 골격(대역 제공자 + 임시 저장소 +
+`main([...])` 직접 호출)을 그대로 빌린다.
+"""
+
+import json
+
+from gptrpg.agents import providers as providers_module
+from gptrpg.agents.envelope import AgentResult
+from gptrpg.cli.main import main
+from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION
+from gptrpg.event_log.store import EventStore
+from gptrpg.session_actor.projection import rebuild_state
+
+_CANDIDATE_JSON = json.dumps([{"move": "hack_and_slash", "stat": "STR"}])
+_SIGNAL_CHECK_JSON = json.dumps([{"signal": "check", "why": "판정이 다음 칸과 관련 있다"}])
+_SIGNAL_SKIP_JSON = json.dumps([{"signal": "skip", "why": "이번 턴은 무관하다"}])
+_VERDICT_ADVANCE_JSON = json.dumps([{"verdict": "advance", "why": "조건이 충족됐다"}])
+
+
+def _install_fake_provider(monkeypatch, fake_provider, *, name="fake", env_var="FAKE_API_KEY"):
+    monkeypatch.setitem(providers_module.PROVIDER_ENV_VARS, name, env_var)
+    monkeypatch.setitem(providers_module.PROVIDER_FACTORIES, name, lambda api_key: fake_provider)
+    monkeypatch.setenv(env_var, "test-key")
+
+
+def _run_turn(db: str, session: str, text: str, *, monkeypatch) -> int:
+    monkeypatch.setattr("builtins.input", lambda *_args: "")
+    return main(
+        [
+            "turn",
+            "--db",
+            db,
+            "--session",
+            session,
+            "--player",
+            "p1",
+            "--text",
+            text,
+            "--provider",
+            "fake",
+            "--model",
+            "fake-model",
+        ]
+    )
+
+
+def _read_events(db: str, session: str):
+    store = EventStore(db)
+    store.initialize()
+    try:
+        return store.read_events(session)
+    finally:
+        store.close()
+
+
+class _MultiRoleProvider:
+    """`--provider fake --model fake-model`이 세 역할(action_classifier/
+    master_gm/clock_judge) 전부에 같은 제공자 이름을 쓰게 만들므로, `complete()`
+    호출 순서(① 분류 ② 시계 신호 관문 ③ 시계 조건 배경 판단)에 따라 다른
+    JSON을 돌려주는 대역 하나가 필요하다. `stream()`은 `master_gm.narrate()`
+    전용이라 `complete()`와 호출 수를 공유하지 않는다.
+    """
+
+    name = "fake"
+
+    def __init__(
+        self,
+        *,
+        classify_value: str = _CANDIDATE_JSON,
+        signal_value: str = _SIGNAL_CHECK_JSON,
+        condition_value: str = _VERDICT_ADVANCE_JSON,
+        stream_text: str = "문이 요란하게 부서진다. 안에서 서늘한 바람이 흘러나온다.",
+        clock_judge_always_raises: bool = False,
+    ) -> None:
+        self.classify_value = classify_value
+        self.signal_value = signal_value
+        self.condition_value = condition_value
+        self.stream_text = stream_text
+        self.clock_judge_always_raises = clock_judge_always_raises
+        self.complete_calls = 0
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        self.complete_calls += 1
+        if self.complete_calls == 1:
+            # ① action_classifier
+            return AgentResult(
+                ok=True, value=self.classify_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
+            )
+        # ②·③ clock_judge (관문 + 배경 깊은 판단)
+        if self.clock_judge_always_raises:
+            raise RuntimeError("clock judge 대역이 일부러 실패한다")
+        value = self.signal_value if self.complete_calls == 2 else self.condition_value
+        return AgentResult(ok=True, value=value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1)
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        for word in self.stream_text.split(" "):
+            if word:
+                yield word + " "
+        self._last_result = AgentResult(
+            ok=True, value=self.stream_text, elapsed_ms=1, prompt_tokens=3, completion_tokens=2
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("complete() 또는 stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_cli_turn_advances_clock_via_condition_trigger_after_process_exits(
+    tmp_db_path, monkeypatch
+) -> None:
+    """`run_turn` 반환 **이후** 새로 연 `EventStore`에서 `clock_advanced
+    (trigger="condition")` 사건을 정확히 하나 찾고, 재생한 `clock_segment`가
+    1이다 — 배경 작업을 `await`하지 않고 던졌을 때 프로세스 종료로 산출물이
+    사라지는 회귀(Pitfall 1)를 잡는 시험이다."""
+    db = str(tmp_db_path)
+    provider = _MultiRoleProvider()
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code == 0
+
+    events = _read_events(db, "s1")
+    clock_advanced = [event for event in events if event.event_type == "clock_advanced"]
+    assert len(clock_advanced) == 1
+    assert clock_advanced[0].trigger == "condition"
+
+    store = EventStore(db)
+    store.initialize()
+    try:
+        state = rebuild_state(store, "s1")
+    finally:
+        store.close()
+    assert state.clock_segment == 1
+
+
+def test_event_schema_version_still_five() -> None:
+    assert EVENT_SCHEMA_VERSION == 5
