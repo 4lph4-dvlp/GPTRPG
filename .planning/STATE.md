@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 08
-current_phase_name: identity-and-idempotency
-status: verifying
+current_phase: 12.1
+current_phase_name: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+status: planning
 stopped_at: Completed 08-04-PLAN.md (Phase 08 fully complete)
-last_updated: "2026-08-06T01:45:21.480Z"
+last_updated: "2026-08-06T12:57:54.761Z"
 last_activity: 2026-08-06
-last_activity_desc: Phase 08 execution started
+last_activity_desc: Phase 08 complete, transitioned to Phase 12.1
 progress:
   total_phases: 2
   completed_phases: 1
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 08 (identity-and-idempotency) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-08-06 — Phase 08 execution started
+Phase: 12.1 — 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-06 — Phase 08 complete, transitioned to Phase 12.1
 
 Progress: [██████████] 100%
 
@@ -41,7 +41,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 22 (M0 누적)
+- Total plans completed: 26 (M0 누적)
 - Average duration: -
 - Total execution time: 0.0 hours (v1.1 기준 — 아직 실행 없음)
 
@@ -54,6 +54,7 @@ Progress: [██████████] 100%
 | 03 (M0) | 6 | - | - |
 | 04 (M0) | 6 | - | - |
 | 05 (M0) | 4/6, 보류 | - | - |
+| 08 | 4 | - | - |
 
 **Recent Trend:**
 
