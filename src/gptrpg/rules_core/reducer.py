@@ -6,7 +6,7 @@
 """
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from gptrpg.rules_core.grading import Grade
 
@@ -53,6 +53,17 @@ class GameState:
     completion_tokens: int = 0
     cached_prompt_tokens: int = 0
     last_grade: Grade | None = None
+    declare_owners: dict[int, str] = field(default_factory=dict)
+    """선언 순번 -> 그 선언을 낸 character_id (판 5+, TRUST-03). `apply_event`가
+    `action_declared`를 접을 때만 채운다 — 판 5 미만 기록은 이 칸의 소스인
+    `character_id`가 아예 없었으므로 순번이 이 표에 들어오지 않는다("모른다"가
+    "빈 문자열이다"와 섞이지 않는다, D-13). `SessionActor._prepare_confirm`이
+    서버 재시작 뒤에도 이 표에서 소유권을 판정한다 — 액터의 메모리 상태가
+    아니라 사건에서 다시 접어 만든 값이라 재시작에도 살아남는다."""
+    occupied_by: dict[str, str] = field(default_factory=dict)
+    """character_id -> browser_id (판 5+, D-05/D-06). `character_occupied`
+    사건에서만 채워진다 — 점유를 요청하는 명령 자체는 08-02가 만든다. 이
+    단계는 사건 종류와 이 파생 칸만 열어 둔다."""
 
 
 def initial_state(session_id: str) -> GameState:
@@ -85,12 +96,27 @@ def _legacy_v1_counts_as_failure(grade: str) -> bool:
 def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameState:
     """사건 하나를 이전 상태에 접어 새 상태를 돌려준다.
 
-    일곱 종류를 전부 다룬다. 모르는 종류가 오면 UnknownEventType을 던진다 —
+    여덟 종류를 전부 다룬다. 모르는 종류가 오면 UnknownEventType을 던진다 —
     조용히 넘어가지 않는다.
     """
     seq = payload["seq"]
     if event_type == "action_declared":
-        return replace(state, last_seq=seq, turn_count=state.turn_count + 1)
+        # 판 5부터 `character_id`가 늘었다(TRUST-03) — 판 5 미만 기록에는 이
+        # 칸 자체가 없었으므로 `declare_owners`에 넣지 않는다("모른다"가
+        # "빈 문자열이다"와 섞이지 않는다, D-13). 이 판 올리기와 이 갈래는
+        # `EVENT_SCHEMA_VERSION` 4->5와 반드시 같은 커밋에 들어간다 — 빠뜨리면
+        # 이 종류의 사건이 하나라도 있는 세션이 폴링마다 소유권 근거를 잃는다.
+        schema_version = payload.get("schema_version", 1)
+        character_id = payload.get("character_id") if schema_version >= 5 else None
+        declare_owners = dict(state.declare_owners)
+        if character_id is not None:
+            declare_owners[seq] = character_id
+        return replace(
+            state,
+            last_seq=seq,
+            turn_count=state.turn_count + 1,
+            declare_owners=declare_owners,
+        )
     if event_type == "action_confirmed":
         return replace(state, last_seq=seq)
     if event_type == "check_resolved":
@@ -146,6 +172,14 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
         # 그림 기능을 끄면 낫는 종류의 고장이 아니다 — 이미 기록된 삽화 사건은
         # 사라지지 않으므로, 한 번 켰던 세션은 영구히 열리지 않게 된다.
         return replace(state, last_seq=seq)
+    if event_type == "character_occupied":
+        # 점유를 요청하는 명령 자체는 08-02가 만든다 — 이 갈래는 사건 종류만
+        # 먼저 열어 둔다. **이 갈래를 빠뜨리면 점유 사건이 하나라도 있는
+        # 세션은 폴링마다 UnknownEventType을 맞고 영구히 안 열린다**(141~148줄의
+        # 삽화 갈래 주석이 같은 사고를 기록해 두었다).
+        occupied_by = dict(state.occupied_by)
+        occupied_by[payload["character_id"]] = payload["browser_id"]
+        return replace(state, last_seq=seq, occupied_by=occupied_by)
     raise UnknownEventType(event_type)
 
 

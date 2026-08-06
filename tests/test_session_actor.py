@@ -113,6 +113,8 @@ async def test_resolve_check_appends_one_check_resolved_event(tmp_db_path):
             ResolveCheck(
                 move="문을 부순다",
                 modifiers=(Modifier(type="flat", value=1, source="힘"),),
+                person_id="p1",
+                character_id="bram",
             )
         )
     finally:
@@ -245,6 +247,8 @@ async def test_unsupported_modifier_type_is_rejected_and_appends_nothing(tmp_db_
                 ResolveCheck(
                     move="문을 부순다",
                     modifiers=(Modifier(type="percentage", value=10, source="버프"),),
+                    person_id="p1",
+                    character_id="bram",
                 )
             )
     finally:
@@ -302,6 +306,8 @@ async def test_rulebook_with_incomplete_grade_bands_is_rejected_not_a_raw_traceb
                         modifiers=(),
                         target=10,
                         rulebook_id=_GAPPED_RULEBOOK_ID,
+                        person_id="p1",
+                        character_id="bram",
                     )
                 )
         finally:
@@ -388,7 +394,13 @@ async def test_full_six_command_session_reconstructs_to_expected_state(tmp_db_pa
             )
         )
         check_seq = await actor.submit(
-            ResolveCheck(move="break_door", modifiers=(), caused_by_seq=confirm_seq)
+            ResolveCheck(
+                move="break_door",
+                modifiers=(),
+                caused_by_seq=confirm_seq,
+                person_id="p1",
+                character_id="bram",
+            )
         )
         await actor.submit(
             AppendNarration(text="문이 부서진다.", chunk_index=0, caused_by_seq=check_seq)

@@ -13,31 +13,33 @@ import가 생기므로, 여기서는 그 함수를 모른다).
 `name`/`current`/`max`/`depleted_effect_ref`) — 이름이 갈리면 화면과 규칙
 코어가 같은 것을 다른 말로 부르게 된다.
 
-**신뢰 모델(M0 한정, T-04-02/T-04-03):** 서버에 세션 저장소나 토큰 발급기를
-두지 않는다. `gptrpg_character` 쿠키는 서명하지 않은 평범한 JSON 값이다 —
-「같은 방 네 명이 링크 하나를 나눠 가진 것」(D-42)이 신뢰 모델이고, 이
-쿠키로 할 수 있는 최악의 일은 남의 **읽기 전용** 시트를 보는 것뿐이다.
-계정·결제는 이 마일스톤의 범위 밖이다. **이 판단은 M0 실험 한정이다 — M1의
-실제 계정 체계로 그대로 가져가면 안 된다.** 쿠키에 `Secure` 속성을 걸지
-않는 것도 같은 이유다: 이 실험은 같은 방에서 HTTPS 없이 돌 가능성이 높고,
-켜면 쿠키가 아예 저장되지 않는다. 공개 인터넷에 이 코드를 올릴 때는 반드시
-그 속성을 켜야 한다(`set_cookie`의 `secure` 인자).
+**신뢰 모델(D-01, TRUST-01):** 서버에 세션 저장소나 토큰 발급기를 두지
+않는다 — 상태는 서명된 쿠키 자체에 있다. `gptrpg_character` 쿠키는 서버
+비밀 열쇠 하나로 HMAC 서명되어(`gptrpg.web.cookie_auth`), 한 글자라도
+변조되면 검증에서 떨어져 「고른 적 없음」이 된다. 「같은 방 네 명이 링크
+하나를 나눠 가진 것」(D-42)이라는 물리적 신뢰 전제는 그대로이지만, 이제는
+그 안에서도 남의 캐릭터를 사칭하는 쿠키를 손으로 써 넣을 수 없다. 계정·결제는
+이 마일스톤의 범위 밖이다. 쿠키에 `Secure` 속성을 걸지 않는 것은 M0 실험
+한정 판단이다: 이 실험은 같은 방에서 HTTPS 없이 돌 가능성이 높고, 켜면
+쿠키가 아예 저장되지 않는다. 공개 인터넷에 이 코드를 올릴 때는 반드시 그
+속성을 켜야 한다(`set_cookie`의 `secure` 인자). **이 판단은 M0 실험
+한정이다 — M1의 실제 계정 체계로 그대로 가져가면 안 된다.**
 """
 
-import json
 from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from gptrpg.web.characters_data import get_character, list_characters
+from gptrpg.web.cookie_auth import COOKIE_NAME, new_browser_id, sign_cookie, verify_cookie
 from gptrpg.web.media import MEDIA_URL_PREFIX
 from gptrpg.web.portraits import portrait_relative_path
+from gptrpg.web.routes_actions import MAX_ID_LEN
 
 router = APIRouter()
 
-COOKIE_NAME = "gptrpg_character"
 COOKIE_MAX_AGE_S = 60 * 60 * 24 * 14
 """14일 — 실험이 1주 간격 두 세션(EXP-03)이라 그 사이를 여유 있게 덮어야
 한다."""
@@ -80,7 +82,7 @@ class CharacterSummaryView(BaseModel):
 
 
 class SelectCharacterRequest(BaseModel):
-    character_id: str
+    character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
 
 
 class SelectCharacterResponse(BaseModel):
@@ -147,15 +149,43 @@ async def get_character_sheet(session_id: str, character_id: str) -> CharacterSh
 async def select_character(
     session_id: str,
     body: SelectCharacterRequest,
+    request: Request,
     response: Response,
 ) -> SelectCharacterResponse:
-    """캐릭터 선택을 쿠키에 남긴다(D-42/D-43). 알려진 캐릭터가 아니면 400."""
+    """캐릭터 선택을 서명 쿠키에 남긴다(D-01/D-42/D-43). 알려진 캐릭터가
+    아니면 400.
+
+    이미 유효한 쿠키를 들고 온 브라우저는 그 안의 `browser_id`를 그대로
+    재사용한다 — 재접속이 새 사람이 되면 「본인 재접속은 그대로 통과한다」
+    (D-05)가 성립하지 않는다. 유효한 쿠키가 없거나 다른 세션 것이면 새
+    `browser_id`를 발급한다.
+    """
     entity = get_character(body.character_id)
     if entity is None:
         raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
+
+    secret = request.app.state.cookie_secret
+    browser_id: str | None = None
+    raw = request.cookies.get(COOKIE_NAME)
+    if raw is not None:
+        existing = verify_cookie(raw, secret=secret)
+        if existing is not None and existing.get("session_id") == session_id:
+            candidate = existing.get("browser_id")
+            if isinstance(candidate, str):
+                browser_id = candidate
+    if browser_id is None:
+        browser_id = new_browser_id()
+
     response.set_cookie(
         key=COOKIE_NAME,
-        value=json.dumps({"session_id": session_id, "character_id": body.character_id}),
+        value=sign_cookie(
+            {
+                "session_id": session_id,
+                "browser_id": browser_id,
+                "character_id": body.character_id,
+            },
+            secret=secret,
+        ),
         max_age=COOKIE_MAX_AGE_S,
         httponly=True,
         samesite="lax",
@@ -169,18 +199,16 @@ async def select_character(
     response_model=MyCharacterResponse,
 )
 async def my_character(session_id: str, request: Request) -> MyCharacterResponse:
-    """쿠키에 남은 선택을 읽는다. 옛 형식·다른 세션·모르는 캐릭터는 전부
-    조용히 `selected: false`로 떨어진다 — 파싱 실패를 예외로 터뜨리지
-    않는다. 옛 형식 쿠키를 가진 브라우저가 화면을 못 여는 것이 더 나쁘다.
+    """쿠키에 남은 선택을 읽는다. 서명이 깨졌거나 다른 세션 것이거나 모르는
+    캐릭터는 전부 조용히 `selected: false`로 떨어진다 — 파싱·검증 실패를
+    예외로 터뜨리지 않는다. 위조되었거나 낡은 쿠키를 가진 브라우저가 화면을
+    못 여는 것이 더 나쁘다.
     """
     raw = request.cookies.get(COOKIE_NAME)
     if raw is None:
         return MyCharacterResponse(selected=False, character_id=None)
-    try:
-        payload = json.loads(raw)
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return MyCharacterResponse(selected=False, character_id=None)
-    if not isinstance(payload, dict):
+    payload = verify_cookie(raw, secret=request.app.state.cookie_secret)
+    if payload is None:
         return MyCharacterResponse(selected=False, character_id=None)
     if payload.get("session_id") != session_id:
         return MyCharacterResponse(selected=False, character_id=None)

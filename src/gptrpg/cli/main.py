@@ -54,6 +54,14 @@ from gptrpg.session_actor.report import DEFAULT_REPORTS_DIR, UnsafeSessionId, bu
 # 순환 import 없음: `turn_flow`는 `main`을 전혀 모른다).
 
 
+_CLI_ROLL_IDENTITY = "cli"
+"""`submit roll` 하위 명령에는 `--player`가 없다 — 판정 하나만 독립적으로
+찍어보는 저수준 디버그 통로다(선언/확인 없이 곧장 판정). `person_id`/
+`character_id`(판 5+, TRUST-04)는 `CheckResolved`에서 필수이므로 고정
+자리표시자를 쓴다 — 이 통로에 실제 브라우저·캐릭터 개념을 새로 들이는
+것은 이 계획의 범위 밖이다."""
+
+
 def _build_command(args: argparse.Namespace) -> Command:
     """submit 하위 명령(선택된 갈래)의 인자를 대응하는 Command 객체로 바꾼다."""
     kind = args.submit_command
@@ -76,6 +84,8 @@ def _build_command(args: argparse.Namespace) -> Command:
             target=args.target,
             rulebook_id=args.rulebook,
             caused_by_seq=args.caused_by,
+            person_id=_CLI_ROLL_IDENTITY,
+            character_id=_CLI_ROLL_IDENTITY,
         )
     if kind == "narrate":
         return AppendNarration(

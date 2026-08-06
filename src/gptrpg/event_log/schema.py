@@ -13,9 +13,9 @@ event_log는 rules_core를 모른다 (경계 계약이 양방향으로 강제한
 from datetime import UTC, datetime
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-EVENT_SCHEMA_VERSION = 4
+EVENT_SCHEMA_VERSION = 5
 """판 1 -> 판 2: `CheckResolved`에 `counts_as_failure` 필수 칸이 늘었다(D-12).
 판 3 -> 판 4: 사건 종류가 하나 늘었다 — `SceneIllustrated`. 기존 여섯 종류의
 칸은 하나도 바뀌지 않았으므로 판 1~3으로 쓰인 기록은 글자 그대로 다시 읽힌다
@@ -32,7 +32,17 @@ EVENT_SCHEMA_VERSION = 4
 「캐시 정보가 기록되지 않았다」와 「캐시 적중이 0이었다」가 구분되지 않으며,
 그 구분이 필요한 자리는 `schema_version`을 보면 된다. `counts_as_failure`와
 달리 필수 칸으로 만들지 않은 이유가 이것이다(필수로 만들면 옛 기록이 아예
-파싱되지 않아 Phase 6이 두 세션 기록을 함께 읽을 수 없다)."""
+파싱되지 않아 Phase 6이 두 세션 기록을 함께 읽을 수 없다).
+
+판 4 -> 판 5: 신원 검증(Phase 8, TRUST-01~04)이 사건 형식에 닿았다. 새
+사건 종류가 하나 늘었다 — `CharacterOccupied`(캐릭터를 처음 점유했다,
+D-05/D-06). `ActionDeclared`·`ActionConfirmed`에 선택 칸
+`character_id: str | None = None`이 늘었다 — 판 5 미만 기록에는 이 칸이
+없었으므로 소유자를 「모른다」로 읽는다(값을 추측해 채우지 않는다, D-13).
+`CheckResolved`에는 `person_id`·`character_id`가 늘었고, 판 5 이상 기록에서만
+**필수**다(D-12) — 판 5 미만 기록은 이 두 칸이 없어도 그대로 읽힌다. 이
+구분이 `.gptrpg/events.db`에 실제로 살아 있는 판 2 기록 895건을 판 5 코드가
+예외 없이 읽는 유일한 길이다."""
 
 Visibility = Literal["public"]
 
@@ -85,6 +95,11 @@ class ActionDeclared(EventEnvelope):
     event_type: Literal["action_declared"]
     player_id: str
     raw_text: str
+    character_id: str | None = None
+    """이 선언을 낸 캐릭터(판 5+, D-03/TRUST-03). 판 5 미만 기록은 이 칸이
+    없었으므로 `None`으로 읽힌다 — 「그 시절에는 안 적었다」이지 「빈 문자열」이
+    아니다. `SessionActor`가 서버 재시작 뒤에도 확인 요청의 소유권을 판정할
+    근거가 이 칸에 남는다."""
 
 
 class ActionConfirmed(EventEnvelope):
@@ -101,6 +116,9 @@ class ActionConfirmed(EventEnvelope):
     stat: str
     system_suggestion: dict[str, str]
     player_confirmed: bool
+    character_id: str | None = None
+    """확인하는 캐릭터(판 5+, D-03). `ActionDeclared.character_id`와 같은
+    이유·같은 선택 칸 형식이다."""
 
 
 class CheckResolved(EventEnvelope):
@@ -113,6 +131,18 @@ class CheckResolved(EventEnvelope):
     target: int
     grade: Grade
     counts_as_failure: bool
+    person_id: str | None = None
+    character_id: str | None = None
+    """「어느 브라우저가 · 어느 캐릭터로」(TRUST-04, D-12). 판 5 이상
+    기록에서는 아래 검증기가 두 칸을 필수로 강제한다 — 판정 기록에 누구의
+    판정인지가 반드시 남는다. 판 5 미만 기록은 이 칸이 없어도 그대로 읽힌다
+    (`.gptrpg/events.db`의 판 2 판정 기록 38건, D-13)."""
+
+    @model_validator(mode="after")
+    def _require_identity_from_schema_5(self) -> "CheckResolved":
+        if self.schema_version >= 5 and (self.person_id is None or self.character_id is None):
+            raise ValueError("판 5부터 person_id·character_id는 필수 칸이다")
+        return self
 
 
 class NarrationAppended(EventEnvelope):
@@ -190,6 +220,19 @@ class SceneIllustrated(EventEnvelope):
     latency_ms: int
 
 
+class CharacterOccupied(EventEnvelope):
+    """캐릭터를 처음 점유했다 — 먼저 잡은 사람이 임자다(D-05/D-06).
+
+    놓기 사건은 없다(D-07) — 한 번 잡으면 놓을 수 없다는 결정이 사건 종류
+    목록에도 그대로 반영된다. 서버를 껐다 켜도 이 사건을 다시 읽으면 점유가
+    복원된다.
+    """
+
+    event_type: Literal["character_occupied"]
+    character_id: str
+    browser_id: str
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -199,6 +242,7 @@ GameEvent = Annotated[
         ClockAdvanced,
         AiInvoked,
         SceneIllustrated,
+        CharacterOccupied,
     ],
     Field(discriminator="event_type"),
 ]

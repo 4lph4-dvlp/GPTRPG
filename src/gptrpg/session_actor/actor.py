@@ -19,6 +19,7 @@ from gptrpg.event_log.schema import (
     ActionConfirmed,
     ActionDeclared,
     AiInvoked,
+    CharacterOccupied,
     CheckResolved,
     ClockAdvanced,
     ModifierRecord,
@@ -67,6 +68,10 @@ class DeclareAction:
 
     player_id: str
     raw_text: str
+    character_id: str | None = None
+    """이 선언을 낸 캐릭터(D-03/TRUST-03). `None`이면 사건에도 `None`으로
+    남는다(판 5 미만 호출부와의 하위 호환 — CLI처럼 캐릭터 개념이 없는
+    호출부도 여전히 선언을 낼 수 있어야 한다)."""
 
 
 @dataclass(frozen=True)
@@ -79,6 +84,9 @@ class ConfirmAction:
     system_suggestion: dict[str, str]
     player_confirmed: bool
     caused_by_seq: int | None = None
+    character_id: str | None = None
+    """확인하는 캐릭터(D-03). `ActionDeclared.character_id`와 같은 이유·같은
+    선택 칸 형식이다."""
 
 
 @dataclass(frozen=True)
@@ -95,6 +103,13 @@ class ResolveCheck:
     target: int = DEFAULT_TARGET
     rulebook_id: str = DUNGEONWORLD_LIKE_ID
     caused_by_seq: int | None = None
+    person_id: str = ""
+    character_id: str = ""
+    """「어느 브라우저가 · 어느 캐릭터로」(TRUST-04, D-12). dataclass의
+    기본값 순서 제약 때문에 빈 문자열을 기본값으로 두고, 빈 값 거부는
+    `_prepare_resolve_check`가 한다(`_prepare_declare`의
+    `if not command.player_id.strip():` 관례와 같은 형식) — 이 두 칸은
+    `CheckResolved`에서 필수이므로(판 5+, D-12) 빈 채로 통과시키지 않는다."""
 
 
 @dataclass(frozen=True)
@@ -175,6 +190,9 @@ _EVENT_CLASSES: dict[str, type] = {
     "clock_advanced": ClockAdvanced,
     "ai_invoked": AiInvoked,
     "scene_illustrated": SceneIllustrated,
+    # 점유 명령 자체(및 이 종류를 만드는 `_prepare_occupy`)는 08-02가 만든다 —
+    # 여기서는 표만 채워 사건 종류가 쓰일 수 있게 한다.
+    "character_occupied": CharacterOccupied,
 }
 
 
@@ -383,7 +401,11 @@ class SessionActor:
         return (
             "action_declared",
             None,
-            {"player_id": command.player_id, "raw_text": command.raw_text},
+            {
+                "player_id": command.player_id,
+                "raw_text": command.raw_text,
+                "character_id": command.character_id,
+            },
         )
 
     def _prepare_confirm(self, command: ConfirmAction) -> tuple[str, int | None, dict]:
@@ -394,6 +416,18 @@ class SessionActor:
         if not command.stat.strip():
             raise CommandRejected("stat는 비어 있을 수 없다")
         self._validate_caused_by(command.caused_by_seq)
+
+        # TRUST-03 — 최종 방어선: 확인하는 쪽이 그 선언을 낸 쪽과 같은
+        # 캐릭터인가. 라우트 계층 검사만으로는 우회 경로(CLI·시험·다음
+        # 단계의 새 호출부)가 남는다(D-11) — 이 검사는 사건에서 다시 접은
+        # `declare_owners`를 보므로 서버 재시작 뒤에도 그대로 성립한다.
+        # 소유자가 `None`이면(판 5 미만 기록) 통과시킨다 — 옛 세션의 처리는
+        # D-14가 08-02에서 따로 정한다. 문구는 어느 캐릭터인지 말하지 않는다
+        # (QUAL-05).
+        declared_owner = self.state.declare_owners.get(command.caused_by_seq)
+        if declared_owner is not None and declared_owner != command.character_id:
+            raise CommandRejected("이 선언은 다른 캐릭터가 낸 것이다")
+
         return (
             "action_confirmed",
             command.caused_by_seq,
@@ -403,11 +437,16 @@ class SessionActor:
                 "stat": command.stat,
                 "system_suggestion": command.system_suggestion,
                 "player_confirmed": command.player_confirmed,
+                "character_id": command.character_id,
             },
         )
 
     def _prepare_resolve_check(self, command: ResolveCheck) -> tuple[str, int | None, dict]:
         self._validate_caused_by(command.caused_by_seq)
+        if not command.person_id.strip():
+            raise CommandRejected("person_id는 비어 있을 수 없다")
+        if not command.character_id.strip():
+            raise CommandRejected("character_id는 비어 있을 수 없다")
 
         try:
             rulebook = get_rulebook(command.rulebook_id)
@@ -454,6 +493,8 @@ class SessionActor:
                 "target": outcome.target,
                 "grade": outcome.grade,
                 "counts_as_failure": band.counts_as_failure,
+                "person_id": command.person_id,
+                "character_id": command.character_id,
             },
         )
 

@@ -36,6 +36,7 @@ from gptrpg.imagery import (
     imagery_config_from_env,
 )
 from gptrpg.session_actor.actor import SessionRegistry
+from gptrpg.web.cookie_auth import COOKIE_SECRET_FILENAME, load_or_create_secret
 from gptrpg.web.media import MEDIA_URL_PREFIX
 from gptrpg.web.routes_actions import router as actions_router
 from gptrpg.web.routes_characters import router as characters_router
@@ -94,6 +95,14 @@ def create_app(
         store.initialize()
         app.state.store = store
         app.state.registry = SessionRegistry(store)
+        # 비밀 열쇠도 store/registry와 같은 이유로 lifespan 안에서 만든다 —
+        # import 시점에 만들면 「이 모듈을 import하면 저장소에 흔적이
+        # 남는다」는, 아래 그림 마운트가 `check_dir=False`로 피한 것과 같은
+        # 문제가 재발한다(D-02). `.gptrpg/` 디렉터리는 `.gitignore:7`이 이미
+        # 통째로 덮으므로 새 gitignore 항목이 필요 없다.
+        app.state.cookie_secret = load_or_create_secret(
+            Path(db_path).parent / COOKIE_SECRET_FILENAME
+        )
         warm_up_task = _start_renderer_warm_up(config, renderer)
         try:
             yield

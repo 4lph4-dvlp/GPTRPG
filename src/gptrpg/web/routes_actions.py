@@ -64,6 +64,7 @@ from gptrpg.session_actor.actor import (
 from gptrpg.session_actor.actor import SessionActor
 from gptrpg.turn.context import build_turn_context
 from gptrpg.web.characters_data import get_character, list_characters
+from gptrpg.web.cookie_auth import read_identity
 from gptrpg.web.media import media_file_path, media_url, scene_relative_path
 
 _CHARACTER_NAMES: dict[str, str] = {c.character_id: c.display_name for c in list_characters()}
@@ -156,14 +157,28 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
     **선언이 분류보다 먼저 기록된다** — 플레이어가 실제로 친 문장이
     다듬어지지 않고 그대로 기록되는 것이 정답 데이터(MEAS-04)이므로, 분류가
     실패하든 말든 `action_declared` 사건은 이미 남아 있다.
+
+    **신원 대조가 맨 앞이다(TRUST-02, D-04).** 쿠키가 없거나 쿠키의
+    캐릭터가 요청 본문의 캐릭터와 다르면 `actor.submit`을 부르기 전에 403을
+    던진다 — 이 검증은 게임 상태가 아니라 요청 형식에 대한 판단이므로
+    사건을 하나도 남기지 않는다(281~285줄이 적어 둔 관례).
     """
+    identity = read_identity(request, session_id)
+    if identity is None or identity.character_id != body.character_id:
+        print("경고: 신원 검증 실패 — declare 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+
     store = request.app.state.store
     registry = request.app.state.registry
     actor = registry.get_or_create(session_id)
 
     try:
         declare_seq = await actor.submit(
-            DeclareAction(player_id=body.player_id, raw_text=body.raw_text)
+            DeclareAction(
+                player_id=body.player_id,
+                raw_text=body.raw_text,
+                character_id=identity.character_id,
+            )
         )
 
         character = get_character(body.character_id)
@@ -273,7 +288,15 @@ async def confirm(
     **판정을 서사보다 먼저 제출하는 것이 흐름 구조로 보장된다** — 조건
     분기가 아니라 코드 순서다. 지연이 1초든 15초를 넘기든 판정 사건이
     기록에서 서사 사건보다 앞선 순번을 갖는 것이 뒤집힐 수 없다.
+
+    **신원 대조가 맨 앞이다(TRUST-02, D-04).** declare()와 같은 이유·같은
+    형식이다.
     """
+    identity = read_identity(request, session_id)
+    if identity is None or identity.character_id != body.character_id:
+        print("경고: 신원 검증 실패 — confirm 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+
     store = request.app.state.store
     registry = request.app.state.registry
     actor = registry.get_or_create(session_id)
@@ -313,6 +336,7 @@ async def confirm(
                 },
                 player_confirmed=body.confirmed,
                 caused_by_seq=body.declare_seq,
+                character_id=identity.character_id,
             )
         )
     except CommandRejected as exc:
@@ -336,6 +360,8 @@ async def confirm(
                 target=body.target,
                 rulebook_id=body.rulebook_id,
                 caused_by_seq=confirm_seq,
+                person_id=identity.browser_id,
+                character_id=identity.character_id,
             )
         )
     except CommandRejected as exc:

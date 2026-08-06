@@ -266,6 +266,11 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         return 0
 
     # ④ 판정 — 결과 줄을 화면에 찍는다. 서사 호출은 아직 시작하지 않았다.
+    #
+    # person_id/character_id(판 5+, TRUST-04)는 CLI에 브라우저 쿠키 신원
+    # 개념이 없으므로 args.player를 그대로 두 칸에 쓴다 — D-42가 이 CLI
+    # 경로에서는 여전히 유효한 전제다(신원 분리는 웹 계층의 서명 쿠키에서만
+    # 의미가 있다, D-03).
     modifiers = tuple(_parse_modifier(raw) for raw in args.modifier)
     resolve_seq = await actor.submit(
         ResolveCheck(
@@ -274,6 +279,8 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             target=args.target,
             rulebook_id=args.rulebook,
             caused_by_seq=confirm_seq,
+            person_id=args.player,
+            character_id=args.player,
         )
     )
     check_event = store.read_events(args.session, from_seq=resolve_seq)[0]
