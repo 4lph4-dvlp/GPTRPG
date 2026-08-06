@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 08
 current_phase_name: identity-and-idempotency
 status: executing
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-08-06T00:54:19.061Z"
+stopped_at: Completed 08-03-PLAN.md
+last_updated: "2026-08-06T01:23:00.194Z"
 last_activity: 2026-08-06
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -31,11 +31,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 08 (identity-and-idempotency) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-08-06 — Phase 08 execution started
 
-Progress: [█████░░░░░] 50%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -82,6 +82,7 @@ Progress: [█████░░░░░] 50%
 | Phase 03 P06 | 45min | 3 tasks | 13 files |
 | Phase 08 P01 | unspecified | 4 tasks | 20 files |
 | Phase 08 P02 | unspecified | 3 tasks | 5 files |
+| Phase 08 P03 | 20min | 4 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -145,6 +146,9 @@ Progress: [█████░░░░░] 50%
 - [Phase ?]: 08-02: OccupyCharacter/_prepare_occupy — D-14 old/new session split lives in exactly one place (last_seq>=0 AND empty occupied_by => reject); AlreadyOccupied(CommandRejected) makes self-reselect a success path with no duplicate event
 - [Phase ?]: 08-02: select_character submits OccupyCharacter before signing the cookie (mirrors declare()'s submit-before-proceed order); declare/confirm's own D-14 exposure left untouched since 08-01 already closed it via cookie-required checks
 - [Phase ?]: 08-02: two-browser HTTP tests against routes that call actor.submit(...) must open each TestClient in its own sequential (non-nested) with-block — nesting reuses a live portal's event loop for the SessionActor's asyncio.Queue from a second, different-loop portal and deadlocks (same class of bug 08-01 already documented)
+- [Phase ?]: 08-03: GameState.confirmed_declares/confirm_to_declare fold from action_confirmed/check_resolved events; SessionActor.AlreadyConfirmed short-circuits same-move re-confirm (no new event), different move/stat gets CommandRejected (D-10)
+- [Phase ?]: 08-03: confirm route catches AlreadyConfirmed before CommandRejected and reuses prior.resolve_seq when present; narration-only failure is now 200 + narration_failed=true with rolls/grade/target intact instead of discarding the roll via 502 (TRUST-06, D-08)
+- [Phase ?]: 08-03 [deviation, Rule 1 bug found in Task 4]: route-level resolve-reuse decision left a TOCTOU window under concurrent confirms (reproduced: two distinct resolve_seq from one confirm). Fixed with actor-level AlreadyResolved(CommandRejected) in _prepare_resolve_check, mirroring the AlreadyConfirmed two-tier defense pattern one step further (D-11)
 
 ### Pending Todos
 
@@ -194,8 +198,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-06T00:54:19.034Z
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-08-06T01:23:00.167Z
+Stopped at: Completed 08-03-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
