@@ -180,7 +180,7 @@ QUAL-05, TEST-01, TEST-02
 
   5. API 요청의 입력 길이 상한이 빠짐없이 걸리고, 예외 메시지가 자격 증명을 실어 나르지 않는다
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 Plans:
 **Wave 1**
@@ -189,7 +189,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 08-02-PLAN.md — 캐릭터 점유: 먼저 잡은 사람이 임자다, 겹치는 점유 요청 재현 (wave 2)
+- [x] 08-02-PLAN.md — 캐릭터 점유: 먼저 잡은 사람이 임자다, 겹치는 점유 요청 재현 (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -650,7 +650,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 5. 실험 실행 — 두 번, 1주 간격 | M0 | 4/6 | Deferred (D-62) | - |
 | 6. 가설 판정 게이트 | M0 | 0/TBD | Deferred (D-62) | - |
 | 7. 거버넌스 재논의 — D17 · D-20 · D31 | v1.1 | — (논의) | **Complete** | 2026-08-05 |
-| 8. 신원 검증과 멱등성 | v1.1 | 1/4 | In Progress|  |
+| 8. 신원 검증과 멱등성 | v1.1 | 2/4 | In Progress|  |
 | 9. 에이전트 구조 재편 | v1.1 | 0/TBD | Not started | - |
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 0/TBD | Not started | - |
 | 11. 룰북 표현 어휘 확장 | v1.1 | 0/TBD | Not started | - |

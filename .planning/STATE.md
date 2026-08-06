@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 08
 current_phase_name: identity-and-idempotency
 status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-08-06T00:32:35.434Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-08-06T00:54:19.061Z"
 last_activity: 2026-08-06
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -31,11 +31,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 08 (identity-and-idempotency) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-08-06 — Phase 08 execution started
 
-Progress: [███░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -81,6 +81,7 @@ Progress: [███░░░░░░░] 25%
 | Phase 03 P05 | 15min | 2 tasks | 3 files |
 | Phase 03 P06 | 45min | 3 tasks | 13 files |
 | Phase 08 P01 | unspecified | 4 tasks | 20 files |
+| Phase 08 P02 | unspecified | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -141,6 +142,9 @@ Progress: [███░░░░░░░] 25%
 - [Phase ?]: 08-01 Task 1 checkpoint(approved-scope) 기록: 판 5는 ActionDeclared/ActionConfirmed.character_id(선택)·CheckResolved.person_id/character_id(schema_version>=5 필수)·CharacterOccupied 신설 넷을 한 커밋에 묶는다 — TRUST-03이 서버 재시작을 넘어 성립하는 유일한 범위
 - [Phase ?]: 08-01: CookieIdentity/read_identity를 routes_characters.py가 아니라 cookie_auth.py에 둠 — 계획 원문대로 하면 routes_characters<->routes_actions 순환 import가 생겨서 자리를 옮겨 해소함
 - [Phase ?]: 08-01: ResolveCheck.person_id/character_id를 액터에서 무조건 필수로 만들면서, 브라우저 쿠키 개념이 없는 CLI(cli/main.py submit roll, cli/turn_flow.py turn)에는 고정 자리표시자('cli' 또는 args.player 재사용)를 채워 기존 CLI 동작을 그대로 보존함
+- [Phase ?]: 08-02: OccupyCharacter/_prepare_occupy — D-14 old/new session split lives in exactly one place (last_seq>=0 AND empty occupied_by => reject); AlreadyOccupied(CommandRejected) makes self-reselect a success path with no duplicate event
+- [Phase ?]: 08-02: select_character submits OccupyCharacter before signing the cookie (mirrors declare()'s submit-before-proceed order); declare/confirm's own D-14 exposure left untouched since 08-01 already closed it via cookie-required checks
+- [Phase ?]: 08-02: two-browser HTTP tests against routes that call actor.submit(...) must open each TestClient in its own sequential (non-nested) with-block — nesting reuses a live portal's event loop for the SessionActor's asyncio.Queue from a second, different-loop portal and deadlocks (same class of bug 08-01 already documented)
 
 ### Pending Todos
 
@@ -190,8 +194,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-06T00:32:35.409Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-08-06T00:54:19.034Z
+Stopped at: Completed 08-02-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
