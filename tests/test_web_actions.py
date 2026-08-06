@@ -17,6 +17,8 @@ from conftest import select_character as _select_character_at
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.imagery import imagery_config_from_env
 from gptrpg.web.app import create_app
+from gptrpg.web.cookie_auth import verify_cookie
+from gptrpg.web.routes_characters import COOKIE_NAME
 
 SESSION_ID = "s1"
 
@@ -144,6 +146,19 @@ def test_raw_text_over_max_length_returns_422(web_client_with_fake_provider) -> 
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/declare",
             json=_declare_body(raw_text="가" * 2001),
+        )
+    assert response.status_code == 422
+
+
+def test_declare_rulebook_id_over_max_length_returns_422(web_client_with_fake_provider) -> None:
+    """QUAL-04 — 상한 전수 훑기가 찾은 빈자리 중 하나:
+    `DeclareRequest.rulebook_id`는 예전에 길이 상한이 없었다. `MAX_ID_LEN`을
+    재사용한다(다른 식별자 칸과 같은 상수, 새 숫자를 만들지 않는다)."""
+    fake = FakeProvider()
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/declare",
+            json=_declare_body(rulebook_id="a" * 65),
         )
     assert response.status_code == 422
 
@@ -621,6 +636,87 @@ def test_check_submission_failure_returns_error_status_with_no_rolls(
     assert response.json().get("rolls") in (None, [])
 
 
+# ---------------------------------------------------------------------------
+# 08-04 Task 3 (QUAL-04) — API 경계 입력 상한 전수 훑기가 찾은 나머지 빈자리.
+#
+# pydantic 요청 본문 검증은 라우트 처리기 안의 어떤 비즈니스 로직(선언·확인
+# 존재 여부 등)보다도 먼저 일어난다 — 그래서 아래 시험들은 사전에 실제
+# `declare_seq`를 만들지 않고도(존재하지 않는 값이라도) 422를 확인할 수
+# 있다. 본문 자체가 형식 위반이면 라우트 함수 코드가 실행되기도 전에
+# FastAPI/pydantic이 거절한다.
+# ---------------------------------------------------------------------------
+
+
+def test_confirm_target_below_min_returns_422(web_client_with_fake_provider) -> None:
+    """QUAL-04 — `ConfirmRequest.target`이 음수로 터무니없이 작으면 422."""
+    fake = FakeProvider()
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(0, target=-201),
+        )
+    assert response.status_code == 422
+
+
+def test_confirm_target_above_max_returns_422(web_client_with_fake_provider) -> None:
+    """QUAL-04 — `ConfirmRequest.target`이 터무니없이 크면 422."""
+    fake = FakeProvider()
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(0, target=201),
+        )
+    assert response.status_code == 422
+
+
+def test_confirm_rulebook_id_over_max_length_returns_422(web_client_with_fake_provider) -> None:
+    """QUAL-04 — `ConfirmRequest.rulebook_id`도 예전에 길이 상한이 없었다."""
+    fake = FakeProvider()
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(0, rulebook_id="a" * 65),
+        )
+    assert response.status_code == 422
+
+
+def test_confirm_modifiers_list_over_max_count_returns_422(web_client_with_fake_provider) -> None:
+    """QUAL-04 — `modifiers` 목록의 항목 **수**가 상한을 넘으면 422."""
+    fake = FakeProvider()
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(0, modifiers=["flat:1:버프"] * 21),
+        )
+    assert response.status_code == 422
+
+
+def test_confirm_modifiers_item_over_max_length_returns_422(web_client_with_fake_provider) -> None:
+    """QUAL-04 — `modifiers`의 **한 항목 문자열**이 상한을 넘으면 422."""
+    fake = FakeProvider()
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(0, modifiers=["flat:1:" + "가" * 128]),
+        )
+    assert response.status_code == 422
+
+
+def test_confirm_previously_capped_fields_still_behave_the_same(
+    web_client_with_fake_provider,
+) -> None:
+    """이미 상한이 걸려 있던 칸(`player_id`·`character_id`·`move`·`stat`)의
+    동작이 이번 과제로 하나도 안 바뀌었다 — 유효한 값은 여전히 통과한다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+    assert response.status_code == 200
+
+
 def test_confirm_event_keeps_system_suggestion_separate_from_picked_move(
     web_client_with_fake_provider,
 ) -> None:
@@ -644,6 +740,83 @@ def test_confirm_event_keeps_system_suggestion_separate_from_picked_move(
     assert confirmed_events[0]["system_suggestion"] == {"move": "parley", "stat": "CHA"}
     assert confirmed_events[0]["move"] == "defy_danger"
     assert confirmed_events[0]["stat"] == "DEX"
+
+
+# ---------------------------------------------------------------------------
+# 08-04 Task 3 (QUAL-05) — 문구 위생 관문, 행동 경로(declare/confirm/
+# select-character) 쪽. `test_web_characters.py`의 `no_secret_leak` 시험과
+# 짝이 되는 자리다 — 그 시험을 옮기거나 지우지 않는다.
+# ---------------------------------------------------------------------------
+
+
+def test_action_routes_no_secret_leak_across_403_409_400(
+    web_client_with_fake_provider, capsys
+) -> None:
+    """QUAL-05 — 신원 불일치(403)·점유 충돌(409)·멱등 거부(400) 세 응답의
+    본문 전체와 서버 로그(`capsys`) 어디에도 ① 발급된 쿠키 값 ② 비밀
+    열쇠의 16진 표현 ③ 서명 조각 ④ `browser_id` 값이 부분 문자열로
+    실려 나가지 않는다.
+    """
+    fake = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+
+    with web_client_with_fake_provider(action_classifier=fake, master_gm=gm) as client_a:
+        select_response = client_a.post(
+            f"/api/sessions/{SESSION_ID}/select-character", json={"character_id": "bram"}
+        )
+        assert select_response.status_code == 200
+        cookie_value = client_a.cookies.get(COOKIE_NAME)
+        assert cookie_value is not None
+        secret = client_a.app.state.cookie_secret
+        payload = verify_cookie(cookie_value, secret=secret)
+        assert payload is not None
+        browser_id = payload["browser_id"]
+        signature_fragment = cookie_value.rsplit(".", 1)[-1]
+        secret_hex = secret.hex()
+
+        capsys.readouterr()  # 지금까지 쌓인 출력을 비운다 — 아래 세 응답만 검사한다.
+
+        # ① 신원 불일치 — declare()의 403(TRUST-02).
+        mismatch_response = client_a.post(
+            f"/api/sessions/{SESSION_ID}/actions/declare",
+            json=_declare_body(character_id="no_such_character"),
+        )
+        assert mismatch_response.status_code == 403
+
+        # ③ 멱등 거부 — 같은 선언에 다른 move로 재확인하면 400(D-10).
+        declare_seq = _declare_first(client_a)
+        first_confirm = client_a.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert first_confirm.status_code == 200
+        rejected_response = client_a.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(
+                declare_seq,
+                move="defy_danger",
+                stat="DEX",
+                suggestion_move="defy_danger",
+                suggestion_stat="DEX",
+            ),
+        )
+        assert rejected_response.status_code == 400
+
+    # ② 점유 충돌 — 다른 브라우저(새 앱 인스턴스, 같은 저장소 파일 =
+    # 서버 재시작과 같은 모양)가 이미 잡힌 캐릭터를 고르면 409(D-05).
+    with web_client_with_fake_provider(action_classifier=fake) as client_b:
+        conflict_response = client_b.post(
+            f"/api/sessions/{SESSION_ID}/select-character", json={"character_id": "bram"}
+        )
+    assert conflict_response.status_code == 409
+
+    captured = capsys.readouterr()
+    secrets_to_check = (cookie_value, secret_hex, signature_fragment, browser_id)
+    for response in (mismatch_response, rejected_response, conflict_response):
+        for secret_value in secrets_to_check:
+            assert secret_value not in response.text
+    for stream_text in (captured.out, captured.err):
+        for secret_value in secrets_to_check:
+            assert secret_value not in stream_text
 
 
 # ---------------------------------------------------------------------------

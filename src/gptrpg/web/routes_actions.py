@@ -27,6 +27,7 @@ import asyncio
 import os
 import sys
 import time
+from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -82,7 +83,29 @@ MAX_RAW_TEXT_LEN = 2000
 AI 프롬프트에 흘러 들어간다(T-04-07)."""
 
 MAX_ID_LEN = 64
-"""`player_id`/`character_id`/`move`/`stat` 같은 식별자 문자열의 상한."""
+"""`player_id`/`character_id`/`move`/`stat`/`rulebook_id` 같은 식별자 문자열의
+상한 — `DeclareRequest.rulebook_id`·`ConfirmRequest.rulebook_id`도 이 상수를
+재사용한다(08-04, QUAL-04). 새 상수를 만들지 않는다 — 이미 같은 성격(식별자
+문자열)의 값이 같은 상한을 쓰는 것이 자연스럽다."""
+
+MIN_TARGET = -200
+MAX_TARGET = 200
+"""`ConfirmRequest.target`의 범위(08-04, QUAL-04). d100 롤언더 룰북(OpenQuest)의
+기술값은 0~100이고 난이도 수정치(`OPENQUEST_DIFFICULTY`)가 겹으로 붙어도
+±50 단위라 이 범위를 넉넉히 덮는다. 2d6 등급식(dungeonworld_like)의 목표값은
+`DEFAULT_TARGET=10` 근방의 한 자리~두 자리 수다. 상한을 「일단 크게」 잡아
+사실상 없는 것으로 만들지 않는다 — 신뢰할 수 없는 본문이 판정 결과 사건
+(`CheckResolved.target`)의 크기를 정하지 못하게 막는 것이 이 범위의 목적이다."""
+
+MAX_MODIFIERS_COUNT = 20
+"""`ConfirmRequest.modifiers` 목록의 항목 수 상한(08-04, QUAL-04, T-08-19).
+룰북 수정치가 판정 하나에 이보다 많이 붙을 자연스러운 이유가 없다 — 상한이
+없으면 그대로 `CheckResolved.modifiers`의 크기를 요청자가 정하게 된다."""
+
+MAX_MODIFIER_LEN = 128
+"""`ConfirmRequest.modifiers`의 항목 문자열 하나(`"유형:값:출처"` 형식)의
+길이 상한(08-04, QUAL-04). `_parse_modifier`가 쪼개는 세 조각(유형·값·출처
+설명)을 넉넉히 담으면서도 `MAX_RAW_TEXT_LEN`처럼 크게 잡지 않는다."""
 
 _NO_SENTENCE = object()
 """narrate()의 첫 조각을 기다릴 때 쓰는 보초값 — `cli/turn_flow.py`의 같은
@@ -143,7 +166,7 @@ class DeclareRequest(BaseModel):
     player_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
     character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
     raw_text: str = Field(min_length=1, max_length=MAX_RAW_TEXT_LEN)
-    rulebook_id: str = DUNGEONWORLD_LIKE_ID
+    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
 
 
 class DeclareResponse(BaseModel):
@@ -261,10 +284,12 @@ class ConfirmRequest(BaseModel):
     suggestion_stat: str = Field(min_length=1, max_length=MAX_ID_LEN)
     confirmed: bool
     declare_seq: int = Field(ge=0)
-    target: int = DEFAULT_TARGET
-    rulebook_id: str = DUNGEONWORLD_LIKE_ID
+    target: int = Field(default=DEFAULT_TARGET, ge=MIN_TARGET, le=MAX_TARGET)
+    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
     character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
-    modifiers: list[str] = Field(default_factory=list)
+    modifiers: list[Annotated[str, Field(max_length=MAX_MODIFIER_LEN)]] = Field(
+        default_factory=list, max_length=MAX_MODIFIERS_COUNT
+    )
 
 
 class ConfirmResponse(BaseModel):
