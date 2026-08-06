@@ -244,6 +244,34 @@ class _NarrationRaisingProvider:
         self._last_result = result
 
 
+class _SwitchableProvider:
+    """`Provider` 프로토콜을 만족하면서 매 호출마다 `self.current`가 가리키는
+    실제 대역으로 위임한다 — 재시도 시험에서 첫 요청은 실패하는 대역, 두 번째
+    요청은 성공하는 대역을 같은 `master_gm` 자리에 순서대로 물릴 때 쓴다
+    (08-03 Task 2). 픽스처 공장(`web_client_with_fake_provider`) 자체는
+    고치지 않는다 — 이 대역은 시험 파일 안에서만 산다."""
+
+    name = "fake-switchable"
+
+    def __init__(self, current) -> None:
+        self.current = current
+
+    def list_models(self) -> list[str]:
+        return self.current.list_models()
+
+    def complete(self, **kwargs):
+        return self.current.complete(**kwargs)
+
+    def stream(self, **kwargs):
+        return self.current.stream(**kwargs)
+
+    def last_result(self):
+        return self.current.last_result()
+
+    def note_result(self, result) -> None:
+        self.current.note_result(result)
+
+
 def _declare_first(client: TestClient, **overrides) -> int:
     response = _declare(client, **overrides)
     assert response.status_code == 200
@@ -369,9 +397,12 @@ def test_two_sentence_narration_produces_two_chunked_events(web_client_with_fake
     assert [narration["chunk_index"] for narration in narrations] == [0, 1]
 
 
-def test_narration_failure_returns_502_but_records_master_gm_ai_call(
+def test_narration_failure_returns_roll_result_and_records_master_gm_ai_call(
     web_client_with_fake_provider,
 ) -> None:
+    """뜻이 바뀐 시험(08-03 Task 2) — 서사만 실패하면 502가 아니라 200이고,
+    이미 굴린 판정 결과(rolls)가 그대로 담겨 돌아온다(D-08, TRUST-06).
+    `ai_invoked` 하나 단언은 그대로 남는다(그 성질은 안 바뀐다)."""
     classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     gm = _NarrationRaisingProvider()
     with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
@@ -379,15 +410,118 @@ def test_narration_failure_returns_502_but_records_master_gm_ai_call(
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
         )
-        assert response.status_code == 502
+        assert response.status_code == 200
+        body = response.json()
 
         ai_calls = [
             event
             for event in _events_of_type(client, "ai_invoked")
             if event["agent_role"] == "master_gm"
         ]
+        resolved = _events_of_type(client, "check_resolved")
+        illustrated = _events_of_type(client, "scene_illustrated")
 
+    assert body["narration_failed"] is True
+    assert body["rolls"] is not None
+    assert body["grade"] is not None
+    assert body["target"] is not None
     assert len(ai_calls) == 1
+    # 판정 값이 되읽은 사건과 글자 그대로 같다.
+    assert body["rolls"] == list(resolved[0]["rolls"])
+    # 서사가 실패한 턴에는 삽화가 만들어지지 않는다(기존 성질 유지).
+    assert illustrated == []
+
+
+def test_narration_retry_reuses_roll_and_only_narration_appended_grows(
+    web_client_with_fake_provider,
+) -> None:
+    """다시 시도를 누르면 이야기만 다시 쓴다(D-09) — 같은 declare_seq로 다시
+    확인을 보내면(이번엔 서사가 성공하는 대역) check_resolved 사건은 여전히
+    하나이고 rolls가 첫 응답과 글자 그대로 같다. narration_appended 사건만
+    새로 늘어나고, action_confirmed 사건은 늘지 않는다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    failing_gm = _NarrationRaisingProvider()
+    switchable = _SwitchableProvider(failing_gm)
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=switchable
+    ) as client:
+        declare_seq = _declare_first(client)
+        first_response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert first_response.status_code == 200
+        first_body = first_response.json()
+        assert first_body["narration_failed"] is True
+
+        confirmed_before = _events_of_type(client, "action_confirmed")
+        resolved_before = _events_of_type(client, "check_resolved")
+        narrations_before = _events_of_type(client, "narration_appended")
+
+        switchable.current = FakeProvider(stream_text=_NARRATION_TEXT)
+        second_response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert second_response.status_code == 200
+        second_body = second_response.json()
+
+        confirmed_after = _events_of_type(client, "action_confirmed")
+        resolved_after = _events_of_type(client, "check_resolved")
+        narrations_after = _events_of_type(client, "narration_appended")
+
+    assert second_body["narration_failed"] is False
+    # TRUST-05 + D-09 — check_resolved 사건 수 1과 rolls 동일을 함께 단언한다.
+    assert len(resolved_after) == len(resolved_before) == 1
+    assert second_body["rolls"] == first_body["rolls"]
+    assert len(confirmed_after) == len(confirmed_before) == 1
+    assert len(narrations_after) > len(narrations_before)
+
+
+def test_confirm_different_move_after_confirmed_returns_400_and_appends_nothing(
+    web_client_with_fake_provider,
+) -> None:
+    """이미 확인된 선언에 다른 move로 재확인하면 400이고 사건이 하나도
+    늘지 않는다(D-10)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        first = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert first.status_code == 200
+        events_before = len(_events(client))
+
+        second = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(
+                declare_seq,
+                move="defy_danger",
+                stat="DEX",
+                suggestion_move="defy_danger",
+                suggestion_stat="DEX",
+            ),
+        )
+        events_after = len(_events(client))
+
+    assert second.status_code == 400
+    assert events_after == events_before
+
+
+def test_check_submission_failure_returns_error_status_with_no_rolls(
+    web_client_with_fake_provider,
+) -> None:
+    """굴림 실패(판정 제출 자체가 거부됨)는 오류 상태 코드이고 응답에 rolls가
+    없다 — 서사 실패(200 + rolls 있음)와 구분된다(TRUST-06)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(declare_seq, modifiers=["percentage:10:버프"]),
+        )
+
+    assert response.status_code == 400
+    assert response.json().get("rolls") in (None, [])
 
 
 def test_confirm_event_keeps_system_suggestion_separate_from_picked_move(
