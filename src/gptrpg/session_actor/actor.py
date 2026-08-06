@@ -30,7 +30,7 @@ from gptrpg.event_log.schema import (
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.dice import Roller
 from gptrpg.rules_core.grading import DEFAULT_TARGET
-from gptrpg.rules_core.reducer import GameState, apply_event
+from gptrpg.rules_core.reducer import ConfirmedDeclareRecord, GameState, apply_event
 from gptrpg.rules_core.resolution import Modifier, UnsupportedModifier, resolve_2d6
 from gptrpg.rules_core.resolution_d100 import resolve_d100
 from gptrpg.rules_core.rulebook import (
@@ -228,6 +228,19 @@ class AlreadyOccupied(CommandRejected):
     (본인 재접속은 그대로 통과한다, D-05). `CommandRejected`의 하위 클래스라
     기존 `except CommandRejected` 경로가 그대로 잡는다 — 구분이 필요한 자리에서만
     이 클래스를 먼저 잡는다."""
+
+
+class AlreadyConfirmed(CommandRejected):
+    """이미 확인된 선언에 **같은** move/stat로 다시 확인이 들어왔다 — 라우트는
+    이것을 성공으로 해석하고 캐시된 판정을 재사용한다(D-09/D-10). `.prior`가
+    이미 기록된 확인·판정 순번을 들고 있다. `CommandRejected`의 하위 클래스라
+    기존 `except CommandRejected` 경로가 그대로 잡는다 — 재사용이 필요한
+    자리에서만 이 클래스를 먼저 잡는다. 문구에 순번·캐릭터·무브 값을 넣지
+    않는다(QUAL-05)."""
+
+    def __init__(self, prior: ConfirmedDeclareRecord) -> None:
+        super().__init__("이미 확인된 선언이다")
+        self.prior = prior
 
 
 class SessionActor:
@@ -443,6 +456,17 @@ class SessionActor:
         declared_owner = self.state.declare_owners.get(command.caused_by_seq)
         if declared_owner is not None and declared_owner != command.character_id:
             raise CommandRejected("이 선언은 다른 캐릭터가 낸 것이다")
+
+        # D-10/TRUST-05 — 멱등 단락: 이 선언이 이미 확인된 적 있으면 두 번째
+        # 확인은 여기서 끝난다. **다름 검사가 먼저**다 — 순서가 바뀌면
+        # 「마음이 바뀌었다」(다른 move/stat)가 캐시 재사용으로 새어 나가고,
+        # 사람이 정말로 다시 눌렀을 때만(같은 move/stat) 캐시를 재사용해야
+        # 하는 이 검사의 의도가 깨진다.
+        prior = self.state.confirmed_declares.get(command.caused_by_seq)
+        if prior is not None:
+            if prior.move != command.move or prior.stat != command.stat:
+                raise CommandRejected("이미 다른 무브로 확인된 선언이다")
+            raise AlreadyConfirmed(prior)
 
         return (
             "action_confirmed",

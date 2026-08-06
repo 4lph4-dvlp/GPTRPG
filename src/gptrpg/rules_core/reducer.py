@@ -12,6 +12,22 @@ from gptrpg.rules_core.grading import Grade
 
 
 @dataclass(frozen=True)
+class ConfirmedDeclareRecord:
+    """선언 하나가 확인된 뒤의 상태 — 재확인이 왔을 때 무엇을 대조하고
+    무엇을 재사용해야 하는지가 이 네 칸에 다 있다 (D-10, Phase 8 Plan 3).
+
+    `resolve_seq`가 `None`이면 확인은 됐는데 판정이 아직 없다는 뜻이다 —
+    확인 사건과 판정 사건 사이에 서버가 죽으면 이 상태로 남는다. 이때는
+    재확인이 와도 캐시된 판정이 없으므로 `ResolveCheck`를 평소대로 다시
+    제출한다."""
+
+    confirm_seq: int
+    resolve_seq: int | None
+    move: str
+    stat: str
+
+
+@dataclass(frozen=True)
 class GameState:
     """사건 기록을 처음부터 훑어 만드는 현재 상태.
 
@@ -64,6 +80,16 @@ class GameState:
     """character_id -> browser_id (판 5+, D-05/D-06). `character_occupied`
     사건에서만 채워진다 — 점유를 요청하는 명령 자체는 08-02가 만든다. 이
     단계는 사건 종류와 이 파생 칸만 열어 둔다."""
+    confirmed_declares: dict[int, ConfirmedDeclareRecord] = field(default_factory=dict)
+    """선언 순번(declare_seq) -> 그 선언이 확인된 뒤의 기록 (D-10, TRUST-05).
+    `player_confirmed=True`인 `action_confirmed`만 채운다 — 거부는 주사위를
+    하나도 굴리지 않았으므로 그 선언을 잠글 이유가 없다. `SessionActor.
+    _prepare_confirm`이 서버 재시작 뒤에도 이 표에서 멱등 단락을 판정한다."""
+    confirm_to_declare: dict[int, int] = field(default_factory=dict)
+    """확인 순번(confirm_seq) -> 그 확인이 붙은 선언 순번(declare_seq). `check_resolved`
+    사건은 자기 `caused_by_seq`로 **확인** 사건을 가리키고 선언 사건을 직접
+    가리키지 않는다 — 이 되짚는 표가 없으면 판정을 어느 선언에 붙여야
+    하는지 알 수 없고, 매번 사건 전체를 다시 훑게 된다."""
 
 
 def initial_state(session_id: str) -> GameState:
@@ -118,7 +144,32 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
             declare_owners=declare_owners,
         )
     if event_type == "action_confirmed":
-        return replace(state, last_seq=seq)
+        # D-10/TRUST-05 — 확인(player_confirmed=True)만 접어 만든다. 거부는
+        # 주사위를 하나도 굴리지 않았으므로 그 선언을 잠글 이유가 없다(TRUST-05가
+        # 지키려는 것은 「굴림이 두 번」이지 「확인 사건이 두 개」가 아니다).
+        # `caused_by_seq`가 없으면(=선언 없이 확인만 낸 옛 호출부·CLI) 대조할
+        # 선언이 없으므로 역시 건너뛴다. 판 5 미만 기록에도 `move`·`stat`·
+        # `player_confirmed`는 이미 있었으므로 schema_version 게이팅이
+        # 필요 없다 — 멱등성 판정은 character_id에 의존하지 않는다.
+        confirmed_declares = state.confirmed_declares
+        confirm_to_declare = state.confirm_to_declare
+        if payload.get("player_confirmed") and payload.get("caused_by_seq") is not None:
+            declare_seq = payload["caused_by_seq"]
+            confirmed_declares = dict(confirmed_declares)
+            confirmed_declares[declare_seq] = ConfirmedDeclareRecord(
+                confirm_seq=seq,
+                resolve_seq=None,
+                move=payload["move"],
+                stat=payload["stat"],
+            )
+            confirm_to_declare = dict(confirm_to_declare)
+            confirm_to_declare[seq] = declare_seq
+        return replace(
+            state,
+            last_seq=seq,
+            confirmed_declares=confirmed_declares,
+            confirm_to_declare=confirm_to_declare,
+        )
     if event_type == "check_resolved":
         grade = payload["grade"]
         schema_version = payload.get("schema_version", 1)
@@ -126,6 +177,17 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
             counts_as_failure = payload["counts_as_failure"]
         else:
             counts_as_failure = _legacy_v1_counts_as_failure(grade)
+        # D-10/TRUST-05 — 이 판정이 어느 선언의 확인 기록에 붙는지를
+        # `confirm_to_declare`로 되짚어, 그 기록의 `resolve_seq`를 채운다.
+        # 되짚을 확인이 없으면(=확인 없이 판정만 낸 옛 호출부·CLI) 그대로
+        # 둔다 — 멱등 단락은 이 칸이 채워진 기록에만 적용된다.
+        confirmed_declares = state.confirmed_declares
+        declare_seq = state.confirm_to_declare.get(payload.get("caused_by_seq"))
+        if declare_seq is not None and declare_seq in confirmed_declares:
+            confirmed_declares = dict(confirmed_declares)
+            confirmed_declares[declare_seq] = replace(
+                confirmed_declares[declare_seq], resolve_seq=seq
+            )
         return replace(
             state,
             last_seq=seq,
@@ -133,6 +195,7 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
             failure_count=state.failure_count + (1 if counts_as_failure else 0),
             fails_since_clock=state.fails_since_clock + (1 if counts_as_failure else 0),
             last_grade=grade,
+            confirmed_declares=confirmed_declares,
         )
     if event_type == "narration_appended":
         return replace(state, last_seq=seq, narration_count=state.narration_count + 1)
