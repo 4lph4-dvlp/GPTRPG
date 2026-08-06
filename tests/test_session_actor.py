@@ -24,6 +24,7 @@ from gptrpg.rules_core.resolution import Modifier
 from gptrpg.rules_core.rulebook import D100_ROLL_UNDER, GradeBand, Rulebook
 from gptrpg.session_actor.actor import (
     AdvanceClock,
+    AlreadyConfirmed,
     AlreadyOccupied,
     AppendNarration,
     CommandRejected,
@@ -699,6 +700,248 @@ async def test_concurrent_occupy_different_characters_all_succeed(tmp_db_path):
     events = _read_events(tmp_db_path)
     occupied_events = [event for event in events if event.event_type == "character_occupied"]
     assert len(occupied_events) == 4
+
+
+# ---------------------------------------------------------------------------
+# 08-03 Task 1 (idempotent_confirm) — 「이 선언은 이미 확인됐다」가 사건에서
+# 접혀 만들어지고, 세션당 단일 쓰기 주체가 두 번째 확인을 그 자리에서
+# 단락시킨다 (D-10, TRUST-05). 이 시험들은 라우트를 우회해 `actor.submit(
+# ConfirmAction(...))`를 직접 두 번 불러 최종 방어선(D-11)을 잰다.
+# ---------------------------------------------------------------------------
+
+
+async def _declare_and_confirm(
+    actor: SessionActor, *, move: str = "parley", stat: str = "CHA"
+) -> tuple[int, int]:
+    declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+    confirm_seq = await actor.submit(
+        ConfirmAction(
+            player_id="p1",
+            move=move,
+            stat=stat,
+            system_suggestion={"move": move, "stat": stat},
+            player_confirmed=True,
+            caused_by_seq=declare_seq,
+        )
+    )
+    return declare_seq, confirm_seq
+
+
+async def test_idempotent_confirm_folds_confirm_and_resolve_into_confirmed_declares(
+    tmp_db_path,
+):
+    store, actor = _make_actor(tmp_db_path, values=[3, 4])
+    try:
+        declare_seq, confirm_seq = await _declare_and_confirm(actor)
+        resolve_seq = await actor.submit(
+            ResolveCheck(
+                move="parley",
+                modifiers=(),
+                caused_by_seq=confirm_seq,
+                person_id="p1",
+                character_id="bram",
+            )
+        )
+        record = actor.state.confirmed_declares[declare_seq]
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert record.confirm_seq == confirm_seq
+    assert record.resolve_seq == resolve_seq
+    assert record.move == "parley"
+    assert record.stat == "CHA"
+
+
+async def test_idempotent_confirm_resolve_seq_is_none_before_check_resolved(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq, _confirm_seq = await _declare_and_confirm(actor)
+        record = actor.state.confirmed_declares[declare_seq]
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert record.resolve_seq is None
+
+
+async def test_idempotent_confirm_rejection_does_not_lock_the_declare(tmp_db_path):
+    """거부(player_confirmed=False)는 confirmed_declares에 들어가지 않는다 —
+    주사위를 하나도 굴리지 않았으므로 그 선언은 아직 잠기지 않는다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        await actor.submit(
+            ConfirmAction(
+                player_id="p1",
+                move="parley",
+                stat="CHA",
+                system_suggestion={"move": "parley", "stat": "CHA"},
+                player_confirmed=False,
+                caused_by_seq=declare_seq,
+            )
+        )
+        assert declare_seq not in actor.state.confirmed_declares
+
+        # 거부 뒤에는 같은 선언을 다시 확인할 수 있다.
+        confirm_seq = await actor.submit(
+            ConfirmAction(
+                player_id="p1",
+                move="parley",
+                stat="CHA",
+                system_suggestion={"move": "parley", "stat": "CHA"},
+                player_confirmed=True,
+                caused_by_seq=declare_seq,
+            )
+        )
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert declare_seq in actor.state.confirmed_declares
+    assert actor.state.confirmed_declares[declare_seq].confirm_seq == confirm_seq
+
+
+async def test_idempotent_confirm_same_move_raises_already_confirmed_and_appends_nothing(
+    tmp_db_path,
+):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq, confirm_seq = await _declare_and_confirm(actor)
+        events_before = len(_read_events(tmp_db_path))
+        with pytest.raises(AlreadyConfirmed) as excinfo:
+            await actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="parley",
+                    stat="CHA",
+                    system_suggestion={"move": "parley", "stat": "CHA"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            )
+        events_after = len(_read_events(tmp_db_path))
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert events_after == events_before
+    assert excinfo.value.prior.confirm_seq == confirm_seq
+
+
+async def test_idempotent_confirm_different_move_raises_command_rejected_not_already_confirmed(
+    tmp_db_path,
+):
+    """다른 move로 재확인하면 CommandRejected이고, AlreadyConfirmed가 아니다
+    (「마음이 바뀌었다」가 주사위 재굴림 경로가 되지 않는다, D-10)."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq, _confirm_seq = await _declare_and_confirm(actor)
+        events_before = len(_read_events(tmp_db_path))
+        with pytest.raises(CommandRejected) as excinfo:
+            await actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="defy_danger",
+                    stat="DEX",
+                    system_suggestion={"move": "defy_danger", "stat": "DEX"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            )
+        events_after = len(_read_events(tmp_db_path))
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert not isinstance(excinfo.value, AlreadyConfirmed)
+    assert events_after == events_before
+
+
+async def test_idempotent_confirm_different_stat_same_move_raises_command_rejected(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq, _confirm_seq = await _declare_and_confirm(actor, move="parley", stat="CHA")
+        with pytest.raises(CommandRejected) as excinfo:
+            await actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="parley",
+                    stat="STR",
+                    system_suggestion={"move": "parley", "stat": "STR"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert not isinstance(excinfo.value, AlreadyConfirmed)
+
+
+async def test_already_confirmed_is_a_command_rejected_subclass(tmp_db_path):
+    """기존 `except CommandRejected` 경로가 `AlreadyConfirmed`도 그대로 잡는다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq, _confirm_seq = await _declare_and_confirm(actor)
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="parley",
+                    stat="CHA",
+                    system_suggestion={"move": "parley", "stat": "CHA"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+
+async def test_idempotent_confirm_first_confirm_on_unconfirmed_declare_passes(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq, confirm_seq = await _declare_and_confirm(actor)
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert confirm_seq == declare_seq + 1
+
+
+async def test_idempotent_confirm_survives_a_fresh_session_registry_over_the_same_store(
+    tmp_db_path,
+):
+    """서버 재시작 재현 — 확인 사건을 쌓은 뒤 새 `SessionRegistry`로 액터를
+    다시 얻어도 멱등 단락이 그대로 작동한다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq, confirm_seq = await _declare_and_confirm(actor)
+    finally:
+        await actor.stop()
+
+    fresh_registry = SessionRegistry(store, roller_factory=lambda: _FixedRoller([3, 4] * 20))
+    fresh_actor = fresh_registry.get_or_create("s1")
+    try:
+        with pytest.raises(AlreadyConfirmed) as excinfo:
+            await fresh_actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="parley",
+                    stat="CHA",
+                    system_suggestion={"move": "parley", "stat": "CHA"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            )
+    finally:
+        await fresh_actor.stop()
+        store.close()
+
+    assert excinfo.value.prior.confirm_seq == confirm_seq
 
 
 # ---------------------------------------------------------------------------
