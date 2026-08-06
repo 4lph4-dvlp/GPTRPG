@@ -75,7 +75,7 @@ def _read_events(tmp_db_path, session_id: str = "s1"):
 async def test_declare_action_appends_one_action_declared_event(tmp_db_path):
     store, actor = _make_actor(tmp_db_path)
     try:
-        seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        seq = await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
     finally:
         await actor.stop()
         store.close()
@@ -89,10 +89,10 @@ async def test_declare_action_appends_one_action_declared_event(tmp_db_path):
 async def test_confirm_action_appends_one_action_confirmed_event(tmp_db_path):
     store, actor = _make_actor(tmp_db_path)
     try:
-        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        declare_seq = await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
         seq = await actor.submit(
             ConfirmAction(
-                player_id="p1",
+                player_id="bram",
                 move="knock",
                 stat="STR",
                 system_suggestion={"move": "knock", "stat": "STR"},
@@ -117,7 +117,7 @@ async def test_resolve_check_appends_one_check_resolved_event(tmp_db_path):
             ResolveCheck(
                 move="문을 부순다",
                 modifiers=(Modifier(type="flat", value=1, source="힘"),),
-                person_id="p1",
+                person_id="bram",
                 character_id="bram",
             )
         )
@@ -191,7 +191,7 @@ async def test_record_ai_call_appends_one_ai_invoked_event(tmp_db_path):
 
 async def test_five_commands_submitted_concurrently_are_recorded_in_submission_order(tmp_db_path):
     store, actor = _make_actor(tmp_db_path)
-    commands = [DeclareAction(player_id="p1", raw_text=str(i)) for i in range(5)]
+    commands = [DeclareAction(player_id="bram", raw_text=str(i)) for i in range(5)]
     try:
         seqs = await asyncio.gather(*(actor.submit(command) for command in commands))
     finally:
@@ -251,7 +251,7 @@ async def test_unsupported_modifier_type_is_rejected_and_appends_nothing(tmp_db_
                 ResolveCheck(
                     move="문을 부순다",
                     modifiers=(Modifier(type="percentage", value=10, source="버프"),),
-                    person_id="p1",
+                    person_id="bram",
                     character_id="bram",
                 )
             )
@@ -310,7 +310,7 @@ async def test_rulebook_with_incomplete_grade_bands_is_rejected_not_a_raw_traceb
                         modifiers=(),
                         target=10,
                         rulebook_id=_GAPPED_RULEBOOK_ID,
-                        person_id="p1",
+                        person_id="bram",
                         character_id="bram",
                     )
                 )
@@ -372,7 +372,7 @@ async def test_sequence_conflict_is_not_swallowed_and_reaches_the_caller(tmp_db_
 
     try:
         with pytest.raises(SequenceConflict):
-            await actor.submit(DeclareAction(player_id="p1", raw_text="원래 명령"))
+            await actor.submit(DeclareAction(player_id="bram", raw_text="원래 명령"))
     finally:
         await actor.stop()
         store.close()
@@ -386,10 +386,10 @@ async def test_sequence_conflict_is_not_swallowed_and_reaches_the_caller(tmp_db_
 async def test_full_six_command_session_reconstructs_to_expected_state(tmp_db_path):
     store, actor = _make_actor(tmp_db_path, values=[2, 3])
     try:
-        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 부순다"))
+        declare_seq = await actor.submit(DeclareAction(player_id="bram", raw_text="문을 부순다"))
         confirm_seq = await actor.submit(
             ConfirmAction(
-                player_id="p1",
+                player_id="bram",
                 move="break_door",
                 stat="STR",
                 system_suggestion={"move": "break_door", "stat": "STR"},
@@ -402,7 +402,7 @@ async def test_full_six_command_session_reconstructs_to_expected_state(tmp_db_pa
                 move="break_door",
                 modifiers=(),
                 caused_by_seq=confirm_seq,
-                person_id="p1",
+                person_id="bram",
                 character_id="bram",
             )
         )
@@ -451,7 +451,7 @@ async def test_full_six_command_session_reconstructs_to_expected_state(tmp_db_pa
 async def test_rebuild_state_does_not_write_and_is_repeatable(tmp_db_path):
     store, actor = _make_actor(tmp_db_path)
     try:
-        await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
     finally:
         await actor.stop()
 
@@ -604,7 +604,7 @@ async def test_occupy_rejected_in_old_session_with_events_but_no_occupation(tmp_
     없는 세션에서는 점유가 거부된다."""
     store, actor = _make_actor(tmp_db_path)
     try:
-        await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
         assert actor.state.last_seq >= 0
         assert actor.state.occupied_by == {}
         with pytest.raises(CommandRejected):
@@ -714,10 +714,10 @@ async def test_concurrent_occupy_different_characters_all_succeed(tmp_db_path):
 async def _declare_and_confirm(
     actor: SessionActor, *, move: str = "parley", stat: str = "CHA"
 ) -> tuple[int, int]:
-    declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+    declare_seq = await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
     confirm_seq = await actor.submit(
         ConfirmAction(
-            player_id="p1",
+            player_id="bram",
             move=move,
             stat=stat,
             system_suggestion={"move": move, "stat": stat},
@@ -739,7 +739,7 @@ async def test_idempotent_confirm_folds_confirm_and_resolve_into_confirmed_decla
                 move="parley",
                 modifiers=(),
                 caused_by_seq=confirm_seq,
-                person_id="p1",
+                person_id="bram",
                 character_id="bram",
             )
         )
@@ -771,10 +771,10 @@ async def test_idempotent_confirm_rejection_does_not_lock_the_declare(tmp_db_pat
     주사위를 하나도 굴리지 않았으므로 그 선언은 아직 잠기지 않는다."""
     store, actor = _make_actor(tmp_db_path)
     try:
-        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        declare_seq = await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
         await actor.submit(
             ConfirmAction(
-                player_id="p1",
+                player_id="bram",
                 move="parley",
                 stat="CHA",
                 system_suggestion={"move": "parley", "stat": "CHA"},
@@ -787,7 +787,7 @@ async def test_idempotent_confirm_rejection_does_not_lock_the_declare(tmp_db_pat
         # 거부 뒤에는 같은 선언을 다시 확인할 수 있다.
         confirm_seq = await actor.submit(
             ConfirmAction(
-                player_id="p1",
+                player_id="bram",
                 move="parley",
                 stat="CHA",
                 system_suggestion={"move": "parley", "stat": "CHA"},
@@ -813,7 +813,7 @@ async def test_idempotent_confirm_same_move_raises_already_confirmed_and_appends
         with pytest.raises(AlreadyConfirmed) as excinfo:
             await actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="parley",
                     stat="CHA",
                     system_suggestion={"move": "parley", "stat": "CHA"},
@@ -842,7 +842,7 @@ async def test_idempotent_confirm_different_move_raises_command_rejected_not_alr
         with pytest.raises(CommandRejected) as excinfo:
             await actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="defy_danger",
                     stat="DEX",
                     system_suggestion={"move": "defy_danger", "stat": "DEX"},
@@ -866,7 +866,7 @@ async def test_idempotent_confirm_different_stat_same_move_raises_command_reject
         with pytest.raises(CommandRejected) as excinfo:
             await actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="parley",
                     stat="STR",
                     system_suggestion={"move": "parley", "stat": "STR"},
@@ -889,7 +889,7 @@ async def test_already_confirmed_is_a_command_rejected_subclass(tmp_db_path):
         with pytest.raises(CommandRejected):
             await actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="parley",
                     stat="CHA",
                     system_suggestion={"move": "parley", "stat": "CHA"},
@@ -930,7 +930,7 @@ async def test_idempotent_confirm_survives_a_fresh_session_registry_over_the_sam
         with pytest.raises(AlreadyConfirmed) as excinfo:
             await fresh_actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="parley",
                     stat="CHA",
                     system_suggestion={"move": "parley", "stat": "CHA"},
@@ -955,11 +955,11 @@ async def test_idempotent_confirm_survives_a_fresh_session_registry_over_the_sam
 async def test_concurrent_confirm_same_move_exactly_one_action_confirmed_event(tmp_db_path):
     store, actor = _make_actor(tmp_db_path, values=[3, 4])
     try:
-        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        declare_seq = await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
         results = await asyncio.gather(
             actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="parley",
                     stat="CHA",
                     system_suggestion={"move": "parley", "stat": "CHA"},
@@ -969,7 +969,7 @@ async def test_concurrent_confirm_same_move_exactly_one_action_confirmed_event(t
             ),
             actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="parley",
                     stat="CHA",
                     system_suggestion={"move": "parley", "stat": "CHA"},
@@ -996,7 +996,7 @@ async def test_concurrent_confirm_same_move_exactly_one_action_confirmed_event(t
                 move="parley",
                 modifiers=(),
                 caused_by_seq=confirm_seq,
-                person_id="p1",
+                person_id="bram",
                 character_id="bram",
             )
         )
@@ -1015,11 +1015,11 @@ async def test_concurrent_confirm_different_move_one_succeeds_other_command_reje
 ):
     store, actor = _make_actor(tmp_db_path)
     try:
-        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        declare_seq = await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
         results = await asyncio.gather(
             actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="parley",
                     stat="CHA",
                     system_suggestion={"move": "parley", "stat": "CHA"},
@@ -1029,7 +1029,7 @@ async def test_concurrent_confirm_different_move_one_succeeds_other_command_reje
             ),
             actor.submit(
                 ConfirmAction(
-                    player_id="p1",
+                    player_id="bram",
                     move="defy_danger",
                     stat="DEX",
                     system_suggestion={"move": "defy_danger", "stat": "DEX"},
@@ -1060,13 +1060,13 @@ async def test_concurrent_confirm_and_resolve_via_route_shaped_flow_yields_one_c
     `_prepare_confirm`만으로는 증명되지 않는다."""
     store, actor = _make_actor(tmp_db_path, values=[3, 4] * 4)
     try:
-        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        declare_seq = await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
 
         async def route_shaped_confirm() -> int:
             try:
                 confirm_seq = await actor.submit(
                     ConfirmAction(
-                        player_id="p1",
+                        player_id="bram",
                         move="parley",
                         stat="CHA",
                         system_suggestion={"move": "parley", "stat": "CHA"},
@@ -1087,7 +1087,7 @@ async def test_concurrent_confirm_and_resolve_via_route_shaped_flow_yields_one_c
                         move="parley",
                         modifiers=(),
                         caused_by_seq=confirm_seq,
-                        person_id="p1",
+                        person_id="bram",
                         character_id="bram",
                     )
                 )
@@ -1149,7 +1149,7 @@ def test_ai_turn_preserves_raw_text_verbatim_and_diverges_pick_from_system_sugge
             "--session",
             "s1",
             "--player",
-            "p1",
+            "bram",
             "--text",
             raw_text,
             "--provider",
@@ -1201,7 +1201,7 @@ def test_ai_turn_no_move_turn_has_declaration_but_no_confirmation_event(
             "--session",
             "s1",
             "--player",
-            "p1",
+            "bram",
             "--text",
             "음... 잠깐만 생각 좀 할게",
             "--provider",

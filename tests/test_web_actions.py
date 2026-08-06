@@ -32,8 +32,11 @@ def _events_of_type(client: TestClient, event_type: str, session_id: str = SESSI
 
 
 def _declare_body(**overrides) -> dict:
+    # player_id == character_id (D-42, frontend/src/screens/SessionScreen.tsx:113) —
+    # 기본값을 "bram"으로 맞춰 둔다(08-04, TEST-01). 실제 캐릭터로 도는 것이
+    # 이 스위트가 다음 아홉 단계에 남기는 바닥이다.
     body = {
-        "player_id": "p1",
+        "player_id": "bram",
         "character_id": "bram",
         "raw_text": "경비병을 설득해 통로를 열어 보려 한다",
         "rulebook_id": "dungeonworld_like",
@@ -284,7 +287,7 @@ def _declare_first(client: TestClient, **overrides) -> int:
 
 def _confirm_body(declare_seq: int, **overrides) -> dict:
     body = {
-        "player_id": "p1",
+        "player_id": "bram",
         "move": "parley",
         "stat": "CHA",
         "suggestion_move": "parley",

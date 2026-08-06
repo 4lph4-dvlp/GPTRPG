@@ -121,8 +121,8 @@ def test_fixture_round_trips_a_complete_session_through_the_store(
 
     # seq 0~3 구간에서 두 플레이어의 사건이 번갈아 나온다.
     first_four_players = [events[i].player_id for i in range(4)]
-    assert first_four_players == ["p1", "p2", "p1", "p2"], (
-        "순번 0~3 은 p1·p2·p1·p2 로 번갈아야 한다 (순번 인접 짝짓기가 틀리게)"
+    assert first_four_players == ["bram", "nari", "bram", "nari"], (
+        "순번 0~3 은 브람·나리·브람·나리 로 번갈아야 한다 (순번 인접 짝짓기가 틀리게)"
     )
 
     # 실행 시각에 의존하지 않는다 — 첫 사건의 recorded_at 이 고정 기준 시각 문자열과 같다.

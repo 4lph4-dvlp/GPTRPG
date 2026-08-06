@@ -78,19 +78,22 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
         # --- 턴 1·2 의 선언·확정이 번갈아 섞인 구간 (seq 0~3) ---
         ActionDeclared(
             event_type="action_declared",
-            player_id="p1",
+            player_id="bram",
+            character_id="bram",
             raw_text="경비병을 설득해 통로를 열어 보려 한다",
             **_env(session_id, 0, None, 0),
         ),
         ActionDeclared(
             event_type="action_declared",
-            player_id="p2",
+            player_id="nari",
+            character_id="nari",
             raw_text="그림자 속에 숨어 상황을 지켜본다",
             **_env(session_id, 1, None, 50),
         ),
         ActionConfirmed(
             event_type="action_confirmed",
-            player_id="p1",
+            player_id="bram",
+            character_id="bram",
             move="persuade",
             stat="CHA",
             system_suggestion={"move": "persuade", "stat": "CHA"},
@@ -99,14 +102,15 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
         ),
         ActionConfirmed(
             event_type="action_confirmed",
-            player_id="p2",
+            player_id="nari",
+            character_id="nari",
             move="shadow",
             stat="DEX",
             system_suggestion={"move": "hide", "stat": "DEX"},
             player_confirmed=False,
             **_env(session_id, 3, 1, 300),
         ),
-        # --- 턴 1 (p1): 판정 실패 → 서사 2조각 ---
+        # --- 턴 1 (bram): 판정 실패 → 서사 2조각 ---
         CheckResolved(
             event_type="check_resolved",
             move="persuade",
@@ -115,7 +119,7 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             target=10,
             grade="miss",
             counts_as_failure=True,
-            person_id="p1",
+            person_id="bram",
             character_id="bram",
             **_env(session_id, 4, 2, 450),
         ),
@@ -141,7 +145,7 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             chunk_index=1,
             **_env(session_id, 7, 2, 2050),
         ),
-        # --- 턴 2 (p2): 판정 성공 (위 제안 거절·대안 선택 = player_confirmed False) ---
+        # --- 턴 2 (nari): 판정 성공 (위 제안 거절·대안 선택 = player_confirmed False) ---
         CheckResolved(
             event_type="check_resolved",
             move="shadow",
@@ -150,14 +154,15 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             target=7,
             grade="strong_hit",
             counts_as_failure=False,
-            person_id="p2",
+            person_id="nari",
             character_id="nari",
             **_env(session_id, 8, 3, 2200),
         ),
-        # --- 턴 3 (p1 재선언): 재굴림 한 번 → 여전히 실패 → 위협 시계 1칸 ---
+        # --- 턴 3 (bram 재선언): 재굴림 한 번 → 여전히 실패 → 위협 시계 1칸 ---
         ActionDeclared(
             event_type="action_declared",
-            player_id="p1",
+            player_id="bram",
+            character_id="bram",
             raw_text="자물쇠를 강제로 따 들어간다",
             **_env(session_id, 9, None, 3000),
         ),
@@ -173,7 +178,8 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
         ),
         ActionConfirmed(
             event_type="action_confirmed",
-            player_id="p1",
+            player_id="bram",
+            character_id="bram",
             move="pick_lock",
             stat="DEX",
             system_suggestion={"move": "force_lock", "stat": "STR"},
@@ -188,7 +194,7 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             target=10,
             grade="miss",
             counts_as_failure=True,
-            person_id="p1",
+            person_id="bram",
             character_id="bram",
             **_env(session_id, 12, 11, 3400),
         ),
@@ -228,12 +234,20 @@ class FakeSession:
 
 @pytest.fixture
 def fake_session_log(tmp_db_path: Path) -> FakeSession:
-    """두 플레이어가 번갈아 입력하는 완결된 한 세션을 실제 저장소에 넣고 다시 읽는다.
+    """두 플레이어(브람·나리)가 번갈아 입력하는 완결된 한 세션을 실제 저장소에 넣고 다시 읽는다.
 
-    순번 0~3: p1 선언·p2 선언·p1 확인·p2 확인 — 인접 짝짓기가 틀리게 섞였다.
-    턴1 p1 판정 miss → 서사 2조각(chunk 0·1). 턴2 p2 판정 strong_hit.
-    턴3 p1 재굴림(눈 4개) → miss → 위협 시계 1칸(실패 누적).
+    순번 0~3: bram 선언·nari 선언·bram 확인·nari 확인 — 인접 짝짓기가 틀리게 섞였다.
+    턴1 bram 판정 miss → 서사 2조각(chunk 0·1). 턴2 nari 판정 strong_hit.
+    턴3 bram 재굴림(눈 4개) → miss → 위협 시계 1칸(실패 누적).
     사건을 append 한 뒤 read_events 로 다시 읽어 돌려준다 (T-1-03).
+
+    08-04: 이 픽스처는 신원이 뜻을 갖는 자리다 — 가짜 플레이어 상수(p로 시작하는
+    번호 붙은 자리표시자) 대신 실제 캐릭터 식별자를 쓴다(TEST-01). `ActionDeclared`/`ActionConfirmed`
+    의 `character_id`와 `CheckResolved`의 `person_id`/`character_id`가 전부
+    같은 사람을 가리키도록 짝을 맞췄다 — `person_id`는 실제 서비스에서는
+    브라우저 식별자이지 캐릭터 이름이 아니지만, 이 픽스처는 역산 검증
+    시험(토큰·턴 수 등 여섯 숫자)만 쓰므로 신원 짝을 맞추는 것 이상의
+    실제 browser_id 형식은 필요하지 않다.
     """
     session_id = "fake-session-01"
     store = EventStore(tmp_db_path)
@@ -251,6 +265,101 @@ def fake_session_log(tmp_db_path: Path) -> FakeSession:
         clock_advance_count=1,
         declare_confirm_ms=[250, 250, 250],
         confirm_narration_ms=[1700],
+    )
+
+
+# ---------------------------------------------------------------------------
+# 08-04 Task 1: 캐릭터 넷(브람·나리·선·호두)이 모두 등장하는 공유 픽스처.
+#
+# 손으로 만드는 시험 전용 사건 생성 도우미를 새로 더 만들지 않는다 — 이 위의
+# `_env()`를 그대로 재사용한다. 넷이 각자 한 번씩 선언·확인·판정하는 최소
+# 구성이면 충분하다(각자의 발화에 각자의 이름이 붙는지 대조하는 것은
+# `tests/test_web_actions.py`의 `multi_character_names` 시험이 실제 HTTP
+# 경로로 이미 확인한다 — 이 픽스처는 저장소 왕복을 거친 사건 목록만 준다).
+# ---------------------------------------------------------------------------
+
+FOUR_PLAYER_CHARACTER_IDS: tuple[str, ...] = ("bram", "nari", "seon", "hodu")
+
+
+@pytest.fixture
+def four_player_session(tmp_db_path: Path) -> FakeSession:
+    """캐릭터 넷이 각자 한 번씩 선언·확인·판정한 완결 세션을 실제 저장소에
+    넣고 다시 읽는다(T-1-03과 같은 왕복 규율). `list_characters()`가 돌려주는
+    네 식별자가 전부 등장한다.
+    """
+    session_id = "four-player-session-01"
+    events: list[GameEvent] = []
+    seq = 0
+    ms = 0
+    declared: list[int] = []
+    confirmed: list[int] = []
+    resolved: list[int] = []
+    for character_id in FOUR_PLAYER_CHARACTER_IDS:
+        declare_seq = seq
+        events.append(
+            ActionDeclared(
+                event_type="action_declared",
+                player_id=character_id,
+                character_id=character_id,
+                raw_text=f"{character_id}가 행동을 선언한다",
+                **_env(session_id, declare_seq, None, ms),
+            )
+        )
+        declared.append(declare_seq)
+        seq += 1
+        ms += 100
+
+        confirm_seq = seq
+        events.append(
+            ActionConfirmed(
+                event_type="action_confirmed",
+                player_id=character_id,
+                character_id=character_id,
+                move="parley",
+                stat="CHA",
+                system_suggestion={"move": "parley", "stat": "CHA"},
+                player_confirmed=True,
+                **_env(session_id, confirm_seq, declare_seq, ms),
+            )
+        )
+        confirmed.append(confirm_seq)
+        seq += 1
+        ms += 100
+
+        resolve_seq = seq
+        events.append(
+            CheckResolved(
+                event_type="check_resolved",
+                move="parley",
+                rolls=[3, 4],
+                modifiers=[],
+                target=10,
+                grade="weak_hit",
+                counts_as_failure=False,
+                person_id=character_id,
+                character_id=character_id,
+                **_env(session_id, resolve_seq, confirm_seq, ms),
+            )
+        )
+        resolved.append(resolve_seq)
+        seq += 1
+        ms += 100
+
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    for event in events:
+        store.append(event)
+    stored_events = store.read_events(session_id)
+    store.close()
+    return FakeSession(
+        session_id=session_id,
+        events=stored_events,
+        token_spend=0,
+        turn_count=len(declared),
+        failure_count=0,
+        clock_advance_count=0,
+        declare_confirm_ms=[100, 100, 100, 100],
+        confirm_narration_ms=[],
     )
 
 
