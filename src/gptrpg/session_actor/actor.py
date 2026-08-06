@@ -90,6 +90,14 @@ class ConfirmAction:
 
 
 @dataclass(frozen=True)
+class OccupyCharacter:
+    """캐릭터 점유를 요청하는 명령 — 먼저 잡은 사람이 임자다(D-05), 놓기는 없다(D-07)."""
+
+    character_id: str
+    browser_id: str
+
+
+@dataclass(frozen=True)
 class ResolveCheck:
     """판정 하나를 요청하는 명령.
 
@@ -173,6 +181,7 @@ class RecordSceneIllustration:
 Command = (
     DeclareAction
     | ConfirmAction
+    | OccupyCharacter
     | ResolveCheck
     | AppendNarration
     | AdvanceClock
@@ -190,8 +199,6 @@ _EVENT_CLASSES: dict[str, type] = {
     "clock_advanced": ClockAdvanced,
     "ai_invoked": AiInvoked,
     "scene_illustrated": SceneIllustrated,
-    # 점유 명령 자체(및 이 종류를 만드는 `_prepare_occupy`)는 08-02가 만든다 —
-    # 여기서는 표만 채워 사건 종류가 쓰일 수 있게 한다.
     "character_occupied": CharacterOccupied,
 }
 
@@ -214,6 +221,13 @@ _RESOLVERS: dict[str, Callable] = {
 
 class CommandRejected(Exception):
     """세션 액터가 명령을 처리할 수 없을 때 던진다. 이 명령에 대해 아무것도 기록되지 않는다."""
+
+
+class AlreadyOccupied(CommandRejected):
+    """이미 이 브라우저가 잡고 있는 캐릭터다 — 라우트는 이것을 성공으로 해석한다
+    (본인 재접속은 그대로 통과한다, D-05). `CommandRejected`의 하위 클래스라
+    기존 `except CommandRejected` 경로가 그대로 잡는다 — 구분이 필요한 자리에서만
+    이 클래스를 먼저 잡는다."""
 
 
 class SessionActor:
@@ -369,6 +383,8 @@ class SessionActor:
             return self._prepare_declare(command)
         if isinstance(command, ConfirmAction):
             return self._prepare_confirm(command)
+        if isinstance(command, OccupyCharacter):
+            return self._prepare_occupy(command)
         if isinstance(command, ResolveCheck):
             return self._prepare_resolve_check(command)
         if isinstance(command, AppendNarration):
@@ -439,6 +455,46 @@ class SessionActor:
                 "player_confirmed": command.player_confirmed,
                 "character_id": command.character_id,
             },
+        )
+
+    def _prepare_occupy(self, command: OccupyCharacter) -> tuple[str, int | None, dict]:
+        """캐릭터 점유 판정 — 먼저 잡은 사람이 임자다(D-05). 놓기는 없다(D-07).
+
+        검증 순서가 중요하다(주석은 각 단계가 무엇을 지키는지 적는다).
+        """
+        if not command.character_id.strip():
+            raise CommandRejected("character_id는 비어 있을 수 없다")
+        if not command.browser_id.strip():
+            raise CommandRejected("browser_id는 비어 있을 수 없다")
+
+        # D-14: 사건이 존재하는데(last_seq >= 0) 점유 사건이 하나도 없으면
+        # 옛 세션(판 5 미만 기록)이다 — 다시보기만 된다. **두 조건을 반드시
+        # 함께 본다** — occupied_by가 비었다는 사실 하나만으로 판정하면
+        # 사건이 하나도 없는 새 세션도 같은 조건을 만족해 아무도 시작하지
+        # 못하게 된다(D-14가 못박은 그 실수).
+        if self.state.last_seq >= 0 and not self.state.occupied_by:
+            raise CommandRejected("이 세션은 점유 기록이 없는 옛 세션이다 — 다시보기만 된다")
+
+        holder = self.state.occupied_by.get(command.character_id)
+        if holder is not None and holder == command.browser_id:
+            # 본인 재접속 — 성공으로 해석되지만 새 사건은 남기지 않는다.
+            raise AlreadyOccupied("이미 이 캐릭터를 점유하고 있다")
+        if holder is not None:
+            # 어느 브라우저가 쥐고 있는지 문구에 넣지 않는다(QUAL-05).
+            raise CommandRejected("이미 다른 분이 고른 캐릭터예요")
+
+        # 한 브라우저는 한 캐릭터만(D-07) — 이 browser_id가 이미 다른
+        # 캐릭터를 쥐고 있으면 거부한다.
+        for occupied_character_id, occupied_browser_id in self.state.occupied_by.items():
+            if occupied_browser_id == command.browser_id and occupied_character_id != (
+                command.character_id
+            ):
+                raise CommandRejected("이 브라우저는 이미 다른 캐릭터를 점유하고 있다")
+
+        return (
+            "character_occupied",
+            None,
+            {"character_id": command.character_id, "browser_id": command.browser_id},
         )
 
     def _prepare_resolve_check(self, command: ResolveCheck) -> tuple[str, int | None, dict]:
