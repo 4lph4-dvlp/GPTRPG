@@ -239,9 +239,20 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 09-01-PLAN.md — 시계 조건 신호 → 배경 검사 → clock_advanced 사건, 웹·CLI 두 경로 (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 09-02-PLAN.md — 상황판단/서술 분리, 서술이 시나리오 원문을 받을 칸 자체를 없앤다 (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 09-03-PLAN.md — 장면 신규 대상 판단 추가, 세 판단을 하나의 gather로 정적 병렬화 (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 09-04-PLAN.md — 결정·파이프라인 문서 갱신과 사람 확인 (wave 4)
 
 > **왜 새로 생겼나.** Phase 7의 D-64 · D-66이 만든 단계다. 이후 단계 대부분이 이 구조 위에
