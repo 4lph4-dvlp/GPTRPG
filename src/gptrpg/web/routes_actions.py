@@ -54,6 +54,7 @@ from gptrpg.imagery import (
 from gptrpg.imagery.scene_prompt import WELL_SCENARIO_SETTING
 from gptrpg.session_actor.actor import (
     AlreadyConfirmed,
+    AlreadyResolved,
     AppendNarration,
     CommandRejected,
     ConfirmAction,
@@ -380,7 +381,12 @@ async def confirm(
         resolve_seq = prior_confirm.resolve_seq
     else:
         # `prior_confirm`이 있는데 `resolve_seq`가 없으면(확인은 됐는데 판정이
-        # 아직 없는 상태 — 그 사이에 서버가 죽었다는 뜻이다) 평소대로 제출한다.
+        # 아직 없는 상태 — 그 사이에 서버가 죽었을 수도, 동시에 들어온 다른
+        # 확인 요청이 아직 판정을 제출하지 않았을 수도 있다) 평소대로
+        # 제출한다. D-11/TEST-02 — 이 "재사용 판단" 자체가 확인↔판정 사이의
+        # TOCTOU 창이다(동시에 들어온 두 요청이 둘 다 여기 도달할 수 있다).
+        # `AlreadyResolved`가 액터 안에서 그 창을 최종적으로 닫는다 — 하위
+        # 클래스이므로 일반 `CommandRejected`보다 먼저 잡는다.
         try:
             # ④ 판정 — 서사 호출은 아직 시작하지 않았다.
             resolve_seq = await actor.submit(
@@ -394,6 +400,8 @@ async def confirm(
                     character_id=identity.character_id,
                 )
             )
+        except AlreadyResolved as exc:
+            resolve_seq = exc.resolve_seq
         except CommandRejected as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SequenceConflict as exc:

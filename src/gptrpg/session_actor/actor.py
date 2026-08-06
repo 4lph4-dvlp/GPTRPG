@@ -243,6 +243,23 @@ class AlreadyConfirmed(CommandRejected):
         self.prior = prior
 
 
+class AlreadyResolved(CommandRejected):
+    """이미 판정된 확인에 대해 두 번째 `ResolveCheck`가 들어왔다 (D-11, TEST-02).
+
+    라우트 계층의 재사용 판단(`prior.resolve_seq`가 있으면 재사용, 없으면
+    제출)은 확인↔판정 사이에 검사-후-사용(TOCTOU) 창을 남긴다 — 같은
+    선언에 대한 확인 요청 두 개가 동시에 들어오면, 큐가 `ConfirmAction`
+    자체는 직렬화해도(`AlreadyConfirmed`), 둘 다 "아직 판정 안 됨"을 보고
+    라우트에서 각자 `ResolveCheck`를 제출할 수 있다. 이 예외가 그 창을
+    액터 안에서 닫는다 — `.resolve_seq`가 이미 기록된 판정 순번을 들고
+    있어 라우트는 그 값으로 기존 되읽기 경로를 그대로 탄다.
+    `CommandRejected`의 하위 클래스다."""
+
+    def __init__(self, resolve_seq: int) -> None:
+        super().__init__("이미 판정된 확인이다")
+        self.resolve_seq = resolve_seq
+
+
 class SessionActor:
     """asyncio.Queue 하나 + 그 큐를 소비하는 태스크 하나. 세션당 쓰기 주체는 이거 하나뿐이다."""
 
@@ -523,6 +540,16 @@ class SessionActor:
 
     def _prepare_resolve_check(self, command: ResolveCheck) -> tuple[str, int | None, dict]:
         self._validate_caused_by(command.caused_by_seq)
+
+        # D-11/TEST-02 — 멱등 단락 둘째 겹: 이 확인(`caused_by_seq`)이 이미
+        # 판정됐으면 여기서 끝난다. `AlreadyResolved` 도크스트링이 이 검사가
+        # 막는 정확한 TOCTOU 창을 설명한다.
+        declare_seq = self.state.confirm_to_declare.get(command.caused_by_seq)
+        if declare_seq is not None:
+            prior = self.state.confirmed_declares.get(declare_seq)
+            if prior is not None and prior.resolve_seq is not None:
+                raise AlreadyResolved(prior.resolve_seq)
+
         if not command.person_id.strip():
             raise CommandRejected("person_id는 비어 있을 수 없다")
         if not command.character_id.strip():

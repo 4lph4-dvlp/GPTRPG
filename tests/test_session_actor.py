@@ -26,6 +26,7 @@ from gptrpg.session_actor.actor import (
     AdvanceClock,
     AlreadyConfirmed,
     AlreadyOccupied,
+    AlreadyResolved,
     AppendNarration,
     CommandRejected,
     ConfirmAction,
@@ -942,6 +943,165 @@ async def test_idempotent_confirm_survives_a_fresh_session_registry_over_the_sam
         store.close()
 
     assert excinfo.value.prior.confirm_seq == confirm_seq
+
+
+# ---------------------------------------------------------------------------
+# 08-03 Task 4 (TEST-02) — 같은 선언에 확인이 동시에 두 번 들어온다. 08-02
+# Task 3이 점유에 대해 한 것을 확인에 대해 똑같이 한다 — 새 도구를 만들지
+# 않고 이미 있는 asyncio.gather 패턴을 재사용한다.
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_confirm_same_move_exactly_one_action_confirmed_event(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path, values=[3, 4])
+    try:
+        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        results = await asyncio.gather(
+            actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="parley",
+                    stat="CHA",
+                    system_suggestion={"move": "parley", "stat": "CHA"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            ),
+            actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="parley",
+                    stat="CHA",
+                    system_suggestion={"move": "parley", "stat": "CHA"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            ),
+            return_exceptions=True,
+        )
+
+        successes = [r for r in results if isinstance(r, int)]
+        already_confirmed = [r for r in results if isinstance(r, AlreadyConfirmed)]
+        assert len(successes) == 1
+        assert len(already_confirmed) == 1
+
+        # 「거부됐다」가 아니라 「기록에 하나만 남았다」를 확인한다.
+        confirm_seq = successes[0]
+
+        # 이어서 ResolveCheck까지 태우면 check_resolved 사건도 정확히 하나다 —
+        # 주사위는 한 번만 굴렀다. (actor.stop() 전에 제출해야 한다 — 멈춘
+        # 액터에 제출하면 그 future는 영원히 안 풀린다.)
+        await actor.submit(
+            ResolveCheck(
+                move="parley",
+                modifiers=(),
+                caused_by_seq=confirm_seq,
+                person_id="p1",
+                character_id="bram",
+            )
+        )
+    finally:
+        await actor.stop()
+        store.close()
+
+    confirmed_events = [e for e in _read_events(tmp_db_path) if e.event_type == "action_confirmed"]
+    assert len(confirmed_events) == 1
+    resolved_events = [e for e in _read_events(tmp_db_path) if e.event_type == "check_resolved"]
+    assert len(resolved_events) == 1
+
+
+async def test_concurrent_confirm_different_move_one_succeeds_other_command_rejected_not_already_confirmed(
+    tmp_db_path,
+):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        results = await asyncio.gather(
+            actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="parley",
+                    stat="CHA",
+                    system_suggestion={"move": "parley", "stat": "CHA"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            ),
+            actor.submit(
+                ConfirmAction(
+                    player_id="p1",
+                    move="defy_danger",
+                    stat="DEX",
+                    system_suggestion={"move": "defy_danger", "stat": "DEX"},
+                    player_confirmed=True,
+                    caused_by_seq=declare_seq,
+                )
+            ),
+            return_exceptions=True,
+        )
+    finally:
+        await actor.stop()
+        store.close()
+
+    successes = [r for r in results if isinstance(r, int)]
+    rejections = [r for r in results if isinstance(r, CommandRejected)]
+    already_confirmed = [r for r in rejections if isinstance(r, AlreadyConfirmed)]
+    assert len(successes) == 1
+    assert len(rejections) == 1
+    assert len(already_confirmed) == 0
+
+
+async def test_concurrent_confirm_and_resolve_via_route_shaped_flow_yields_one_check_resolved(
+    tmp_db_path,
+):
+    """HTTP 라우트가 실제로 하는 것과 같은 두 단계(ConfirmAction 뒤에 조건부
+    ResolveCheck)를 두 동시 요청이 각자 밟는 상황을 액터 계층에서 직접
+    재현한다 — 확인↔판정 사이의 TOCTOU 창(D-11)이 실제로 닫혀 있는지가
+    `_prepare_confirm`만으로는 증명되지 않는다."""
+    store, actor = _make_actor(tmp_db_path, values=[3, 4] * 4)
+    try:
+        declare_seq = await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+
+        async def route_shaped_confirm() -> int:
+            try:
+                confirm_seq = await actor.submit(
+                    ConfirmAction(
+                        player_id="p1",
+                        move="parley",
+                        stat="CHA",
+                        system_suggestion={"move": "parley", "stat": "CHA"},
+                        player_confirmed=True,
+                        caused_by_seq=declare_seq,
+                    )
+                )
+                prior = None
+            except AlreadyConfirmed as exc:
+                prior = exc.prior
+                confirm_seq = prior.confirm_seq
+
+            if prior is not None and prior.resolve_seq is not None:
+                return prior.resolve_seq
+            try:
+                return await actor.submit(
+                    ResolveCheck(
+                        move="parley",
+                        modifiers=(),
+                        caused_by_seq=confirm_seq,
+                        person_id="p1",
+                        character_id="bram",
+                    )
+                )
+            except AlreadyResolved as exc:
+                return exc.resolve_seq
+
+        resolve_seqs = await asyncio.gather(route_shaped_confirm(), route_shaped_confirm())
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert resolve_seqs[0] == resolve_seqs[1]
+    resolved_events = [e for e in _read_events(tmp_db_path) if e.event_type == "check_resolved"]
+    assert len(resolved_events) == 1
 
 
 # ---------------------------------------------------------------------------

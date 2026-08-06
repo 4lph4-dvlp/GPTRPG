@@ -6,13 +6,17 @@
 확인한다 — 두 번째 검증 경로를 새로 만들지 않는다.
 """
 
+import asyncio
 import json
 
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from conftest import FakeProvider
 from conftest import select_character as _select_character_at
 from gptrpg.agents.envelope import AgentResult
+from gptrpg.imagery import imagery_config_from_env
+from gptrpg.web.app import create_app
 
 SESSION_ID = "s1"
 
@@ -547,3 +551,87 @@ def test_confirm_event_keeps_system_suggestion_separate_from_picked_move(
     assert confirmed_events[0]["system_suggestion"] == {"move": "parley", "stat": "CHA"}
     assert confirmed_events[0]["move"] == "defy_danger"
     assert confirmed_events[0]["stat"] == "DEX"
+
+
+# ---------------------------------------------------------------------------
+# 08-03 Task 4 (TEST-02) — HTTP 계층: 두 개의 확인 요청을 같은 declare_seq로
+# 동시에 보낸다. `ASGITransport`는 lifespan을 스스로 돌리지 않으므로
+# `app.router.lifespan_context(app)` 안에서 연다(08-02 Task 3과 같은 방식).
+# 확인 요청에는 서명 쿠키가 필요하므로 두 클라이언트가 같은 쿠키를 든다 —
+# 같은 브라우저가 두 번 눌렀다는 상황이다.
+# ---------------------------------------------------------------------------
+
+
+def _make_app_with_fake_provider(
+    tmp_db_path, tmp_path, *, action_classifier: FakeProvider, master_gm: FakeProvider
+):
+    """`conftest.web_client_with_fake_provider`의 `_make`와 같은 조립이지만
+    `TestClient`로 감싸지 않고 앱 자체를 돌려준다 — `httpx.AsyncClient` +
+    `ASGITransport`로 진짜 동시성을 내려면 `TestClient`(동기, 스레드 포탈)가
+    아니라 앱을 직접 다뤄야 한다."""
+    config_path = tmp_path / "agents.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "action_classifier": {"provider": "nim", "model": "fake-model"},
+                "master_gm": {"provider": "nim", "model": "fake-model"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    providers = {"action_classifier": action_classifier, "master_gm": master_gm}
+
+    def _resolver(role: str, choices, env):
+        return providers[role]
+
+    return create_app(
+        db_path=tmp_db_path,
+        provider_resolver=_resolver,
+        agent_config_path=config_path,
+        imagery_config=imagery_config_from_env({"GPTRPG_IMAGERY_DIR": str(tmp_path / "media")}),
+    )
+
+
+async def test_concurrent_confirm_same_declare_seq_http_layer_one_check_resolved(
+    tmp_db_path, tmp_path
+) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    app = _make_app_with_fake_provider(tmp_db_path, tmp_path, action_classifier=classifier, master_gm=gm)
+
+    async with app.router.lifespan_context(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as setup_client:
+            select_response = await setup_client.post(
+                f"/api/sessions/{SESSION_ID}/select-character", json={"character_id": "bram"}
+            )
+            assert select_response.status_code == 200
+            declare_response = await setup_client.post(
+                f"/api/sessions/{SESSION_ID}/actions/declare", json=_declare_body()
+            )
+            assert declare_response.status_code == 200
+            declare_seq = declare_response.json()["declare_seq"]
+            cookies = dict(setup_client.cookies)
+
+        confirm_body = _confirm_body(declare_seq)
+        async with (
+            AsyncClient(transport=transport, base_url="http://test", cookies=cookies) as client_a,
+            AsyncClient(transport=transport, base_url="http://test", cookies=cookies) as client_b,
+        ):
+            response_a, response_b = await asyncio.gather(
+                client_a.post(f"/api/sessions/{SESSION_ID}/actions/confirm", json=confirm_body),
+                client_b.post(f"/api/sessions/{SESSION_ID}/actions/confirm", json=confirm_body),
+            )
+
+        async with AsyncClient(transport=transport, base_url="http://test") as reader:
+            events_response = await reader.get(f"/api/sessions/{SESSION_ID}/events")
+
+    assert response_a.status_code == 200
+    assert response_b.status_code == 200
+    body_a = response_a.json()
+    body_b = response_b.json()
+    assert body_a["rolls"] == body_b["rolls"]
+
+    events = events_response.json()["events"]
+    resolved = [e for e in events if e["event_type"] == "check_resolved"]
+    assert len(resolved) == 1
