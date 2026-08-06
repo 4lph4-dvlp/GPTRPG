@@ -53,6 +53,7 @@ from gptrpg.imagery import (
 )
 from gptrpg.imagery.scene_prompt import WELL_SCENARIO_SETTING
 from gptrpg.session_actor.actor import (
+    AlreadyConfirmed,
     AppendNarration,
     CommandRejected,
     ConfirmAction,
@@ -273,6 +274,10 @@ class ConfirmResponse(BaseModel):
     grade: str | None = None
     target: int | None = None
     narration_chunk_count: int = 0
+    narration_failed: bool = False
+    """서사 생성만 실패했다는 표시다(TRUST-06, D-08) — `rolls`/`grade`/`target`은
+    그대로 채워져 있다. 「굴림 실패」(오류 상태 코드, 판정 값 없음)와 구분된다.
+    기본값이 있으므로 기존 응답 조립 자리를 전부 고치지 않아도 된다."""
 
 
 @router.post("/sessions/{session_id}/actions/confirm", response_model=ConfirmResponse)
@@ -287,10 +292,19 @@ async def confirm(
 
     **판정을 서사보다 먼저 제출하는 것이 흐름 구조로 보장된다** — 조건
     분기가 아니라 코드 순서다. 지연이 1초든 15초를 넘기든 판정 사건이
-    기록에서 서사 사건보다 앞선 순번을 갖는 것이 뒤집힐 수 없다.
+    기록에서 서사 사건보다 앞선 순번을 갖는 것이 뒤집힐 수 없다. 판정을
+    재사용하는 경로(같은 declare_seq로 재시도)도 이 성질을 유지한다 — 재사용은
+    이미 기록된 앞선 순번을 가리키는 것이므로 순서가 뒤집힐 수 없다.
 
     **신원 대조가 맨 앞이다(TRUST-02, D-04).** declare()와 같은 이유·같은
     형식이다.
+
+    **「굴림 실패」와 「서사 실패」가 응답에서 구분된다(TRUST-06).** 판정
+    제출(`ResolveCheck`) 자체가 던지는 예외는 오류 상태 코드로 나가고
+    응답에 `rolls`가 없다. 서사만 실패하면 200이고 `rolls`/`grade`/`target`이
+    채워진 채 `narration_failed=True`가 함께 온다 — 이미 굴린 주사위 결과를
+    버리지 않는다(D-08). 다시 시도를 누르면(같은 declare_seq) 캐시된 판정을
+    재사용하고 서사만 다시 쓴다(D-09).
     """
     identity = read_identity(request, session_id)
     if identity is None or identity.character_id != body.character_id:
@@ -324,6 +338,11 @@ async def confirm(
         except UnknownRulebook as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # D-10/D-11 — 같은 선언에 대한 재확인은 `AlreadyConfirmed`(CommandRejected의
+    # 하위 클래스)로 액터가 단락시킨다. **하위 클래스를 먼저 잡는다** — 순서가
+    # 뒤집히면 아래 일반 `except CommandRejected`가 먼저 걸려 영원히 안 잡힌다.
+    # `prior`가 남으면 이 확인은 이미 기록된 확인·판정을 재사용한다는 뜻이다.
+    prior_confirm = None
     try:
         confirm_seq = await actor.submit(
             ConfirmAction(
@@ -339,6 +358,9 @@ async def confirm(
                 character_id=identity.character_id,
             )
         )
+    except AlreadyConfirmed as exc:
+        prior_confirm = exc.prior
+        confirm_seq = prior_confirm.confirm_seq
     except CommandRejected as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SequenceConflict as exc:
@@ -351,23 +373,31 @@ async def confirm(
         # 같다(확인 사건에 그 칸이 필요하고, 판정은 여기서 걸러진다).
         return ConfirmResponse(confirmed=False, confirm_seq=confirm_seq)
 
-    try:
-        # ④ 판정 — 서사 호출은 아직 시작하지 않았다.
-        resolve_seq = await actor.submit(
-            ResolveCheck(
-                move=body.move,
-                modifiers=modifiers,
-                target=body.target,
-                rulebook_id=body.rulebook_id,
-                caused_by_seq=confirm_seq,
-                person_id=identity.browser_id,
-                character_id=identity.character_id,
+    if prior_confirm is not None and prior_confirm.resolve_seq is not None:
+        # D-09 — 판정을 재사용한다. 주사위는 이미 굴렀으니 `ResolveCheck`를
+        # 다시 제출하지 않고 그 순번을 그대로 쓴다 — 아래 346줄대의 기존
+        # 되읽기 경로(store.read_events)를 그대로 탄다.
+        resolve_seq = prior_confirm.resolve_seq
+    else:
+        # `prior_confirm`이 있는데 `resolve_seq`가 없으면(확인은 됐는데 판정이
+        # 아직 없는 상태 — 그 사이에 서버가 죽었다는 뜻이다) 평소대로 제출한다.
+        try:
+            # ④ 판정 — 서사 호출은 아직 시작하지 않았다.
+            resolve_seq = await actor.submit(
+                ResolveCheck(
+                    move=body.move,
+                    modifiers=modifiers,
+                    target=body.target,
+                    rulebook_id=body.rulebook_id,
+                    caused_by_seq=confirm_seq,
+                    person_id=identity.browser_id,
+                    character_id=identity.character_id,
+                )
             )
-        )
-    except CommandRejected as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except SequenceConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CommandRejected as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except SequenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     check_event = store.read_events(session_id, from_seq=resolve_seq)[0]
     check_summary = f"{body.move} 판정 결과 {check_event.grade} (목표 {check_event.target})"
@@ -400,10 +430,11 @@ async def confirm(
     # 예외 포착은 AI 스트림 자체(narrate() 생성/첫 조각/이후 조각 이어받기)만
     # 감싼다 — `actor.submit(AppendNarration(...))`는 이 밖에 둔다(WR-01과
     # 같은 이유). 이 호출이 던지는 예외는 이벤트 스키마·저장소 I/O 같은
-    # 액터/저장소 계층의 결함이지 서사 실패가 아니므로, 502로 뭉뚱그리지
-    # 않고 그대로 500으로 올라가게 둔다. `Exception`만 잡는다 — `BaseException`은
-    # 잡지 않는다. **되감지 않는다** — 이미 나온 문장은 그 자리에서
-    # `AppendNarration`으로 제출한다.
+    # 액터/저장소 계층의 결함이지 서사 실패가 아니므로, 아래 `narration_failed`
+    # 200 응답으로 뭉뚱그리지 않고 그대로 500으로 올라가게 둔다(TRUST-06 —
+    # 「굴림 실패」와 「서사 실패」가 응답에서 구분된다). `Exception`만 잡는다 —
+    # `BaseException`은 잡지 않는다. **되감지 않는다** — 이미 나온 문장은 그
+    # 자리에서 `AppendNarration`으로 제출한다.
     narration_start = time.monotonic()
     narration_error: Exception | None = None
     chunk_index = 0
@@ -463,17 +494,27 @@ async def confirm(
     )
 
     if narration_error is not None or not gm_result.ok:
-        # 화면이 그대로 쓸 문구다 — 호출 스택이나 제공자 설정을 응답에 담지
-        # 않는다. 액터·저장소 결함은 이 502로 뭉뚱그려지지 않고 그대로 500으로
-        # 올라간다(다른 원인이므로 다른 상태 코드).
-        raise HTTPException(
-            status_code=502,
-            detail="이번 턴을 처리하지 못했어요. 다시 시도해 주세요",
+        # D-08/TRUST-06 — 서사만 실패했다. 이미 기록된 판정 결과를 버리지
+        # 않는다: 200을 돌려주고 `rolls`/`grade`/`target`은 되읽은 판정
+        # 사건에서 그대로 채운 채 `narration_failed=True`로 실패를 알린다.
+        # 액터·저장소 결함(이벤트 스키마·I/O)은 이 분기가 아니라 그 위 호출부에서
+        # 그대로 500으로 올라간다(다른 원인이므로 다른 상태 코드, 502 분기가
+        # 아니다) — 「굴림 실패」와 「서사 실패」의 구분이 여기서 코드 구조로
+        # 남는다.
+        return ConfirmResponse(
+            confirmed=True,
+            confirm_seq=confirm_seq,
+            resolve_seq=resolve_seq,
+            rolls=list(check_event.rolls),
+            grade=check_event.grade,
+            target=check_event.target,
+            narration_chunk_count=chunk_index,
+            narration_failed=True,
         )
 
-    # ⑦ 장면 삽화 — **성공한 턴에만, 응답을 보낸 뒤에.** 위 502 분기 아래에
-    # 있는 것이 의도다: 서사가 실패한 턴에 그림만 남으면 화면에 서사 없는
-    # 삽화가 떠서 무슨 일이 있었는지 더 알기 어려워진다.
+    # ⑦ 장면 삽화 — **성공한 턴에만, 응답을 보낸 뒤에.** 위 서사 실패 분기가
+    # 먼저 반환하는 것이 의도다: 서사가 실패한 턴에 그림만 남으면 화면에 서사
+    # 없는 삽화가 떠서 무슨 일이 있었는지 더 알기 어려워진다.
     imagery_config: ImageryConfig = request.app.state.imagery_config
     if imagery_config.enabled:
         background.add_task(
