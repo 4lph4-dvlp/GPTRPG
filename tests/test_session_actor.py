@@ -24,10 +24,12 @@ from gptrpg.rules_core.resolution import Modifier
 from gptrpg.rules_core.rulebook import D100_ROLL_UNDER, GradeBand, Rulebook
 from gptrpg.session_actor.actor import (
     AdvanceClock,
+    AlreadyOccupied,
     AppendNarration,
     CommandRejected,
     ConfirmAction,
     DeclareAction,
+    OccupyCharacter,
     RecordAiCall,
     ResolveCheck,
     SessionActor,
@@ -459,6 +461,191 @@ async def test_rebuild_state_does_not_write_and_is_repeatable(tmp_db_path):
 
     assert before == after
     assert state1 == state2
+
+
+# ---------------------------------------------------------------------------
+# 08-02 Task 1: OccupyCharacter — 먼저 잡은 사람이 임자다(D-05), 놓기는
+# 없다(D-07), 서버를 다시 켜도 복원된다(D-06). D-14가 옛 세션과 새 세션을
+# 가른다.
+# ---------------------------------------------------------------------------
+
+
+async def test_occupy_character_appends_one_character_occupied_event(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        seq = await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert seq == 0
+    events = _read_events(tmp_db_path)
+    assert len(events) == 1
+    assert events[0].event_type == "character_occupied"
+
+
+async def test_occupy_character_updates_state_occupied_by(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+        state = actor.state
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert state.occupied_by == {"bram": "B1"}
+
+
+async def test_occupy_already_taken_by_another_browser_is_rejected_and_appends_nothing(
+    tmp_db_path,
+):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+        with pytest.raises(CommandRejected):
+            await actor.submit(OccupyCharacter(character_id="bram", browser_id="B2"))
+        state = actor.state
+    finally:
+        await actor.stop()
+        store.close()
+
+    events = _read_events(tmp_db_path)
+    assert len(events) == 1
+    assert state.occupied_by == {"bram": "B1"}
+
+
+async def test_occupy_own_character_again_raises_already_occupied_and_appends_no_new_event(
+    tmp_db_path,
+):
+    """본인 재접속은 그대로 통과한다(D-05) — 재접속마다 중복 점유 사건이 쌓이지 않는다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+        with pytest.raises(AlreadyOccupied):
+            await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+    finally:
+        await actor.stop()
+        store.close()
+
+    events = _read_events(tmp_db_path)
+    assert len(events) == 1
+
+
+async def test_already_occupied_is_a_command_rejected_subclass(tmp_db_path):
+    """기존 `except CommandRejected` 경로가 `AlreadyOccupied`도 그대로 잡는다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+        with pytest.raises(CommandRejected):
+            await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+    finally:
+        await actor.stop()
+        store.close()
+
+
+async def test_one_browser_cannot_occupy_a_second_character(tmp_db_path):
+    """한 브라우저는 한 캐릭터만(D-07)."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+        with pytest.raises(CommandRejected):
+            await actor.submit(OccupyCharacter(character_id="nari", browser_id="B1"))
+        state = actor.state
+    finally:
+        await actor.stop()
+        store.close()
+
+    events = _read_events(tmp_db_path)
+    assert len(events) == 1
+    assert state.occupied_by == {"bram": "B1"}
+
+
+async def test_occupy_blank_character_id_is_rejected(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        with pytest.raises(CommandRejected):
+            await actor.submit(OccupyCharacter(character_id="   ", browser_id="B1"))
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert _read_events(tmp_db_path) == []
+
+
+async def test_occupy_blank_browser_id_is_rejected(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        with pytest.raises(CommandRejected):
+            await actor.submit(OccupyCharacter(character_id="bram", browser_id=""))
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert _read_events(tmp_db_path) == []
+
+
+async def test_occupy_succeeds_in_a_session_with_zero_events(tmp_db_path):
+    """D-14 새 세션: 사건이 하나도 없는 세션에서는 점유가 정상적으로 성공한다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        assert actor.state.last_seq == -1  # 새 세션임을 확인하고 시작한다
+        seq = await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert seq == 0
+
+
+async def test_occupy_rejected_in_old_session_with_events_but_no_occupation(tmp_db_path):
+    """D-14 옛 세션: 사건은 있는데(action_declared) character_occupied가 하나도
+    없는 세션에서는 점유가 거부된다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(DeclareAction(player_id="p1", raw_text="문을 두드린다"))
+        assert actor.state.last_seq >= 0
+        assert actor.state.occupied_by == {}
+        with pytest.raises(CommandRejected):
+            await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+    finally:
+        await actor.stop()
+        store.close()
+
+    events = _read_events(tmp_db_path)
+    assert len(events) == 1  # 점유 사건은 추가되지 않았다
+    assert events[0].event_type == "action_declared"
+
+
+async def test_occupation_survives_a_fresh_session_registry_over_the_same_store(tmp_db_path):
+    """D-06 — 서버 재시작 재현: 같은 `EventStore` 위에 `SessionRegistry`를 새로
+    만들어 액터를 다시 얻으면 `occupied_by`가 그대로 복원된다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+    finally:
+        await actor.stop()
+
+    fresh_registry = SessionRegistry(store, roller_factory=lambda: _FixedRoller([3, 4] * 20))
+    fresh_actor = fresh_registry.get_or_create("s1")
+    try:
+        assert fresh_actor.state.occupied_by == {"bram": "B1"}
+    finally:
+        await fresh_actor.stop()
+        store.close()
+
+
+async def test_occupy_rejection_message_never_contains_the_holder_browser_id(tmp_db_path):
+    """QUAL-05 — 거부 문구 어디에도 점유자의 `browser_id` 값이 들어 있지 않다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(OccupyCharacter(character_id="bram", browser_id="holder-secret-id"))
+        with pytest.raises(CommandRejected) as excinfo:
+            await actor.submit(OccupyCharacter(character_id="bram", browser_id="B2"))
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert "holder-secret-id" not in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
