@@ -16,6 +16,7 @@ from gptrpg.web.characters_data import (
     NEW_CHARACTER_STAT_NAMES,
     PLAYER_CHARACTERS,
 )
+from gptrpg.web.cookie_auth import verify_cookie
 from gptrpg.web.routes_characters import COOKIE_NAME
 
 _HP_DEPLETED_REF = "dungeonworld_like.hp_depleted"
@@ -190,3 +191,62 @@ def test_seon_and_hodu_placeholders_satisfy_new_character_spec() -> None:
         assert hp.current == expected_hp, character_id
         assert hp.current == hp.max, character_id
         assert hp.depleted_effect_ref, character_id
+
+
+# ---------------------------------------------------------------------------
+# 08-01 Task 4 — QUAL-04·QUAL-05 관문 시험
+# ---------------------------------------------------------------------------
+
+
+def test_select_character_id_over_max_length_returns_422_and_sets_no_cookie(
+    web_client: TestClient,
+) -> None:
+    """QUAL-04: `character_id`에 상한이 없으면 쿠키 크기 상한(브라우저마다
+    보통 4KB)을 넘겨 조용한 저장 실패가 날 수 있다(Pitfall 3). 65자(상한
+    `MAX_ID_LEN=64`를 1 넘긴 값)는 422이고 쿠키가 걸리지 않는다."""
+    response = web_client.post(
+        "/api/sessions/s1/select-character",
+        json={"character_id": "a" * 65},
+    )
+
+    assert response.status_code == 422
+    assert "set-cookie" not in response.headers
+
+
+def test_identity_mismatch_response_has_no_secret_leak(web_client: TestClient) -> None:
+    """QUAL-05: 신원 불일치(403) 응답 본문에 ① 발급된 쿠키 값 전체 ② 비밀
+    열쇠 바이트의 16진 표현 ③ 서명 조각 ④ `browser_id` 값 넷 중 어느 것도
+    부분 문자열로 실려 나가지 않는다."""
+    select_response = web_client.post(
+        "/api/sessions/s1/select-character", json={"character_id": "bram"}
+    )
+    assert select_response.status_code == 200
+    cookie_value = web_client.cookies.get(COOKIE_NAME)
+    assert cookie_value is not None
+
+    secret = web_client.app.state.cookie_secret
+    payload = verify_cookie(cookie_value, secret=secret)
+    assert payload is not None
+    browser_id = payload["browser_id"]
+    signature_fragment = cookie_value.rsplit(".", 1)[-1]
+    secret_hex = secret.hex()
+
+    # bram 쿠키를 그대로 든 채, 본문의 character_id만 다른 캐릭터로 어긋내
+    # 신원 불일치(TRUST-02)를 일으킨다 — declare()의 신원 대조는 제공자
+    # 설정에 닿기 전에 먼저 걸리므로 `web_client`(대역 제공자 없음)로 충분하다.
+    response = web_client.post(
+        "/api/sessions/s1/actions/declare",
+        json={
+            "player_id": "p1",
+            "character_id": "nari",
+            "raw_text": "아무 문장",
+            "rulebook_id": "dungeonworld_like",
+        },
+    )
+    assert response.status_code == 403
+
+    body_text = response.text
+    assert cookie_value not in body_text
+    assert secret_hex not in body_text
+    assert signature_fragment not in body_text
+    assert browser_id not in body_text

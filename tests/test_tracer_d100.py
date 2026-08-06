@@ -53,6 +53,8 @@ async def test_openquest_success_check_records_and_reconstructs(tmp_db_path):
                 modifiers=(),
                 target=50,
                 rulebook_id=OPENQUEST_ID,
+                person_id="p1",
+                character_id="bram",
             )
         )
     finally:
@@ -86,6 +88,8 @@ async def test_openquest_doubles_over_skill_is_fumble_and_counts_as_failure(tmp_
                 modifiers=(),
                 target=50,
                 rulebook_id=OPENQUEST_ID,
+                person_id="p1",
+                character_id="bram",
             )
         )
     finally:
@@ -118,6 +122,8 @@ async def test_unknown_rulebook_id_is_rejected_and_appends_nothing(tmp_db_path):
                     modifiers=(),
                     target=50,
                     rulebook_id="no_such_rulebook",
+                    person_id="p1",
+                    character_id="bram",
                 )
             )
     finally:
@@ -154,6 +160,8 @@ async def test_existing_two_d6_path_without_rulebook_id_behaves_like_phase_1(tmp
             ResolveCheck(
                 move="문을 부순다",
                 modifiers=(Modifier(type="flat", value=1, source="힘"),),
+                person_id="p1",
+                character_id="bram",
             )
         )
     finally:

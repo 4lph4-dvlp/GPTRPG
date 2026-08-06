@@ -11,6 +11,7 @@ import json
 from fastapi.testclient import TestClient
 
 from conftest import FakeProvider
+from conftest import select_character as _select_character_at
 from gptrpg.agents.envelope import AgentResult
 
 SESSION_ID = "s1"
@@ -37,6 +38,27 @@ def _declare_body(**overrides) -> dict:
     return body
 
 
+def _select_character(client: TestClient, character_id: str, session_id: str = SESSION_ID) -> None:
+    """`conftest.select_character` 공용 도우미의 이 파일 기본 세션 얇은
+    래퍼(08-01 Task 4) — declare/confirm이 이제 신원 대조를 요구하므로
+    (TRUST-02), 대다수 시험이 판정 내용을 확인하기 전에 먼저 이 통로를
+    거쳐야 한다."""
+    _select_character_at(client, session_id, character_id)
+
+
+def _declare(client: TestClient, **overrides):
+    """`_declare_body`의 `character_id`로 쿠키를 먼저 걸고 declare를 부른다.
+
+    `character_id` 오버라이드가 알려지지 않은 캐릭터일 수 있는 신원 불일치
+    시험은 이 도우미를 쓰지 않는다 — select-character 자체가 모르는
+    캐릭터를 거부하므로(400) 그 경우는 각 시험이 유효한 캐릭터로 먼저
+    선택한 뒤 본문만 어긋내는 방식으로 직접 조립한다.
+    """
+    body = _declare_body(**overrides)
+    _select_character(client, body["character_id"])
+    return client.post(f"/api/sessions/{SESSION_ID}/actions/declare", json=body)
+
+
 # ---------------------------------------------------------------------------
 # Task 2: 선언 경로
 # ---------------------------------------------------------------------------
@@ -45,7 +67,7 @@ def _declare_body(**overrides) -> dict:
 def test_declare_single_candidate_returns_tier_single(web_client_with_fake_provider) -> None:
     fake = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=fake) as client:
-        response = client.post(f"/api/sessions/{SESSION_ID}/actions/declare", json=_declare_body())
+        response = _declare(client)
 
     assert response.status_code == 200
     body = response.json()
@@ -57,7 +79,7 @@ def test_declare_single_candidate_returns_tier_single(web_client_with_fake_provi
 def test_declare_no_candidates_returns_tier_none(web_client_with_fake_provider) -> None:
     fake = FakeProvider(complete_value="[]")
     with web_client_with_fake_provider(action_classifier=fake) as client:
-        response = client.post(f"/api/sessions/{SESSION_ID}/actions/declare", json=_declare_body())
+        response = _declare(client)
 
     assert response.status_code == 200
     body = response.json()
@@ -72,7 +94,7 @@ def test_action_declared_event_persists_even_when_classification_fails(
     `action_declared` 사건은 이미 기록되어 있다 — 선언이 분류보다 먼저 남는다."""
     fake = FakeProvider(complete_value=json.dumps([{"move": "not_a_real_move", "stat": "STR"}]))
     with web_client_with_fake_provider(action_classifier=fake) as client:
-        response = client.post(f"/api/sessions/{SESSION_ID}/actions/declare", json=_declare_body())
+        response = _declare(client)
 
         assert response.status_code == 400
         declared = _events_of_type(client, "action_declared")
@@ -86,7 +108,7 @@ def test_ai_invoked_event_caused_by_seq_points_at_declare(
 ) -> None:
     fake = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=fake) as client:
-        response = client.post(f"/api/sessions/{SESSION_ID}/actions/declare", json=_declare_body())
+        response = _declare(client)
         assert response.status_code == 200
         declare_seq = response.json()["declare_seq"]
 
@@ -119,14 +141,24 @@ def test_raw_text_over_max_length_returns_422(web_client_with_fake_provider) -> 
     assert response.status_code == 422
 
 
-def test_unknown_character_id_returns_400(web_client_with_fake_provider) -> None:
+def test_declare_identity_mismatch_returns_403(web_client_with_fake_provider) -> None:
+    """08-01 Task 4: 신원 대조(TRUST-02)가 declare()의 맨 앞에 생기면서, 이
+    시험의 뜻이 「모르는 캐릭터」에서 「쿠키의 캐릭터와 본문의 캐릭터가
+    어긋남」으로 바뀌었다 — 본문의 `character_id`가 알려진 캐릭터인지는
+    쿠키 검증을 통과한 뒤에야 확인되므로, 유효한 쿠키(bram)로도 본문이
+    다른 값(모르는 캐릭터 포함)이면 403이 먼저 난다. 「모르는 캐릭터」를
+    재는 원래 의도는 `select-character`가 400을 내는 것으로 이미
+    `test_web_characters.py::test_select_unknown_character_returns_400_and_sets_no_cookie`가
+    덮는다.
+    """
     fake = FakeProvider()
     with web_client_with_fake_provider(action_classifier=fake) as client:
+        _select_character(client, "bram")
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/declare",
             json=_declare_body(character_id="no_such_character"),
         )
-    assert response.status_code == 400
+    assert response.status_code == 403
 
 
 def test_prompt_never_carries_clock_advance_count_or_failure_accumulator(
@@ -135,7 +167,7 @@ def test_prompt_never_carries_clock_advance_count_or_failure_accumulator(
     """관측 지표(시계 진행 횟수·판정 실패 누적)가 AI 프롬프트로 새면 안 된다(T-04-16)."""
     fake = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=fake) as client:
-        response = client.post(f"/api/sessions/{SESSION_ID}/actions/declare", json=_declare_body())
+        response = _declare(client)
     assert response.status_code == 200
 
     assert len(fake.calls) == 1
@@ -153,9 +185,7 @@ def test_prompt_carries_the_acting_character_real_stat_names(
     """행동한 사람의 실제 캐릭터 상태값이 AI 문맥에 들어간다 — 자리 표시자 적이 아니다."""
     fake = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=fake) as client:
-        response = client.post(
-            f"/api/sessions/{SESSION_ID}/actions/declare", json=_declare_body(character_id="bram")
-        )
+        response = _declare(client, character_id="bram")
     assert response.status_code == 200
 
     system, _messages = fake.calls[0]
@@ -215,7 +245,7 @@ class _NarrationRaisingProvider:
 
 
 def _declare_first(client: TestClient, **overrides) -> int:
-    response = client.post(f"/api/sessions/{SESSION_ID}/actions/declare", json=_declare_body(**overrides))
+    response = _declare(client, **overrides)
     assert response.status_code == 200
     return response.json()["declare_seq"]
 
@@ -259,15 +289,16 @@ def test_confirm_rejected_produces_no_check_resolved_event(web_client_with_fake_
     assert narrations == []
 
 
-def test_confirm_unknown_character_id_leaves_no_orphaned_confirm_event(
+def test_confirm_identity_mismatch_returns_403_and_no_confirm_event(
     web_client_with_fake_provider,
 ) -> None:
-    """캐릭터·룰북·수정자 검증은 사건을 기록하기 전에 끝나야 한다(CR-01).
-
-    검증이 `ConfirmAction` 제출 뒤에 있으면, 잘못된 요청이 400으로 끝나도
-    `player_confirmed=True`인 사건만 영구히 남고 그 뒤를 잇는 `check_resolved`가
-    영영 없는 상태가 된다 — 판정 없는 "확인됨" 사건이 사건 기록의 무결성을
-    깨는 것과 같다(RIG-06).
+    """08-01 Task 4: 신원 대조(TRUST-02)가 confirm()의 맨 앞에 생기면서, 이
+    시험의 뜻이 「모르는 캐릭터」에서 「쿠키의 캐릭터와 본문의 캐릭터가
+    어긋남」으로 바뀌었다. 검증은 여전히 사건을 기록하기 전에 끝난다(CR-01,
+    D-04) — 「모르는 캐릭터」를 재는 원래 의도는 `select-character`가 400을
+    내는 것으로 이미
+    `test_web_characters.py::test_select_unknown_character_returns_400_and_sets_no_cookie`가
+    덮는다.
     """
     classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=classifier) as client:
@@ -276,7 +307,7 @@ def test_confirm_unknown_character_id_leaves_no_orphaned_confirm_event(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
             json=_confirm_body(declare_seq, character_id="no_such_character"),
         )
-        assert response.status_code == 400
+        assert response.status_code == 403
         confirmed = _events_of_type(client, "action_confirmed")
 
     assert confirmed == []

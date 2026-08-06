@@ -115,6 +115,8 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             target=10,
             grade="miss",
             counts_as_failure=True,
+            person_id="p1",
+            character_id="bram",
             **_env(session_id, 4, 2, 450),
         ),
         AiInvoked(
@@ -148,6 +150,8 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             target=7,
             grade="strong_hit",
             counts_as_failure=False,
+            person_id="p2",
+            character_id="nari",
             **_env(session_id, 8, 3, 2200),
         ),
         # --- 턴 3 (p1 재선언): 재굴림 한 번 → 여전히 실패 → 위협 시계 1칸 ---
@@ -184,6 +188,8 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             target=10,
             grade="miss",
             counts_as_failure=True,
+            person_id="p1",
+            character_id="bram",
             **_env(session_id, 12, 11, 3400),
         ),
         ClockAdvanced(
@@ -334,6 +340,23 @@ def fake_provider() -> FakeProvider:
         complete_value=json.dumps([{"move": "hack_and_slash", "stat": "STR"}]),
         stream_text="문이 요란하게 부서진다. 안에서 서늘한 바람이 흘러나온다.",
     )
+
+
+# ---------------------------------------------------------------------------
+# 08-01 Task 4: 서명 쿠키를 붙인 클라이언트를 만드는 공용 도우미.
+#
+# 실제 `select-character` 경로를 통해서만 쿠키를 얻는다 — 시험 전용 서명기를
+# 손으로 만들지 않는다(생산 코드와 다른 서명기를 쓰면 서명이 실제로 맞는지를
+# 시험이 못 잡는다).
+# ---------------------------------------------------------------------------
+
+
+def select_character(client: TestClient, session_id: str, character_id: str) -> None:
+    response = client.post(
+        f"/api/sessions/{session_id}/select-character",
+        json={"character_id": character_id},
+    )
+    assert response.status_code == 200
 
 
 # ---------------------------------------------------------------------------

@@ -50,7 +50,12 @@ def _make_actor(tmp_db_path, values: list[int], report_dir=None) -> tuple[EventS
 
 
 def _resolve_check() -> ResolveCheck:
-    return ResolveCheck(move="문을 부순다", modifiers=(Modifier(type="flat", value=0, source="없음"),))
+    return ResolveCheck(
+        move="문을 부순다",
+        modifiers=(Modifier(type="flat", value=0, source="없음"),),
+        person_id="p1",
+        character_id="bram",
+    )
 
 
 async def test_two_failures_do_not_trigger_clock_advance(tmp_db_path):
@@ -184,7 +189,13 @@ async def test_invalid_command_still_rejected_with_report_dir_configured(tmp_db_
     try:
         with pytest.raises(CommandRejected):
             await actor.submit(
-                ResolveCheck(move="", modifiers=(), rulebook_id="unknown-rulebook")
+                ResolveCheck(
+                    move="",
+                    modifiers=(),
+                    rulebook_id="unknown-rulebook",
+                    person_id="p1",
+                    character_id="bram",
+                )
             )
     finally:
         await actor.stop()

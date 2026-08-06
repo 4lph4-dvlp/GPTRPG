@@ -319,6 +319,8 @@ def _turn_with_narration_after(confirm_ms: int, narration_ms: int) -> list:
             target=10,
             grade="weak_hit",
             counts_as_failure=False,
+            person_id="p1",
+            character_id="bram",
             seq=2,
             caused_by_seq=1,
             recorded_at=_at(confirm_ms + 10),
@@ -480,7 +482,11 @@ async def test_auto_advance_stops_at_the_last_segment(tmp_db_path: Path) -> None
         # 마지막 칸을 넘기려면 (칸 수 + 1) × 문턱만큼의 실패가 필요하다.
         needed = (THREAT_CLOCK_SEGMENT_COUNT + 1) * AUTO_ADVANCE_FAILURE_THRESHOLD
         for _ in range(needed):
-            await actor.submit(ResolveCheck(move="hack_and_slash", modifiers=()))
+            await actor.submit(
+                ResolveCheck(
+                    move="hack_and_slash", modifiers=(), person_id="p1", character_id="bram"
+                )
+            )
     finally:
         await actor.stop()
 
@@ -506,7 +512,11 @@ async def test_clock_state_given_to_the_ai_never_exceeds_the_segment_count(
     actor = registry.get_or_create("s-prompt-cap")
     try:
         for _ in range((THREAT_CLOCK_SEGMENT_COUNT + 1) * AUTO_ADVANCE_FAILURE_THRESHOLD):
-            await actor.submit(ResolveCheck(move="hack_and_slash", modifiers=()))
+            await actor.submit(
+                ResolveCheck(
+                    move="hack_and_slash", modifiers=(), person_id="p1", character_id="bram"
+                )
+            )
     finally:
         await actor.stop()
 

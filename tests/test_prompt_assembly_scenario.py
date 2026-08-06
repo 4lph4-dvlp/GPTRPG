@@ -51,6 +51,8 @@ def _resolve_failing_check(store: EventStore, session_id: str) -> None:
             target=10,
             grade="miss",
             counts_as_failure=True,
+            person_id="p1",
+            character_id="bram",
             session_id=session_id,
             seq=store.next_seq(session_id),
             schema_version=EVENT_SCHEMA_VERSION,

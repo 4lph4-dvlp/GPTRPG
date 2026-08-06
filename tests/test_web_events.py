@@ -136,6 +136,8 @@ def _failed_check(session_id: str, seq: int) -> CheckResolved:
         target=10,
         grade="miss",
         counts_as_failure=True,
+        person_id="p1",
+        character_id="bram",
         session_id=session_id,
         seq=seq,
         schema_version=EVENT_SCHEMA_VERSION,

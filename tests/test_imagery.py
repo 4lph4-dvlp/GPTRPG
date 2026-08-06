@@ -315,6 +315,10 @@ def _imagery_client(
 
 
 def _run_one_turn(client: TestClient) -> dict:
+    select = client.post(
+        f"/api/sessions/{SESSION_ID}/select-character", json={"character_id": "bram"}
+    )
+    assert select.status_code == 200
     declare = client.post(
         f"/api/sessions/{SESSION_ID}/actions/declare",
         json={
@@ -456,6 +460,10 @@ def test_rejected_confirm_makes_no_illustration(tmp_db_path: Path, tmp_path: Pat
     """거부된 확인은 판정이 없으므로 그릴 장면도 없다."""
     renderer = FakeRenderer()
     with _imagery_client(tmp_db_path, tmp_path, renderer=renderer) as client:
+        select = client.post(
+            f"/api/sessions/{SESSION_ID}/select-character", json={"character_id": "bram"}
+        )
+        assert select.status_code == 200
         declare = client.post(
             f"/api/sessions/{SESSION_ID}/actions/declare",
             json={
