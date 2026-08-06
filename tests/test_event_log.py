@@ -4,12 +4,14 @@
 (01-03-PLAN.md Task 1·2의 명시적 요구사항).
 """
 
+import shutil
 import sqlite3
 import threading
 
 import pytest
 from pydantic import ValidationError
 
+from conftest import PROJECT_ROOT
 from gptrpg.event_log.schema import (
     EVENT_ADAPTER,
     EVENT_SCHEMA_VERSION,
@@ -25,6 +27,7 @@ from gptrpg.event_log.schema import (
 )
 from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rules_core.reducer import UnknownEventType, apply_event, fold, initial_state
+from gptrpg.session_actor.projection import rebuild_state_from_events
 
 # ---------------------------------------------------------------------------
 # 여섯 종류의 이름 -> 클래스, 이름 -> 고유 필수 칸의 최소 유효 값.
@@ -56,6 +59,10 @@ UNIQUE_FIELDS: dict[str, dict] = {
         "target": 10,
         "grade": "miss",
         "counts_as_failure": True,
+        # 판 5부터 필수(D-12, TRUST-04) — EVENT_SCHEMA_VERSION이 5가 된 뒤로
+        # 이 표를 쓰는 모든 시험이 판 5 기록을 만들므로 여기서도 채워야 한다.
+        "person_id": "p1",
+        "character_id": "bram",
     },
     "narration_appended": {"text": "문이 부서진다", "chunk_index": 0},
     "clock_advanced": {"clock_id": "threat-1", "segment_index": 1, "trigger": "fail_counter"},
@@ -425,3 +432,96 @@ def test_concurrency_two_connections_writing_same_seq_only_one_commits(tmp_db_pa
         assert len(events) == 1
     finally:
         verify_store.close()
+
+
+# ---------------------------------------------------------------------------
+# Task 3 (08-01) — 옛 기록을 읽는 길: 판 5 코드가 판 2 기록을 예외 없이 접는다
+# ---------------------------------------------------------------------------
+
+_REAL_EVENTS_DB = PROJECT_ROOT / ".gptrpg" / "events.db"
+
+
+def test_legacy_v2_payloads_fold_without_declare_owners_being_guessed():
+    """판 2 형식(character_id·person_id 없음)을 판 5 리듀서로 접어도 예외가
+    나지 않고, `declare_owners`가 비어 있다 — 「그 시절에는 안 적었다」가
+    「모른다」로 읽혔다는 뜻이다(D-13). 소유자를 `player_id` 값으로 채워
+    넣는 경로가 없음을 이 단언이 지킨다."""
+    pairs = [
+        (
+            "action_declared",
+            {
+                "session_id": "s1",
+                "seq": 0,
+                "schema_version": 2,
+                "recorded_at": utc_now_iso(),
+                "caused_by_seq": None,
+                "player_id": "p1",
+                "raw_text": "문을 두드린다",
+            },
+        ),
+        (
+            "action_confirmed",
+            {
+                "session_id": "s1",
+                "seq": 1,
+                "schema_version": 2,
+                "recorded_at": utc_now_iso(),
+                "caused_by_seq": 0,
+                "player_id": "p1",
+                "move": "knock",
+                "stat": "STR",
+                "system_suggestion": {"move": "knock", "stat": "STR"},
+                "player_confirmed": True,
+            },
+        ),
+        (
+            "check_resolved",
+            {
+                "session_id": "s1",
+                "seq": 2,
+                "schema_version": 2,
+                "recorded_at": utc_now_iso(),
+                "caused_by_seq": 1,
+                "move": "knock",
+                "rolls": [3, 4],
+                "modifiers": [],
+                "target": 10,
+                "grade": "miss",
+                "counts_as_failure": True,
+            },
+        ),
+    ]
+
+    state = fold("s1", pairs)
+
+    assert state.last_seq == 2
+    assert state.check_count == 1
+    assert state.declare_owners == {}
+
+
+@pytest.mark.skipif(
+    not _REAL_EVENTS_DB.is_file(),
+    reason=".gptrpg/events.db가 이 체크아웃에 없다(gitignore 대상) — 있을 때만 스모크로 돈다",
+)
+def test_real_events_db_replay_smoke_test_folds_without_exception(tmp_path):
+    """`.gptrpg/events.db`의 세션1 기록(전부 판 2, 895건)을 **복제본**에서
+    열어 판 5 코드로 처음부터 끝까지 접는다 — 원본은 절대 열지 않는다.
+    Phase 12(TEST-04)가 이 회귀를 전담하지만, 이 단계도 "읽는 길만 연다"는
+    D-13의 약속을 어기지 않으려면 최소한 이 스모크가 통과해야 한다.
+    """
+    copy_path = tmp_path / "events-copy.db"
+    shutil.copy(_REAL_EVENTS_DB, copy_path)
+
+    store = EventStore(copy_path)
+    store.initialize()
+    try:
+        events = store.read_events("session1")
+    finally:
+        store.close()
+
+    assert events, "복제본에 session1 기록이 있어야 이 스모크가 의미 있다"
+
+    state = rebuild_state_from_events("session1", events)
+
+    assert state.check_count > 0
+    assert state.declare_owners == {}
