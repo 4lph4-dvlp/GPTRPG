@@ -289,24 +289,34 @@ def test_occupancy_second_browser_without_cookie_gets_409_no_cookie_no_new_event
     web_app: FastAPI, tmp_db_path: Path
 ) -> None:
     """빈 세션에서 다른 브라우저가 같은 캐릭터를 고르면 409이고, 쿠키가
-    걸리지 않고 사건도 늘지 않는다."""
+    걸리지 않고 사건도 늘지 않는다.
+
+    두 `TestClient`는 **차례로**(중첩하지 않고) 연다 — 같은 `SessionActor`의
+    `asyncio.Queue`를 서로 다른 포털 스레드/이벤트 루프에서 동시에
+    건드리면 08-01이 이미 겪은 교착(멎음)이 재발한다. 점유는 사건
+    기록으로 남으므로(D-06) `with` 블록을 나갔다 다시 들어가도, 즉 서버가
+    재시작해도 「다른 브라우저」 재현이 그대로 성립한다 — 같은
+    `tmp_db_path`와 `cookie_secret` 파일을 공유하기 때문이다.
+    """
     with TestClient(web_app) as client_a:
         first = client_a.post(
             "/api/sessions/s1/select-character", json={"character_id": "bram"}
         )
         assert first.status_code == 200
 
-        client_b = TestClient(web_app)
+    with TestClient(web_app) as client_b:
         second = client_b.post(
             "/api/sessions/s1/select-character", json={"character_id": "bram"}
         )
 
         assert second.status_code == 409
         assert "set-cookie" not in second.headers
-        assert _character_occupied_event_count(tmp_db_path) == 1
+    assert _character_occupied_event_count(tmp_db_path) == 1
 
 
-def test_occupancy_second_browser_can_select_a_different_character(web_app: FastAPI) -> None:
+def test_occupancy_second_browser_can_select_a_different_character(
+    web_app: FastAPI,
+) -> None:
     """진 쪽은 다른 캐릭터를 고를 수 있다(D-05)."""
     with TestClient(web_app) as client_a:
         first = client_a.post(
@@ -314,7 +324,7 @@ def test_occupancy_second_browser_can_select_a_different_character(web_app: Fast
         )
         assert first.status_code == 200
 
-        client_b = TestClient(web_app)
+    with TestClient(web_app) as client_b:
         second = client_b.post(
             "/api/sessions/s1/select-character", json={"character_id": "nari"}
         )
@@ -366,7 +376,7 @@ def test_occupancy_409_response_has_no_holder_identity_leak(web_app: FastAPI) ->
         assert payload is not None
         holder_browser_id = payload["browser_id"]
 
-        client_b = TestClient(web_app)
+    with TestClient(web_app) as client_b:
         second = client_b.post(
             "/api/sessions/s1/select-character", json={"character_id": "bram"}
         )
@@ -413,3 +423,19 @@ def test_occupancy_new_session_with_zero_events_select_succeeds(web_client: Test
         "/api/sessions/s1/select-character", json={"character_id": "bram"}
     )
     assert response.status_code == 200
+
+
+def test_occupancy_same_character_selectable_independently_in_a_different_session(
+    web_client: TestClient,
+) -> None:
+    """점유는 세션 범위다 — s1에서 bram을 잡아도 s2에서 같은 브라우저가 bram을
+    고르는 것은 충돌이 아니다(`GameState`는 세션마다 따로 접힌다)."""
+    first = web_client.post(
+        "/api/sessions/s1/select-character", json={"character_id": "bram"}
+    )
+    assert first.status_code == 200
+
+    second = web_client.post(
+        "/api/sessions/s2/select-character", json={"character_id": "bram"}
+    )
+    assert second.status_code == 200

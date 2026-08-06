@@ -160,7 +160,15 @@ def test_confirm_with_mismatched_character_returns_403_at_route_layer(
     web_client_with_fake_provider,
 ) -> None:
     """라우트 계층이 먼저 막는다 — 쿠키의 캐릭터와 본문의 캐릭터가 어긋나면
-    액터까지 가지도 않는다."""
+    액터까지 가지도 않는다.
+
+    08-02가 점유(D-05/D-07)를 실제로 강제하면서, 같은 브라우저가 bram을 쥔
+    채로 nari를 다시 고르는 것은 이제 정당한 점유 충돌(409)이다 — 그래서
+    nari는 **다른** 브라우저(별도 `TestClient`, 같은 `tmp_db_path` 위에서
+    차례로 연다)가 잡는다. 그 다른 브라우저의 쿠키(nari)로 bram의 선언을
+    확인하려 하면, 본문의 character_id(bram)와 쿠키(nari)가 어긋난다는
+    이 시험의 원래 의도는 그대로 유지된다.
+    """
     with web_client_with_fake_provider(action_classifier=_classifier()) as client:
         _select_character(client, "bram")
         declare_response = client.post(
@@ -170,15 +178,13 @@ def test_confirm_with_mismatched_character_returns_403_at_route_layer(
         assert declare_response.status_code == 200
         declare_seq = declare_response.json()["declare_seq"]
 
-        # 같은 브라우저가 이제 nari로 다시 고른다(D-05 점유는 08-02 몫이라
-        # 이 단계에서는 통과한다) — 쿠키가 nari인 채로 bram의 선언을 확인하려
-        # 하면 본문의 character_id(bram)와 쿠키(nari)가 어긋난다.
-        _select_character(client, "nari")
-        response = client.post(
+    with web_client_with_fake_provider(action_classifier=_classifier()) as other_client:
+        _select_character(other_client, "nari")
+        response = other_client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
             json=_confirm_body(declare_seq, character_id="bram"),
         )
-        confirmed = _events_of_type(client, "action_confirmed")
+        confirmed = _events_of_type(other_client, "action_confirmed")
 
     assert response.status_code == 403
     assert confirmed == []

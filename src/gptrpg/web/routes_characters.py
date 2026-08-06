@@ -26,14 +26,23 @@ import가 생기므로, 여기서는 그 함수를 모른다).
 한정이다 — M1의 실제 계정 체계로 그대로 가져가면 안 된다.**
 """
 
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from gptrpg.event_log.store import SequenceConflict
+from gptrpg.session_actor.actor import AlreadyOccupied, CommandRejected, OccupyCharacter
 from gptrpg.web.characters_data import get_character, list_characters
-from gptrpg.web.cookie_auth import COOKIE_NAME, new_browser_id, sign_cookie, verify_cookie
+from gptrpg.web.cookie_auth import (
+    COOKIE_NAME,
+    new_browser_id,
+    read_identity,
+    sign_cookie,
+    verify_cookie,
+)
 from gptrpg.web.media import MEDIA_URL_PREFIX
 from gptrpg.web.portraits import portrait_relative_path
 from gptrpg.web.routes_actions import MAX_ID_LEN
@@ -153,29 +162,47 @@ async def select_character(
     response: Response,
 ) -> SelectCharacterResponse:
     """캐릭터 선택을 서명 쿠키에 남긴다(D-01/D-42/D-43). 알려진 캐릭터가
-    아니면 400.
+    아니면 400, 이미 다른 브라우저가 점유한 캐릭터면 409(D-05).
 
     이미 유효한 쿠키를 들고 온 브라우저는 그 안의 `browser_id`를 그대로
     재사용한다 — 재접속이 새 사람이 되면 「본인 재접속은 그대로 통과한다」
     (D-05)가 성립하지 않는다. 유효한 쿠키가 없거나 다른 세션 것이면 새
     `browser_id`를 발급한다.
+
+    **점유 제출이 쿠키 굽기보다 먼저다** — `declare()`가 `actor.submit`을
+    먼저 부르고 그 다음에 진행하는 것과 같은 결이다. 순서가 뒤집히면
+    점유에 실패한 브라우저가 쿠키를 들고 나가, 다음 요청에서 신원은
+    통과하는데 점유는 없는 반쪽 상태가 된다.
+
+    **새 쿠키를 받는 유일한 문이 이 경로다.** `declare`/`confirm` 쪽 D-14는
+    따로 손대지 않는다 — 옛 세션의 브라우저는 서명 쿠키가 없고(그때는
+    서명 자체가 없었다) 08-01이 declare/confirm에 유효 쿠키를 요구하게
+    만들었으므로 이미 403으로 막힌다. 이 경로만 옛 세션에 대해 닫으면
+    된다(D-14, T-08-11).
     """
     entity = get_character(body.character_id)
     if entity is None:
         raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
 
-    secret = request.app.state.cookie_secret
-    browser_id: str | None = None
-    raw = request.cookies.get(COOKIE_NAME)
-    if raw is not None:
-        existing = verify_cookie(raw, secret=secret)
-        if existing is not None and existing.get("session_id") == session_id:
-            candidate = existing.get("browser_id")
-            if isinstance(candidate, str):
-                browser_id = candidate
-    if browser_id is None:
-        browser_id = new_browser_id()
+    identity = read_identity(request, session_id)
+    browser_id = identity.browser_id if identity is not None else new_browser_id()
 
+    actor = request.app.state.registry.get_or_create(session_id)
+    try:
+        await actor.submit(
+            OccupyCharacter(character_id=body.character_id, browser_id=browser_id)
+        )
+    except AlreadyOccupied:
+        pass  # 본인 재접속 — 성공으로 진행한다(D-05).
+    except CommandRejected as exc:
+        # 거부는 서버 기록에만 한 줄 남긴다(D-04) — 이 줄에도 browser_id를
+        # 넣지 않는다(QUAL-05).
+        print("경고: 캐릭터 점유 거부 — select-character", file=sys.stderr)
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    secret = request.app.state.cookie_secret
     response.set_cookie(
         key=COOKIE_NAME,
         value=sign_cookie(
