@@ -95,6 +95,7 @@ export const COPY = {
   emptyHeading: "아직 아무 일도 일어나지 않았어요",
   emptyBody: "첫 행동을 입력해서 이야기를 시작해 보세요",
   turnFailed: "이번 턴을 처리하지 못했어요. 다시 시도해 주세요",
+  narrationFailed: "이번 턴의 이야기를 쓰지 못했어요. 주사위 결과는 그대로예요",
   serverConfigFailed: "서버 설정 문제로 처리하지 못했어요. 관리자에게 알려 주세요",
   noActionRecognized: "인식된 행동이 없어요. 다른 문장으로 다시 말해 보세요",
   classifying: "AI가 분류하는 중…",

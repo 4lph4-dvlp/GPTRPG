@@ -111,7 +111,7 @@ export function ChatPane({
     setBusy(true);
     setStatus(confirmed ? { text: COPY.narrating, error: false } : null);
     try {
-      await confirmAction(
+      const response = await confirmAction(
         sessionId,
         characterId,
         characterId,
@@ -120,8 +120,18 @@ export function ChatPane({
         suggestion,
         confirmed,
       );
-      setStatus(null);
+      // 서사만 실패하면 응답은 200이지만 `narration_failed`가 참이다(TRUST-06,
+      // D-08) — 판정 값은 이미 화면에 붙었으니(폴링) 이 실패는 조용히
+      // 사라지면 안 된다. 이미 있는 실패 표시 경로를 그대로 탄다.
+      if (response.narration_failed) {
+        onTurnFailed(pending.declare_seq);
+        setStatus({ text: COPY.narrationFailed, error: true });
+      } else {
+        setStatus(null);
+      }
     } catch (error) {
+      // 서사 실패는 이제 200이지만, 다른 실패(403·409·503 등)는 여전히
+      // 예외로 온다 — 이 경로는 그대로 둔다.
       if (confirmed) {
         onTurnFailed(pending.declare_seq);
         setStatus({ text: messageFor(error), error: true });

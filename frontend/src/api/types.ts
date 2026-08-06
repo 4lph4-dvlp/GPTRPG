@@ -26,6 +26,11 @@ export interface ActionDeclaredEvent extends EventEnvelope {
   event_type: "action_declared";
   player_id: string;
   raw_text: string;
+  /**
+   * 이 선언을 낸 캐릭터(판 5+, D-03/TRUST-03). 판 5 미만 기록에는 이 칸이
+   * 없었으므로 `null`이다 — "모른다"이지 "빈 문자열"이 아니다.
+   */
+  character_id: string | null;
 }
 
 export interface ActionConfirmedEvent extends EventEnvelope {
@@ -35,6 +40,8 @@ export interface ActionConfirmedEvent extends EventEnvelope {
   stat: string;
   system_suggestion: Record<string, string>;
   player_confirmed: boolean;
+  /** 확인하는 캐릭터(판 5+, D-03). `ActionDeclaredEvent.character_id`와 같다. */
+  character_id: string | null;
 }
 
 export interface CheckResolvedEvent extends EventEnvelope {
@@ -45,6 +52,12 @@ export interface CheckResolvedEvent extends EventEnvelope {
   target: number;
   grade: string;
   counts_as_failure: boolean;
+  /**
+   * 「어느 브라우저가 · 어느 캐릭터로」(TRUST-04, D-12). 판 5 이상 기록에서만
+   * 필수이고, 판 5 미만 기록은 `null`로 읽힌다.
+   */
+  person_id: string | null;
+  character_id: string | null;
 }
 
 export interface NarrationAppendedEvent extends EventEnvelope {
@@ -167,4 +180,10 @@ export interface ConfirmResponse {
   grade: string | null;
   target: number | null;
   narration_chunk_count: number;
+  /**
+   * 서사 생성만 실패했다는 표시다(TRUST-06, D-08) — 이때도 `rolls`/`grade`/
+   * `target`은 이미 채워져 있다. 응답 자체는 200이므로 `catch`가 아니라 이
+   * 칸을 화면이 직접 읽어야 실패가 조용히 사라지지 않는다.
+   */
+  narration_failed: boolean;
 }
