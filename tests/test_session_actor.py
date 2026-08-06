@@ -649,6 +649,59 @@ async def test_occupy_rejection_message_never_contains_the_holder_browser_id(tmp
 
 
 # ---------------------------------------------------------------------------
+# 08-02 Task 3 (TEST-02) — 두 브라우저가 같은 순간에 같은 캐릭터를 누른다.
+# 큐 하나 + 소비자 하나가 직렬화를 공짜로 주므로(actor.py 도크스트링) 이
+# 결과는 sleep·재시도 없이 결정적이다(non-flaky).
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_occupy_same_character_exactly_one_wins_and_one_event_is_recorded(
+    tmp_db_path,
+):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        results = await asyncio.gather(
+            actor.submit(OccupyCharacter(character_id="bram", browser_id="B1")),
+            actor.submit(OccupyCharacter(character_id="bram", browser_id="B2")),
+            return_exceptions=True,
+        )
+    finally:
+        await actor.stop()
+        store.close()
+
+    successes = [r for r in results if isinstance(r, int)]
+    rejections = [r for r in results if isinstance(r, CommandRejected)]
+    assert len(successes) == 1
+    assert len(rejections) == 1
+
+    # 「거부됐다」가 아니라 「기록에 하나만 남았다」를 확인한다 — 예외가 났다는
+    # 사실만으로는 두 요청이 실제로 직렬화되어 사건이 하나만 남았는지 알 수 없다.
+    events = _read_events(tmp_db_path)
+    occupied_events = [event for event in events if event.event_type == "character_occupied"]
+    assert len(occupied_events) == 1
+
+
+async def test_concurrent_occupy_different_characters_all_succeed(tmp_db_path):
+    """직렬화가 정상적인 동시 사용까지 막지는 않는다 — 과잉 직렬화가 아니다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        results = await asyncio.gather(
+            actor.submit(OccupyCharacter(character_id="bram", browser_id="B1")),
+            actor.submit(OccupyCharacter(character_id="nari", browser_id="B2")),
+            actor.submit(OccupyCharacter(character_id="seon", browser_id="B3")),
+            actor.submit(OccupyCharacter(character_id="hodu", browser_id="B4")),
+        )
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert len(results) == 4
+    events = _read_events(tmp_db_path)
+    occupied_events = [event for event in events if event.event_type == "character_occupied"]
+    assert len(occupied_events) == 4
+
+
+# ---------------------------------------------------------------------------
 # 03-04: `gptrpg turn`으로 한 턴을 끝까지 돌린 뒤 기록을 다시 읽어 MEAS-04를
 # 확인한다 — 원문 보존, 제안/선택 분리, 판정 결과가 서사보다 먼저, 「무브
 # 없음」 턴에 확인 사건이 없음.

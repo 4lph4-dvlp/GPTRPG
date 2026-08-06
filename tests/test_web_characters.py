@@ -6,10 +6,12 @@
 검증한다.
 """
 
+import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ActionDeclared, utc_now_iso
 from gptrpg.event_log.store import EventStore
@@ -439,3 +441,34 @@ def test_occupancy_same_character_selectable_independently_in_a_different_sessio
         "/api/sessions/s2/select-character", json={"character_id": "bram"}
     )
     assert second.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 08-02 Task 3 (TEST-02) — HTTP 계층: 두 개의 독립된 AsyncClient가 같은 앱에
+# 같은 캐릭터로 동시에 select-character를 보낸다.
+#
+# `ASGITransport`는 lifespan을 스스로 돌리지 않는다 — `web_app.router.
+# lifespan_context(web_app)` 블록 안에서 두 클라이언트를 열어 새 의존성 없이
+# `app.state.store`/`registry`/`cookie_secret`을 채운다.
+# ---------------------------------------------------------------------------
+
+
+async def test_concurrent_select_character_same_character_status_codes_are_200_and_409(
+    web_app: FastAPI,
+) -> None:
+    async with web_app.router.lifespan_context(web_app):
+        transport = ASGITransport(app=web_app)
+        async with (
+            AsyncClient(transport=transport, base_url="http://test") as client_a,
+            AsyncClient(transport=transport, base_url="http://test") as client_b,
+        ):
+            response_a, response_b = await asyncio.gather(
+                client_a.post(
+                    "/api/sessions/s1/select-character", json={"character_id": "bram"}
+                ),
+                client_b.post(
+                    "/api/sessions/s1/select-character", json={"character_id": "bram"}
+                ),
+            )
+
+    assert {response_a.status_code, response_b.status_code} == {200, 409}
