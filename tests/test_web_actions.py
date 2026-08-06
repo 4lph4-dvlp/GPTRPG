@@ -206,6 +206,96 @@ def test_prompt_carries_the_acting_character_real_stat_names(
 
 
 # ---------------------------------------------------------------------------
+# 08-04 Task 2 (TEST-01) — 서로 다른 캐릭터의 발화가 서로 다른 이름표를 단다.
+#
+# 2026-08-04 실전 사고: 최근 대화에서 "플레이어: "만 찍히면 네 명의 발화가
+# 전부 한 사람 것처럼 뭉뚱그려진다(routes_actions._CHARACTER_NAMES 도크스트링).
+# 핵심 단언은 「이름이 나온다」가 아니라 「두 발화가 서로 다른 이름표를 단다」다
+# — 「어떤 이름이든 있으면 통과」로 쓰면 이 사고를 못 잡는다.
+# ---------------------------------------------------------------------------
+
+
+def _last_turn_text(fake: FakeProvider) -> str:
+    """가장 최근 호출의 `messages`에서 최근 대화·이번 문장이 실린 문자열을 뽑는다.
+
+    캐릭터 이름표가 실제로 찍히는 자리는 `messages`다 — `system`은 캐릭터
+    상태·시계 정보만 담는다(`agents/prompt_assembly.py`의 `_session_block_text`
+    /`build_classifier_prompt`). `turn.context.build_turn_context`가 줄마다
+    화자를 붙인 뒤(`f"{speaker}: {event.raw_text}"`) 그 줄바꿈이 그대로
+    이 문자열에 남아 있다 — JSON으로 다시 감싸면 줄바꿈이 이스케이프되어
+    줄 단위 대조가 깨지므로 `messages[-1]["content"]`를 직접 쓴다.
+    """
+    _system, messages = fake.calls[-1]
+    return messages[-1]["content"]
+
+
+def test_multi_character_names_two_characters_get_distinct_labels(
+    web_client_with_fake_provider,
+) -> None:
+    """브람이 선언하고 이어서 나리가 선언하면, 나리의 선언을 부르는 순간 AI에게
+    넘어간 프롬프트에 두 발화가 각자의(서로 다른) 이름표로 실린다."""
+    fake = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+
+    bram_text = "브람이 경비병을 설득한다"
+    nari_text = "나리가 그림자에 숨는다"
+
+    with web_client_with_fake_provider(action_classifier=fake) as client_bram:
+        response = _declare(client_bram, player_id="bram", character_id="bram", raw_text=bram_text)
+        assert response.status_code == 200
+
+        # TRUST-02가 다중 캐릭터 픽스처 위에서도 유지된다 — 브람 쿠키로
+        # 나리 이름의 선언을 만들 수 없다(08-01의 403). 이 시험 파일 안에서
+        # 한 번 더 확인한다.
+        mismatch = client_bram.post(
+            f"/api/sessions/{SESSION_ID}/actions/declare",
+            json=_declare_body(player_id="nari", character_id="nari", raw_text="가로채기"),
+        )
+        assert mismatch.status_code == 403
+
+    with web_client_with_fake_provider(action_classifier=fake) as client_nari:
+        response = _declare(client_nari, player_id="nari", character_id="nari", raw_text=nari_text)
+        assert response.status_code == 200
+
+    turn_text = _last_turn_text(fake)
+    turn_lines = turn_text.split("\n")
+
+    bram_line = f"브람: {bram_text}"
+    nari_line = f"나리: {nari_text}"
+
+    # 캐릭터 식별자(bram/nari)가 아니라 표시 이름(브람/나리)이 찍힌다 — 사람이
+    # 읽는 자리이기 때문이다. 두 줄이 각자 정확히 이 형태로 존재해야
+    # (실질적으로) 서로 다른 이름표라는 것이 증명된다.
+    assert bram_line in turn_lines, f"{bram_line!r}이 프롬프트에 없다: {turn_text!r}"
+    assert nari_line in turn_lines, f"{nari_line!r}이 프롬프트에 없다: {turn_text!r}"
+
+
+def test_multi_character_names_four_characters_all_appear(
+    web_client_with_fake_provider,
+) -> None:
+    """넷이 모두 선언한 세션에서는 네 표시 이름이 모두 프롬프트에 나온다."""
+    fake = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    turns = (
+        ("bram", "브람", "브람이 문을 두드린다"),
+        ("nari", "나리", "나리가 자물쇠를 살핀다"),
+        ("seon", "선", "선이 옛 노래를 흥얼거린다"),
+        ("hodu", "호두", "호두가 말을 건다"),
+    )
+    for character_id, _display_name, raw_text in turns:
+        with web_client_with_fake_provider(action_classifier=fake) as client:
+            response = _declare(
+                client, player_id=character_id, character_id=character_id, raw_text=raw_text
+            )
+            assert response.status_code == 200
+
+    turn_text = _last_turn_text(fake)
+    turn_lines = turn_text.split("\n")
+
+    for _character_id, display_name, raw_text in turns:
+        expected_line = f"{display_name}: {raw_text}"
+        assert expected_line in turn_lines, f"{expected_line!r}이 프롬프트에 없다: {turn_text!r}"
+
+
+# ---------------------------------------------------------------------------
 # Task 3: 확인 경로
 # ---------------------------------------------------------------------------
 
