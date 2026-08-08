@@ -151,3 +151,67 @@ def test_cli_turn_advances_clock_via_condition_trigger_after_process_exits(
 
 def test_event_schema_version_still_five() -> None:
     assert EVENT_SCHEMA_VERSION == 5
+
+
+# ---------------------------------------------------------------------------
+# 09-01 Task 3 — 판단이 늦거나 죽어도 턴은 끝까지 간다 (ARCH-05/D-05)
+# ---------------------------------------------------------------------------
+
+
+def test_clock_judge_always_raising_still_exits_zero_with_narration_recorded(
+    tmp_db_path, monkeypatch
+) -> None:
+    """판단이 매번 예외를 던져도 `run_turn`의 반환 코드는 0이고 서사 사건은
+    그대로 남는다 — 턴은 판단 실패와 무관하게 끝까지 간다(ARCH-05/D-05)."""
+    db = str(tmp_db_path)
+    provider = _MultiRoleProvider(clock_judge_always_raises=True)
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code == 0
+
+    events = _read_events(db, "s1")
+    narration_events = [event for event in events if event.event_type == "narration_appended"]
+    # 기본 stream_text는 마침표 둘로 끝나는 두 문장이다 — 판단 실패와
+    # 무관하게 그대로 두 조각이 기록된다.
+    assert len(narration_events) == 2
+
+    clock_advanced = [event for event in events if event.event_type == "clock_advanced"]
+    assert clock_advanced == []
+
+
+def test_clock_judge_failure_notice_only_on_stderr_never_stdout(
+    tmp_db_path, monkeypatch, capsys
+) -> None:
+    """판단 실패 문구가 `capsys`로 잡은 표준출력에는 없고 표준오류에만
+    있다 — 플레이어 화면과 운영자 로그의 구분이다(D-05)."""
+    db = str(tmp_db_path)
+    provider = _MultiRoleProvider(clock_judge_always_raises=True)
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    failure_phrase = "clock judge 대역이 일부러 실패한다"
+    assert failure_phrase not in captured.out
+    assert failure_phrase in captured.err
+
+
+def test_signal_skip_never_calls_deep_judgment_provider(tmp_db_path, monkeypatch) -> None:
+    """신호가 `"skip"`이면 깊은 판단 제공자가 한 번도 안 불린다 —
+    관문(judge_clock_signal)만 돌고 배경 작업이 아예 등록되지 않는다(DP-01)."""
+    db = str(tmp_db_path)
+    provider = _MultiRoleProvider(signal_value=_SIGNAL_SKIP_JSON)
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code == 0
+
+    # ① action_classifier + ② clock_judge 관문(신호=skip) 두 번만 불렸다 —
+    # ③ 깊은 판단 호출은 없다.
+    assert provider.complete_calls == 2
+
+    events = _read_events(db, "s1")
+    clock_advanced = [event for event in events if event.event_type == "clock_advanced"]
+    assert clock_advanced == []
