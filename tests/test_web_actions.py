@@ -650,6 +650,73 @@ def test_situation_judge_both_attempts_fail_narration_still_completes(
     assert narrations
 
 
+# ---------------------------------------------------------------------------
+# 09-03 (ARCH-04/ARCH-05): 세 판단(situation_judge/scene_entity_judge/
+# clock_judge)이 한 번의 confirm 요청마다 정확히 하나씩 `ai_invoked` 사건을
+# 남기고, scene_entity_judge만 두 시도 모두 실패해도 서사는 그대로 나온다.
+# ---------------------------------------------------------------------------
+
+
+def test_confirm_records_exactly_one_ai_invoked_per_parallel_judgment_role(
+    web_client_with_fake_provider,
+) -> None:
+    """한 번의 confirm 요청이 `situation_judge`·`scene_entity_judge`·
+    `clock_judge` 각각의 `ai_invoked` 사건을 하나씩 남긴다(ARCH-04)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert response.status_code == 200
+
+        ai_events = _events_of_type(client, "ai_invoked")
+
+    for role in ("situation_judge", "scene_entity_judge", "clock_judge"):
+        matching = [event for event in ai_events if event["agent_role"] == role]
+        assert len(matching) == 1, f"{role}: {len(matching)}개"
+
+
+def test_scene_entity_judge_both_attempts_fail_narration_still_completes(
+    web_client_with_fake_provider,
+) -> None:
+    """장면 신규 대상 판단이 두 시도 모두 실패해도 서사는 그대로 나오고
+    확인 요청이 성공(200)으로 끝난다(ARCH-05, D-05) — 나머지 두 판단 결과는
+    그대로 쓰인다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    scene_entity_judge = _AlwaysRaisingCompleteProvider()
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=gm, scene_entity_judge=scene_entity_judge
+    ) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert response.status_code == 200
+        body = response.json()
+
+        entity_ai = [
+            event
+            for event in _events_of_type(client, "ai_invoked")
+            if event["agent_role"] == "scene_entity_judge"
+        ]
+        situation_ai = [
+            event
+            for event in _events_of_type(client, "ai_invoked")
+            if event["agent_role"] == "situation_judge"
+        ]
+        narrations = _events_of_type(client, "narration_appended")
+
+    assert body["narration_failed"] is False
+    assert body["narration_chunk_count"] == 2
+    assert len(entity_ai) == 1
+    assert entity_ai[0]["prompt_tokens"] == 0
+    assert len(situation_ai) == 1
+    assert narrations
+
+
 def test_confirm_different_move_after_confirmed_returns_400_and_appends_nothing(
     web_client_with_fake_provider,
 ) -> None:

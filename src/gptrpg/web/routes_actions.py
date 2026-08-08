@@ -460,16 +460,20 @@ async def confirm(
         character_names=_CHARACTER_NAMES,
     )
 
-    # 상황판단·시계 신호 관문을 narrate() 호출 **전**에 병렬로 부른다
-    # (09-RESEARCH.md Pitfall 3이 지목한 정확한 구간, ARCH-04). `choices`를
-    # 재사용하고 `load_config`를 다시 부르지 않는다 — `situation_judge`/
-    # `clock_judge`가 설정 파일에 없어도 `ROLE_FALLBACKS`가 이미 다른 역할의
-    # 선택을 물려줬다. 이 구간 전체를 `try`로 감싸 실패 시 stderr 한 줄만
-    # 남기고 빈 판단으로 계속 간다 — 판단 실패가 확인 요청을 막지 않는다
-    # (D-05, ARCH-05).
+    # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
+    # 병렬로 부른다(09-RESEARCH.md Pitfall 3이 지목한 정확한 구간, ARCH-04).
+    # `choices`를 재사용하고 `load_config`를 다시 부르지 않는다 —
+    # `situation_judge`/`scene_entity_judge`/`clock_judge`가 설정 파일에
+    # 없어도 `ROLE_FALLBACKS`가 이미 다른 역할의 선택을 물려줬다. 이 구간
+    # 전체를 `try`로 감싸 실패 시 stderr 한 줄만 남기고 빈 판단으로 계속
+    # 간다 — 판단 실패가 확인 요청을 막지 않는다(D-05, ARCH-05).
     situation_judge_choice = choices["situation_judge"]
     situation_provider: Provider = request.app.state.provider_resolver(
         "situation_judge", choices, os.environ
+    )
+    entity_judge_choice = choices["scene_entity_judge"]
+    entity_provider: Provider = request.app.state.provider_resolver(
+        "scene_entity_judge", choices, os.environ
     )
     clock_judge_choice = choices["clock_judge"]
     clock_provider: Provider = request.app.state.provider_resolver(
@@ -479,6 +483,8 @@ async def confirm(
         judgments = await gather_turn_judgments(
             situation_provider=situation_provider,
             situation_model=situation_judge_choice.model,
+            entity_provider=entity_provider,
+            entity_model=entity_judge_choice.model,
             clock_provider=clock_provider,
             clock_model=clock_judge_choice.model,
             ctx=ctx,
@@ -487,12 +493,12 @@ async def confirm(
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단 실패가 확인 요청을 막지 않는다
         print(
-            f"경고: 상황판단/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
+            f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
             file=sys.stderr,
         )
         judgments = empty_turn_judgments()
 
-    # 새 에이전트 호출 둘의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
+    # 새 에이전트 호출 셋의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
     # (MEAS-02, `master_gm` 호출 기록과 같은 규율). 새 에이전트 호출이 계측에서
     # 빠지지 않는다.
     await actor.submit(
@@ -504,6 +510,18 @@ async def confirm(
             completion_tokens=judgments.situation.ai.completion_tokens,
             cached_prompt_tokens=judgments.situation.ai.cached_prompt_tokens,
             latency_ms=judgments.situation.ai.elapsed_ms,
+            caused_by_seq=confirm_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="scene_entity_judge",
+            model=entity_judge_choice.model,
+            provider=entity_judge_choice.provider,
+            prompt_tokens=judgments.entity.ai.prompt_tokens,
+            completion_tokens=judgments.entity.ai.completion_tokens,
+            cached_prompt_tokens=judgments.entity.ai.cached_prompt_tokens,
+            latency_ms=judgments.entity.ai.elapsed_ms,
             caused_by_seq=confirm_seq,
         )
     )

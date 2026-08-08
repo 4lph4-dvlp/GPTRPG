@@ -218,8 +218,8 @@ def test_stream_always_fails_before_first_chunk_exits_nonzero_with_zero_narratio
     assert not any(event.event_type == "narration_appended" for event in events)
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    # 09-02: 분류기 + 상황판단 + 시계 신호 관문 + 진행자(실패해도 기록된다) 네 건.
-    assert len(ai_events) == 4
+    # 09-03: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 진행자(실패해도 기록된다) 다섯 건.
+    assert len(ai_events) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -271,8 +271,8 @@ def test_narrate_name_replaced_with_failing_generator_exits_nonzero_and_keeps_em
     assert narration_events[0].text == "이미 나간 문장 하나."
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    # 09-02: 분류기 + 상황판단 + 시계 신호 관문 + 진행자 네 건.
-    assert len(ai_events) == 4
+    # 09-03: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 진행자 다섯 건.
+    assert len(ai_events) == 5
 
 
 # ---------------------------------------------------------------------------
@@ -453,3 +453,143 @@ def test_situation_judge_both_attempts_fail_narration_still_completes_and_turn_e
     assert len(situation_ai_events) == 1
     assert situation_ai_events[0].prompt_tokens == 0
     assert situation_ai_events[0].completion_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# 시험 8 (09-03, ARCH-04/ARCH-05): scene_entity_judge가 두 시도 모두
+# 실패해도 서사는 그대로 나오고 턴이 끝까지 간다 — 나머지 두 판단 결과는
+# 그대로 쓰인다. 정상 실행에서는 세 판단 각자 정확히 하나씩 ai_invoked를
+# 남긴다.
+# ---------------------------------------------------------------------------
+
+
+class _SceneEntityJudgeAlwaysFailsProvider:
+    """`--provider fake --model fake-model`이 모든 역할에 같은 이름을 쓰게
+    만들므로, `system` 프롬프트의 역할 지시문 텍스트로 장면 신규 대상 판단
+    호출만 골라 실패시키는 대역이 필요하다. 분류기·상황판단·시계 신호
+    관문·진행자는 정상 동작한다."""
+
+    name = "scene-entity-judge-always-fails"
+
+    def __init__(self) -> None:
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        combined = " ".join(block.get("text", "") for block in system)
+        if "장면 신규 대상 판단자" in combined:
+            raise RuntimeError("scene_entity_judge 대역이 일부러 실패한다")
+        if "상황판단 담당" in combined:
+            return AgentResult(
+                ok=True,
+                value=json.dumps([{"scene_summary": "장면.", "facts": []}]),
+                elapsed_ms=1,
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+        if "위협 시계 관문 판단자" in combined:
+            return AgentResult(
+                ok=True,
+                value=json.dumps([{"signal": "skip", "why": "이번 턴은 무관하다"}]),
+                elapsed_ms=1,
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+        # 행동 분류기
+        return AgentResult(ok=True, value=_CANDIDATE_JSON, elapsed_ms=1, prompt_tokens=5, completion_tokens=3)
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        yield "문이 삐걱거리며 열린다. "
+        yield "안에서 서늘한 바람이 흘러나온다."
+        self._last_result = AgentResult(ok=True, value="...", elapsed_ms=1, prompt_tokens=7, completion_tokens=4)
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("complete() 또는 stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_scene_entity_judge_both_attempts_fail_narration_still_completes_and_turn_exits_zero(
+    tmp_db_path, monkeypatch
+):
+    """장면 신규 대상 판단이 두 시도 모두 실패해도 서사는 그대로 나오고
+    턴이 끝까지 간다(ARCH-05, D-05) — `_turn_flow`의 종료 코드는 0이다."""
+    db = str(tmp_db_path)
+    provider = _SceneEntityJudgeAlwaysFailsProvider()
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code == 0
+
+    events = _read_events(db, "s1")
+    narration_events = [event for event in events if event.event_type == "narration_appended"]
+    assert len(narration_events) == 2
+
+    entity_ai_events = [
+        event
+        for event in events
+        if event.event_type == "ai_invoked" and event.agent_role == "scene_entity_judge"
+    ]
+    assert len(entity_ai_events) == 1
+    assert entity_ai_events[0].prompt_tokens == 0
+    assert entity_ai_events[0].completion_tokens == 0
+
+
+def test_turn_records_exactly_one_ai_invoked_per_parallel_judgment_role(
+    tmp_db_path, monkeypatch
+):
+    """정상 실행에서 `situation_judge`·`scene_entity_judge`·`clock_judge`
+    각각 정확히 하나의 `ai_invoked` 사건을 남긴다(ARCH-04)."""
+    db = str(tmp_db_path)
+
+    class _AllRolesSucceedProvider:
+        name = "all-roles-succeed"
+
+        def __init__(self) -> None:
+            self._last_result: AgentResult | None = None
+
+        def list_models(self) -> list[str]:
+            return ["fake-model"]
+
+        def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+            combined = " ".join(block.get("text", "") for block in system)
+            if "상황판단 담당" in combined:
+                value = json.dumps([{"scene_summary": "장면.", "facts": []}])
+            elif "장면 신규 대상 판단자" in combined:
+                value = "[]"
+            elif "위협 시계 관문 판단자" in combined:
+                value = json.dumps([{"signal": "skip", "why": "이번 턴은 무관하다"}])
+            else:
+                value = _CANDIDATE_JSON
+            return AgentResult(ok=True, value=value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1)
+
+        def stream(self, *, model, system, messages, max_tokens, timeout_s):
+            yield "문이 삐걱거리며 열린다. "
+            yield "안에서 서늘한 바람이 흘러나온다."
+            self._last_result = AgentResult(
+                ok=True, value="...", elapsed_ms=1, prompt_tokens=7, completion_tokens=4
+            )
+
+        def last_result(self) -> AgentResult:
+            if self._last_result is None:
+                raise RuntimeError("complete() 또는 stream()을 먼저 불러야 last_result()를 부를 수 있다")
+            return self._last_result
+
+        def note_result(self, result: AgentResult) -> None:
+            self._last_result = result
+
+    _install_fake_provider(monkeypatch, _AllRolesSucceedProvider())
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code == 0
+
+    events = _read_events(db, "s1")
+    ai_events = [event for event in events if event.event_type == "ai_invoked"]
+    for role in ("situation_judge", "scene_entity_judge", "clock_judge"):
+        matching = [event for event in ai_events if event.agent_role == role]
+        assert len(matching) == 1, f"{role}: {len(matching)}개"

@@ -690,6 +690,7 @@ def test_stall_is_not_retried(fake_session_log) -> None:
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
 
     sentences = list(

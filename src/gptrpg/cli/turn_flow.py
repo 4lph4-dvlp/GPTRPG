@@ -290,15 +290,20 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
 
     check_summary = f"{picked.move} 판정 결과 {check_event.grade} (목표 {check_event.target})"
 
-    # 상황판단·시계 신호 관문을 narrate() 호출 **전**에 병렬로 부른다(ARCH-04).
-    # 웹과 달리 여기서는 이벤트 루프를 막아도 되는 자리가 아니다(액터의 큐
-    # 소비 태스크가 같은 루프에 있다) — `gather_turn_judgments` 내부가 이미
-    # `asyncio.to_thread`로 두 판단을 작업 스레드로 내보낸다. 이 구간 전체를
-    # `try`로 감싸 실패 시 stderr 한 줄만 남기고 빈 판단으로 계속 간다(D-05)
-    # — 판단이 실패해도 `_turn_flow`의 종료 코드는 영향받지 않는다.
+    # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
+    # 병렬로 부른다(ARCH-04). 웹과 달리 여기서는 이벤트 루프를 막아도 되는
+    # 자리가 아니다(액터의 큐 소비 태스크가 같은 루프에 있다) —
+    # `gather_turn_judgments` 내부가 이미 `asyncio.to_thread`로 세 판단을
+    # 작업 스레드로 내보낸다. 이 구간 전체를 `try`로 감싸 실패 시 stderr
+    # 한 줄만 남기고 빈 판단으로 계속 간다(D-05) — 판단이 실패해도
+    # `_turn_flow`의 종료 코드는 영향받지 않는다.
     situation_judge_choice = _resolve_role_choice(args, "situation_judge")
     situation_provider = resolve_provider(
         "situation_judge", {"situation_judge": situation_judge_choice}, os.environ
+    )
+    entity_judge_choice = _resolve_role_choice(args, "scene_entity_judge")
+    entity_provider = resolve_provider(
+        "scene_entity_judge", {"scene_entity_judge": entity_judge_choice}, os.environ
     )
     clock_judge_choice = _resolve_role_choice(args, "clock_judge")
     clock_provider = resolve_provider(
@@ -308,6 +313,8 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         judgments = await gather_turn_judgments(
             situation_provider=situation_provider,
             situation_model=situation_judge_choice.model,
+            entity_provider=entity_provider,
+            entity_model=entity_judge_choice.model,
             clock_provider=clock_provider,
             clock_model=clock_judge_choice.model,
             ctx=ctx,
@@ -316,12 +323,12 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단이 실패해도 턴을 막지 않는다
         print(
-            f"경고: 상황판단/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
+            f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
             file=sys.stderr,
         )
         judgments = empty_turn_judgments()
 
-    # 새 에이전트 호출 둘의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
+    # 새 에이전트 호출 셋의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
     # (MEAS-02, 아래 `master_gm` 호출 기록과 같은 규율).
     await actor.submit(
         RecordAiCall(
@@ -332,6 +339,18 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             completion_tokens=judgments.situation.ai.completion_tokens,
             cached_prompt_tokens=judgments.situation.ai.cached_prompt_tokens,
             latency_ms=judgments.situation.ai.elapsed_ms,
+            caused_by_seq=confirm_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="scene_entity_judge",
+            model=entity_judge_choice.model,
+            provider=entity_judge_choice.provider,
+            prompt_tokens=judgments.entity.ai.prompt_tokens,
+            completion_tokens=judgments.entity.ai.completion_tokens,
+            cached_prompt_tokens=judgments.entity.ai.cached_prompt_tokens,
+            latency_ms=judgments.entity.ai.elapsed_ms,
             caused_by_seq=confirm_seq,
         )
     )

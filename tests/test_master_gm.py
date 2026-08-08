@@ -114,6 +114,7 @@ def test_narrate_yields_at_least_two_chunks_in_order() -> None:
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
     provider = _TwoSentenceStreamProvider()
     sentences = list(
@@ -289,6 +290,7 @@ def test_narrate_gives_up_and_marks_failure_when_stream_never_produces_anything(
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
     provider = _StallsForeverStreamProvider(stall_s=1.0)
     sentences = list(
@@ -314,6 +316,7 @@ def test_narrate_keeps_already_emitted_sentence_when_stream_stalls_mid_way() -> 
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
     provider = _EmitsOneThenStallsForeverProvider(stall_s=1.0)
     sentences = list(
@@ -348,6 +351,7 @@ def test_narrate_marks_failure_through_delegate_shaped_provider_when_stream_neve
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
     provider = _DelegateShapedStallsForeverProvider(stall_s=1.0)
     sentences = list(
@@ -372,6 +376,7 @@ def test_narrate_keeps_already_emitted_sentence_through_delegate_shaped_provider
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
     provider = _DelegateShapedEmitsOneThenStallsForeverProvider(stall_s=1.0)
     sentences = list(
@@ -401,6 +406,7 @@ def test_narrate_does_not_call_note_result_on_successful_completion() -> None:
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
     provider = _TwoSentenceStreamProvider()
     note_result_calls: list[AgentResult] = []
@@ -483,6 +489,7 @@ def test_narrate_through_real_delegating_nim_provider_keeps_emitted_chunk_and_ma
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
     sentences = list(
         narrate(

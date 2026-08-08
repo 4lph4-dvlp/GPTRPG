@@ -210,6 +210,7 @@ def _blank_facts() -> NarrationFacts:
         scene_entities=(),
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
 
 

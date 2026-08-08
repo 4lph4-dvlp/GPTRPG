@@ -106,8 +106,8 @@ def test_turn_runs_full_loop_and_records_events_in_causal_order(
     assert check_event.seq < narration_events[0].seq
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    # 09-02: 분류기 + 상황판단 + 시계 신호 관문 + 진행자 네 건.
-    assert len(ai_events) == 4
+    # 09-03: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 진행자 다섯 건.
+    assert len(ai_events) == 5
     for ai_event in ai_events:
         assert ai_event.latency_ms >= 0
         assert ai_event.prompt_tokens > 0

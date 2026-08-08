@@ -19,6 +19,7 @@ from gptrpg.agents.clock_judge import ClockSignal
 from gptrpg.agents.context import ClockState, NarrationFacts
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import chunk_sentences, narrate
+from gptrpg.agents.scene_entity_judge import EntityJudgment
 from gptrpg.agents.situation_judge import SituationJudgment
 from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST
 from gptrpg.turn.judgments import TurnJudgments, build_narration_facts
@@ -57,6 +58,7 @@ def _narration_facts(**overrides) -> NarrationFacts:
         scene_entities=THREAT_CAST,
         character_state=(),
         recent_turns=(),
+        new_entities=(),
     )
     base.update(overrides)
     return NarrationFacts(**base)
@@ -144,6 +146,7 @@ def test_situation_summary_can_carry_scenario_text_verbatim_into_narration_messa
     )
     judgments = TurnJudgments(
         situation=situation_judgment,
+        entity=EntityJudgment(entities=(), ai=empty_ai),
         clock=ClockSignal(should_check=False, why="", ai=empty_ai),
     )
 

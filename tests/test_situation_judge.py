@@ -64,6 +64,7 @@ def _narration_facts(**overrides) -> NarrationFacts:
         scene_entities=THREAT_CAST,
         character_state=(),
         recent_turns=("플레이어: 문을 두드린다",),
+        new_entities=(),
     )
     base.update(overrides)
     return NarrationFacts(**base)
@@ -84,6 +85,7 @@ def test_narration_facts_field_names_have_no_clock_state_slot():
         "scene_entities",
         "character_state",
         "recent_turns",
+        "new_entities",
     }
 
 

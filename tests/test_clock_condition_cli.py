@@ -64,18 +64,19 @@ def _read_events(db: str, session: str):
 
 
 class _MultiRoleProvider:
-    """`--provider fake --model fake-model`이 네 역할(action_classifier/
-    situation_judge/master_gm/clock_judge) 전부에 같은 제공자 이름을 쓰게
-    만드는 대역 하나가 필요하다.
+    """`--provider fake --model fake-model`이 다섯 역할(action_classifier/
+    situation_judge/scene_entity_judge/master_gm/clock_judge) 전부에 같은
+    제공자 이름을 쓰게 만드는 대역 하나가 필요하다.
 
     09-02부터는 `situation_judge`와 `clock_judge`(관문)가 `asyncio.gather`로
-    **동시에** 돈다(ARCH-04) — 두 판단이 같은 이 대역 인스턴스의 `complete()`를
-    스레드 둘에서 부르므로, "호출 순서"로 역할을 가리는 방식은 더 이상
-    안전하지 않다(레이스). 그래서 `system` 프롬프트에 실린 역할 지시문
-    텍스트(각 `build_*_prompt`가 박아 넣는 고정 문구, `prompt_assembly.py`
-    참조)로 역할을 가린다 — 어느 스레드가 먼저 들어와도 항상 맞는 값을
-    돌려준다. `stream()`은 `master_gm.narrate()` 전용이라 `complete()`와
-    호출 수를 공유하지 않는다.
+    **동시에** 돈다(ARCH-04) — 09-03부터는 `scene_entity_judge`도 같은
+    `gather`에 세 번째로 나열된다. 세 판단이 같은 이 대역 인스턴스의
+    `complete()`를 스레드 셋에서 부르므로, "호출 순서"로 역할을 가리는
+    방식은 더 이상 안전하지 않다(레이스). 그래서 `system` 프롬프트에 실린
+    역할 지시문 텍스트(각 `build_*_prompt`가 박아 넣는 고정 문구,
+    `prompt_assembly.py` 참조)로 역할을 가린다 — 어느 스레드가 먼저
+    들어와도 항상 맞는 값을 돌려준다. `stream()`은 `master_gm.narrate()`
+    전용이라 `complete()`와 호출 수를 공유하지 않는다.
     """
 
     name = "fake"
@@ -85,6 +86,7 @@ class _MultiRoleProvider:
         *,
         classify_value: str = _CANDIDATE_JSON,
         situation_value: str = _SITUATION_JSON,
+        entity_value: str = "[]",
         signal_value: str = _SIGNAL_CHECK_JSON,
         condition_value: str = _VERDICT_ADVANCE_JSON,
         stream_text: str = "문이 요란하게 부서진다. 안에서 서늘한 바람이 흘러나온다.",
@@ -92,6 +94,7 @@ class _MultiRoleProvider:
     ) -> None:
         self.classify_value = classify_value
         self.situation_value = situation_value
+        self.entity_value = entity_value
         self.signal_value = signal_value
         self.condition_value = condition_value
         self.stream_text = stream_text
@@ -115,6 +118,10 @@ class _MultiRoleProvider:
         if "상황판단 담당" in combined_system:
             return AgentResult(
                 ok=True, value=self.situation_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
+            )
+        if "장면 신규 대상 판단자" in combined_system:
+            return AgentResult(
+                ok=True, value=self.entity_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
             )
         if "위협 시계 관문 판단자" in combined_system:
             if self.clock_judge_always_raises:
@@ -234,9 +241,9 @@ def test_signal_skip_never_calls_deep_judgment_provider(tmp_db_path, monkeypatch
     exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
     assert exit_code == 0
 
-    # ① action_classifier + ② situation_judge + ③ clock_judge 관문(신호=skip)
-    # 세 번만 불렸다 — ④ 깊은 판단 호출은 없다.
-    assert provider.complete_calls == 3
+    # ① action_classifier + ② situation_judge + ③ scene_entity_judge +
+    # ④ clock_judge 관문(신호=skip) 네 번만 불렸다 — ⑤ 깊은 판단 호출은 없다.
+    assert provider.complete_calls == 4
 
     events = _read_events(db, "s1")
     clock_advanced = [event for event in events if event.event_type == "clock_advanced"]
