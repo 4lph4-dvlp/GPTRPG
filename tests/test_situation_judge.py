@@ -147,6 +147,39 @@ def test_narration_system_unchanged_when_only_turn_varying_fields_differ():
 
 
 # ---------------------------------------------------------------------------
+# build_gm_prompt — new_entities(09-03, D-03 (a))가 turn 조각에 실린다
+# ---------------------------------------------------------------------------
+
+
+def test_new_entities_names_appear_in_narration_messages_when_present():
+    facts = _narration_facts(new_entities=("부서진 등불", "낯선 파수꾼"))
+    _system, messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=facts
+    )
+    turn_text = messages[0]["content"]
+    assert "부서진 등불" in turn_text
+    assert "낯선 파수꾼" in turn_text
+
+
+def test_new_entities_line_absent_when_empty_messages_shorter_than_when_present():
+    """빈 목록 자리표시자가 매 턴 들어가면 모델이 그것을 소재로 착각한다 —
+    비어 있으면 그 줄 자체가 안 들어간다는 것을 문자열 길이 차이로
+    확인한다(문자열 부재만으로는 "줄 자체가 없다"를 증명하지 못한다 —
+    자리표시자 문구도 빈 상태를 가리키는 문자열을 포함할 수 있으므로)."""
+    empty_facts = _narration_facts(new_entities=())
+    filled_facts = _narration_facts(new_entities=("부서진 등불",))
+
+    _system, empty_messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=empty_facts
+    )
+    _system, filled_messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=filled_facts
+    )
+
+    assert len(empty_messages[0]["content"]) < len(filled_messages[0]["content"])
+
+
+# ---------------------------------------------------------------------------
 # build_situation_prompt — 지시문·시나리오 원문이 사라진 게 아니라 옮겨 왔다
 # ---------------------------------------------------------------------------
 
