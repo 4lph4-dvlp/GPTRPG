@@ -1,7 +1,13 @@
 """시나리오 데이터가 데이터에서 프롬프트 텍스트까지 한 경로로 통하는지 확인한다.
 
-가짜 제공자는 필요 없다 — `build_turn_context`를 직접 불러 `_session_block_text`
-로 펼친 문자열만 검사한다(프롬프트 조립까지만 확인한다).
+가짜 제공자는 필요 없다 — `build_turn_context`를 직접 불러 프롬프트 조립까지만
+확인한다.
+
+**09-02부터 이 파일은 상황판단(`build_situation_prompt`) 프롬프트에 대한
+검사다.** 서술이 아니다 — 서술(`build_gm_prompt`)의 `system`에는 시나리오
+원문이 없다는 **정반대** 검사는 `tests/test_narration_isolation.py`가 한다.
+두 파일이 서로를 가리킨다: 여기서 시나리오 내용이 "있다"고 증명하는 자리를
+찾으면 `test_narration_isolation.py`에서 "없다"는 짝을 확인할 것.
 """
 
 from gptrpg.agents import prompt_assembly
@@ -35,9 +41,19 @@ def _advance_clock(store: EventStore, session_id: str, segment_index: int) -> No
     )
 
 
-def _session_block(store: EventStore, session_id: str) -> str:
+def _situation_system(store: EventStore, session_id: str) -> str:
+    """`build_situation_prompt`가 만드는 `system` 두 조각을 이어 붙인 문자열.
+
+    상황판단은 시나리오 원문(정체·원하는 것·파국·칸 설명)을 볼 자격이 있는
+    유일한 역할이다 — 아래 시험들이 그 사실을 실제 데이터로 증명한다.
+    """
     ctx = build_turn_context(store, session_id, DUNGEONWORLD_LIKE_ID)
-    return prompt_assembly._session_block_text(ctx)
+    system, _messages = prompt_assembly.build_situation_prompt(
+        rulebook_display_name="던전월드 계열",
+        ctx=ctx,
+        check_summary="hack_and_slash 판정 결과 miss (목표 10)",
+    )
+    return "\n".join(block["text"] for block in system)
 
 
 def _resolve_failing_check(store: EventStore, session_id: str) -> None:
@@ -61,38 +77,43 @@ def _resolve_failing_check(store: EventStore, session_id: str) -> None:
     )
 
 
-def test_scenario_name_identity_wants_appear_in_session_block(tmp_db_path):
+def test_scenario_name_identity_wants_appear_in_situation_system(tmp_db_path):
+    """이 검사는 이제 상황판단 프롬프트에 대한 것이다 — 서술 프롬프트에 대한
+    같은 검사는 `tests/test_narration_isolation.py`에서 정반대(포함하지
+    않는다)를 단언한다."""
     store = EventStore(tmp_db_path)
     store.initialize()
     try:
-        block = _session_block(store, "s1")
+        system = _situation_system(store, "s1")
     finally:
         store.close()
 
-    assert M0_THREAT_CLOCK.name in block
-    assert M0_THREAT_CLOCK.identity in block
-    assert M0_THREAT_CLOCK.wants in block
+    assert M0_THREAT_CLOCK.name in system
+    assert M0_THREAT_CLOCK.identity in system
+    assert M0_THREAT_CLOCK.wants in system
 
 
-def test_session_block_is_byte_identical_across_two_calls_in_same_segment(tmp_db_path):
+def test_situation_system_is_byte_identical_across_two_calls_in_same_segment(tmp_db_path):
+    """캐싱 안정성 — 같은 칸에서 두 번 호출해도 `system`이 바이트 단위로 같다.
+    턴마다 달라지는 사실 묶음은 `messages`에만 실린다는 증거다(DP-05)."""
     store = EventStore(tmp_db_path)
     store.initialize()
     try:
-        first = _session_block(store, "s1")
-        second = _session_block(store, "s1")
+        first = _situation_system(store, "s1")
+        second = _situation_system(store, "s1")
     finally:
         store.close()
 
     assert first == second
 
 
-def test_session_block_changes_after_clock_advances_a_segment(tmp_db_path):
+def test_situation_system_changes_after_clock_advances_a_segment(tmp_db_path):
     store = EventStore(tmp_db_path)
     store.initialize()
     try:
-        before = _session_block(store, "s1")
+        before = _situation_system(store, "s1")
         _advance_clock(store, "s1", segment_index=1)
-        after = _session_block(store, "s1")
+        after = _situation_system(store, "s1")
     finally:
         store.close()
 
@@ -139,18 +160,18 @@ def test_catastrophe_is_non_empty():
 # ---------------------------------------------------------------------------
 
 
-def test_session_block_does_not_leak_accumulated_failure_count(tmp_db_path):
+def test_situation_system_does_not_leak_accumulated_failure_count(tmp_db_path):
     """실패가 쌓인 상태(`fails_since_clock` != 0)에서 조립해도 그 숫자가
-    세션 고정 블록에 나타나지 않는다 — 같은 칸 안에서는 실패 유무와 무관하게
+    상황판단 `system`에 나타나지 않는다 — 같은 칸 안에서는 실패 유무와 무관하게
     byte-identical해야 한다."""
     store = EventStore(tmp_db_path)
     store.initialize()
     try:
-        before = _session_block(store, "s1")
+        before = _situation_system(store, "s1")
         _resolve_failing_check(store, "s1")
         _resolve_failing_check(store, "s1")
         state = rebuild_state(store, "s1")
-        after = _session_block(store, "s1")
+        after = _situation_system(store, "s1")
     finally:
         store.close()
 
