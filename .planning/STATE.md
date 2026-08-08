@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 9
+current_phase: 09
 current_phase_name: 에이전트 구조 재편
 status: executing
-stopped_at: Phase 9 context gathered
-last_updated: "2026-08-06T17:56:37.062Z"
-last_activity: 2026-08-06
-last_activity_desc: Phase 08 complete (identity-and-idempotency, 4/4 plans, verification passed). next_phase pointer corrected 12.1 → 9 (see frontmatter note)
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-08-08T16:24:47.710Z"
+last_activity: 2026-08-07
+last_activity_desc: Phase 09 execution started
 progress:
-  total_phases: 3
+  total_phases: 11
   completed_phases: 1
   total_plans: 8
-  completed_plans: 4
-  percent: 33
+  completed_plans: 5
+  percent: 9
 ---
 
 # Project State
@@ -24,18 +24,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 08 complete — next up Phase 9 — 에이전트 구조 재편
+**Current focus:** Phase 09 — 에이전트 구조 재편
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 9 of 16 (에이전트 구조 재편) — Phase 8 완료, `/gsd-discuss-phase 9` 또는 `/gsd-plan-phase 9` 대기
-Plan: Not started
+Phase: 09 (에이전트 구조 재편) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-08-06 — Phase 08 complete (identity-and-idempotency, 4/4 plans, verification passed). next_phase pointer corrected 12.1 → 9 (see frontmatter note)
+Last activity: 2026-08-09 — Completed 09-01-PLAN.md
 
-Progress: [██████████] 100%
+Progress: [██████░░░░] 63%
 
 ## Performance Metrics
 
@@ -85,6 +85,7 @@ Progress: [██████████] 100%
 | Phase 08 P02 | unspecified | 3 tasks | 5 files |
 | Phase 08 P03 | 20min | 4 tasks | 8 files |
 | Phase 08 P04 | 13min | 3 tasks | 5 files |
+| Phase 09 P01 | ~3h (2 sessions, interrupted+resumed) | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -153,6 +154,8 @@ Progress: [██████████] 100%
 - [Phase ?]: 08-03 [deviation, Rule 1 bug found in Task 4]: route-level resolve-reuse decision left a TOCTOU window under concurrent confirms (reproduced: two distinct resolve_seq from one confirm). Fixed with actor-level AlreadyResolved(CommandRejected) in _prepare_resolve_check, mirroring the AlreadyConfirmed two-tier defense pattern one step further (D-11)
 - [Phase ?]: 08-04: fake_session_log/test_web_actions.py player_id defaults changed p1/p2 -> bram/nari to match production's player_id===character_id convention (D-42) — this is what makes context.py's speaker-label lookup (keyed by event.player_id) attach each character's own display name
 - [Phase ?]: 08-04: ConfirmRequest.target bounded ge=-200/le=200 (covers d100 skill 0-100 + OpenQuest difficulty shifts, and 2d6's low-teens targets); new MAX_MODIFIERS_COUNT=20/MAX_MODIFIER_LEN=128 constants cap ConfirmRequest.modifiers list length + item length; DeclareRequest/ConfirmRequest.rulebook_id reuse existing MAX_ID_LEN
+- [Phase ?]: 09-01: DP-01/DP-02/DP-03/DP-04 확정대로 구현 — clock_judge 관문/깊은 판단 분리, 배경 자동 반영(확인 화면 없음), AGENT_ROLES 다섯 역할 + ROLE_FALLBACKS, 새 사건 종류·스키마 판 올림 없음(ClockAdvanced(trigger="condition") 재사용)
+- [Phase ?]: 09-01 Task 3: D-05/ARCH-05 조용한 실패 계약을 판단 함수·웹 라우트·CLI 세 층 모두에서 시험으로 고정 — 소스 변경 없이 19개 새 단언 전부 통과
 
 ### Pending Todos
 
@@ -202,10 +205,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-06T14:56:24.282Z
-Stopped at: Phase 9 context gathered
+Last session: 2026-08-08T16:24:47.679Z
+Stopped at: Completed 09-01-PLAN.md
 Traceability 갱신 완료
-Resume file: /home/alpha-pi/GPTRPG/.planning/phases/09-agent-architecture/09-CONTEXT.md
+Resume file: None
 
 **다음 행동:** Phase 7(거버넌스 재논의 — D-20 · D-31) 착수. 코드 계획이 아니라 사용자와의
 직접 논의로 시작하는 편이 맞을 수 있다 — `/gsd-plan-phase 7` 실행 전에 D-20/D-31 재논의
