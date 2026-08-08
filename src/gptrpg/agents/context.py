@@ -144,8 +144,11 @@ class NarrationFacts:
     추가하는 것은 곧 ARCH-02 위반이다 — "그 칸은 안 쓰기로 한다"는 관례가
     아니라, 애초에 그 칸이 타입에 없다는 것으로 막는다.
 
-    (09-03이 여기에 `new_entities` 칸을 하나 더한다 — 그 칸도 시나리오
-    원문이 아니라 이번 턴 장면에 새로 등장한 대상 목록일 뿐이다.)
+    `new_entities`(09-03)는 시나리오 원문이 아니다 — 이번 턴 장면에 새로
+    등장한 대상(인물·사물)의 표시 이름 목록일 뿐이다. `scene_entity_judge`가
+    판단한 결과가 여기로 흘러 서술이 그 이름을 자연스럽게 등장시킨다(D-03).
+    기본값 없이 명시 인자로 받는다 — 어느 호출부도 이 칸을 "빈 값이니
+    생략해도 된다"고 착각하지 않게 한다.
     """
 
     check_summary: str
@@ -154,6 +157,7 @@ class NarrationFacts:
     scene_entities: tuple[Entity, ...]
     character_state: tuple[StatEntry, ...]
     recent_turns: tuple[str, ...]
+    new_entities: tuple[str, ...]
 
     def __post_init__(self) -> None:
         if len(self.facts) > SITUATION_FACTS_LIMIT:
@@ -161,4 +165,42 @@ class NarrationFacts:
         if len(self.recent_turns) > RECENT_TURNS_LIMIT:
             raise ContextCapExceeded(
                 "recent_turns", len(self.recent_turns), RECENT_TURNS_LIMIT
+            )
+        if len(self.new_entities) > NEW_ENTITY_LIMIT:
+            raise ContextCapExceeded(
+                "new_entities", len(self.new_entities), NEW_ENTITY_LIMIT
+            )
+
+
+ENTITY_JUDGE_RECENT_TURNS_LIMIT = 4
+"""장면 신규 대상 판단이 받는 최근 대화 상한(ARCH-06 "각자 상한"의 세 번째
+조각). 이 판단은 "방금 무슨 일이 있었나"만 보면 새 인물·사물 등장 여부를
+가릴 수 있으므로 서술용 `RECENT_TURNS_LIMIT`(10)보다 좁다 — `clock_judge`의
+`CLOCK_JUDGE_RECENT_TURNS_LIMIT`과 같은 이유의 좁힘이다."""
+
+NEW_ENTITY_LIMIT = 3
+"""한 턴에 서술이 새로 소개할 수 있는 대상(인물·사물) 개수 상한.
+`action_classifier.MAX_CANDIDATES = 3`과 같은 이유의 상한이다 — 상한이
+없으면 모델이 장면을 통째로 새로 짓는 우회로가 열린다."""
+
+
+@dataclass(frozen=True)
+class EntityJudgeContext:
+    """`scene_entity_judge` 역할(judge_new_entity)이 받는 문맥 — 딱 세 칸.
+
+    **시계 상태 칸도 캐릭터 상태 칸도 없다** — "이번 판정 결과가 장면에
+    새 인물·사물을 등장시키는가"를 판단하는 데 위협 시계가 몇 칸째인지도
+    캐릭터의 남은 자원도 필요 없다. 이 값 객체가 그 두 칸을 애초에 갖고
+    있지 않은 것 자체가 ARCH-06의 "각자 상한"이다 — 필요 이상을 못 받게
+    타입으로 막는다(`ClockJudgeContext`와 같은 원리).
+    """
+
+    scene_entities: tuple[Entity, ...]
+    recent_turns: tuple[str, ...]
+    check_summary: str
+
+    def __post_init__(self) -> None:
+        if len(self.recent_turns) > ENTITY_JUDGE_RECENT_TURNS_LIMIT:
+            raise ContextCapExceeded(
+                "recent_turns", len(self.recent_turns), ENTITY_JUDGE_RECENT_TURNS_LIMIT
             )

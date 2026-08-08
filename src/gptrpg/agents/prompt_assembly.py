@@ -16,6 +16,7 @@
 
 from gptrpg.agents.context import (
     ClockJudgeContext,
+    EntityJudgeContext,
     NarrationFacts,
     SITUATION_FACTS_LIMIT,
     TurnContext,
@@ -194,6 +195,11 @@ def build_gm_prompt(
         f"사실:\n{_format_facts(facts.facts)}\n\n"
         f"방금 판정 결과: {facts.check_summary}"
     )
+    if facts.new_entities:
+        turn += (
+            f"\n\n이번 장면에 새로 등장하는 대상: {', '.join(facts.new_entities)}"
+            " — 이 이름들을 자연스럽게 등장시켜라."
+        )
     messages = [{"role": "user", "content": turn}]
     return system, messages
 
@@ -318,6 +324,44 @@ def build_clock_condition_prompt(
         f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"
         f"방금 판정 결과: {ctx.check_summary}\n\n"
         f"이번 턴 서사: {narration_text}"
+    )
+    messages = [{"role": "user", "content": turn}]
+    return system, messages
+
+
+def build_scene_entity_prompt(
+    *,
+    rulebook_display_name: str,
+    ctx: EntityJudgeContext,
+) -> tuple[list[dict], list[dict]]:
+    """`judge_new_entity`(장면 신규 대상 판단, D-03) 프롬프트를 조립한다.
+
+    **닫힌 출력 계약** — 응답은 JSON 배열이고, 각 원소는 `name`(표시 이름
+    한 단어~짧은 구)과 `kind`(`"person"` 또는 `"thing"` 두 값만) 칸을 갖는
+    객체다. 새로 등장하는 대상이 없으면 빈 배열을 돌려준다. 설명 문장을
+    덧붙이지 않는다. 이미 장면에 있는 대상은 다시 적지 않는다는 지시도
+    포함한다 — 걸러내는 것 자체는 `judge_new_entity`가 결과를 받은 뒤에도
+    한 번 더 하지만(모델이 지시를 놓칠 수 있으므로), 지시문에서부터 막는
+    것이 첫 방어선이다.
+
+    `session` 조각은 `_format_scene_entities(ctx.scene_entities)` — 이미
+    장면에 있는 대상을 모델에게 보여주는 것 자체가 "새로 등장" 여부를
+    가릴 기준이 된다. `messages`는 최근 대화 + 판정 결과다.
+    """
+    permanent = (
+        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 장면 신규 대상 판단자다. "
+        "판정 결과와 최근 대화를 보고, 이번 판정으로 장면에 새로 등장하는 인물이나 "
+        "사물이 있는지만 판단한다. 이미 장면에 있는 대상은 다시 적지 않는다. "
+        "응답은 JSON 배열로만 한다 — 예: "
+        '[{"name": "부서진 등불", "kind": "thing"}]. 새로 등장하는 대상이 없으면 '
+        '빈 배열 []을 돌려준다. `kind`는 "person" 또는 "thing" 두 값만 허용한다. '
+        "설명 문장을 덧붙이지 않는다."
+    )
+    session = _format_scene_entities(ctx.scene_entities)
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = (
+        f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"
+        f"방금 판정 결과: {ctx.check_summary}"
     )
     messages = [{"role": "user", "content": turn}]
     return system, messages

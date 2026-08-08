@@ -55,6 +55,15 @@ SITUATION_TIMEOUT_S = 15.0
 하기 때문이고, D-27이 잠근 두 값(`CLASSIFIER_TIMEOUT_S`·`GM_TIMEOUT_S`)은
 여전히 건드리지 않는다."""
 
+SCENE_ENTITY_TIMEOUT_S = 5.0
+"""scene_entity_judge(장면 신규 대상 판단) 호출 타임아웃(09-03). 닫힌 목록
+(`kind`가 두 값뿐)에서 대상을 몇 개 뽑아 돌려주는 경량 판단이므로
+`action_classifier`/`clock_judge`와 같은 층의 값을 쓴다 — D-04가 이
+판단은 서술 앞에 붙는 지연이므로 **턴 안에서 끝나야 한다**고 정했고,
+그래서 `SITUATION_TIMEOUT_S`(깊은 추론 급)가 아니라 이 값을 쓴다. D-27이
+잠근 두 값(`CLASSIFIER_TIMEOUT_S`·`GM_TIMEOUT_S`)은 여전히 건드리지
+않는다."""
+
 MAX_ATTEMPTS = 2
 """첫 시도 + 재시도 한 번, 그것으로 끝 (D-28). 한 번의 호출 요청이 제공자를
 세 번 이상 때리는 경로가 없다는 것을 이 상수가 못박는다."""
