@@ -50,7 +50,13 @@ class ClockState:
 
 @dataclass(frozen=True)
 class TurnContext:
-    """매 턴 에이전트에게 넘기는 것 딱 네 가지 — 그 이상도 이하도 아니다."""
+    """매 턴 에이전트에게 넘기는 것 딱 네 가지 — 그 이상도 이하도 아니다.
+
+    09-02부터는 `action_classifier`와 `situation_judge` 둘만 이 값 객체를
+    받는다 — 이 둘이 시나리오 원문(시계 상태 포함)까지 필요한 유일한 역할이다.
+    서술(`master_gm.narrate`)은 더 이상 `TurnContext`를 받지 않는다(D-06) —
+    좁아진 `NarrationFacts`(아래)를 받는다.
+    """
 
     scene_entities: tuple[Entity, ...]
     character_state: tuple[StatEntry, ...]
@@ -112,4 +118,47 @@ class ClockJudgeContext:
         if len(self.recent_turns) > CLOCK_JUDGE_RECENT_TURNS_LIMIT:
             raise ContextCapExceeded(
                 "recent_turns", len(self.recent_turns), CLOCK_JUDGE_RECENT_TURNS_LIMIT
+            )
+
+
+SITUATION_FACTS_LIMIT = 5
+"""상황판단(`situation_judge`)이 서술에 넘길 수 있는 사실 문장 개수 상한
+(ARCH-02, ARCH-06 "각자 상한"의 두 번째 조각).
+
+상한이 없으면 상황판단이 시나리오 원문을 통째로 "사실"이라 부르며 옮겨
+담는 우회로가 열린다 — ARCH-02가 막으려는 것이 정확히 그 경로다. 자르는
+책임은 `situation_judge.judge_situation`에 있다(모델이 이 개수보다 많이
+돌려줘도 앞에서부터 잘라 넘긴다) — 아래 `NarrationFacts`는 그래도 넘치면
+예외를 던지는 마지막 방어선이다.
+"""
+
+
+@dataclass(frozen=True)
+class NarrationFacts:
+    """서술(`master_gm.narrate`)이 받는 것 전부 — 위협 시계 상태를 담는 칸이 없다.
+
+    **왜 시계 상태 칸이 아예 없는가(ARCH-02, 잠금 요구사항):** 서술 담당은
+    진행자 지시문·규칙·시나리오 원문(정체·원하는 것·파국 문장·칸 설명)을
+    받지 않는다. 지금 이 칸에서 무슨 일이 벌어지는가는 상황판단이
+    `scene_summary` 한두 문장으로 좁혀 준 것만 받는다. 이 칸을 나중에
+    추가하는 것은 곧 ARCH-02 위반이다 — "그 칸은 안 쓰기로 한다"는 관례가
+    아니라, 애초에 그 칸이 타입에 없다는 것으로 막는다.
+
+    (09-03이 여기에 `new_entities` 칸을 하나 더한다 — 그 칸도 시나리오
+    원문이 아니라 이번 턴 장면에 새로 등장한 대상 목록일 뿐이다.)
+    """
+
+    check_summary: str
+    scene_summary: str
+    facts: tuple[str, ...]
+    scene_entities: tuple[Entity, ...]
+    character_state: tuple[StatEntry, ...]
+    recent_turns: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.facts) > SITUATION_FACTS_LIMIT:
+            raise ContextCapExceeded("facts", len(self.facts), SITUATION_FACTS_LIMIT)
+        if len(self.recent_turns) > RECENT_TURNS_LIMIT:
+            raise ContextCapExceeded(
+                "recent_turns", len(self.recent_turns), RECENT_TURNS_LIMIT
             )

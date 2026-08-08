@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from gptrpg.agents.context import ClockState, TurnContext
+from gptrpg.agents.context import NarrationFacts
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import (
     STREAM_STALL_TIMEOUT_S,
@@ -107,10 +107,12 @@ class _TwoSentenceStreamProvider:
 
 
 def test_narrate_yields_at_least_two_chunks_in_order() -> None:
-    ctx = TurnContext(
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
         scene_entities=(),
         character_state=(),
-        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )
     provider = _TwoSentenceStreamProvider()
@@ -118,8 +120,7 @@ def test_narrate_yields_at_least_two_chunks_in_order() -> None:
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=ctx,
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=facts,
             rulebook_display_name="던전월드 계열",
         )
     )
@@ -281,10 +282,12 @@ class _DelegateShapedEmitsOneThenStallsForeverProvider:
 def test_narrate_gives_up_and_marks_failure_when_stream_never_produces_anything() -> None:
     """조각이 하나도 안 나온 채 멈추면 재시도(MAX_ATTEMPTS)까지 소진한 뒤 실패로
     떨어진다 — 터미널이 무한정 멈추지 않는다."""
-    ctx = TurnContext(
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
         scene_entities=(),
         character_state=(),
-        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )
     provider = _StallsForeverStreamProvider(stall_s=1.0)
@@ -292,8 +295,7 @@ def test_narrate_gives_up_and_marks_failure_when_stream_never_produces_anything(
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=ctx,
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=facts,
             rulebook_display_name="던전월드 계열",
             stall_timeout_s=0.05,
         )
@@ -305,10 +307,12 @@ def test_narrate_gives_up_and_marks_failure_when_stream_never_produces_anything(
 
 def test_narrate_keeps_already_emitted_sentence_when_stream_stalls_mid_way() -> None:
     """이미 나간 조각은 스톨 뒤에도 살아남고, 재시도 없이 거기서 끝난다."""
-    ctx = TurnContext(
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
         scene_entities=(),
         character_state=(),
-        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )
     provider = _EmitsOneThenStallsForeverProvider(stall_s=1.0)
@@ -316,8 +320,7 @@ def test_narrate_keeps_already_emitted_sentence_when_stream_stalls_mid_way() -> 
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=ctx,
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=facts,
             rulebook_display_name="던전월드 계열",
             stall_timeout_s=0.05,
         )
@@ -338,10 +341,12 @@ def test_narrate_marks_failure_through_delegate_shaped_provider_when_stream_neve
 ):
     """03-06 이전이면 여기서 RuntimeError가 났다 — provider._last_result 직접 대입은
     위임 어댑터에서 아무도 읽지 않는 새 속성 하나만 만들고 값을 잃어버렸다."""
-    ctx = TurnContext(
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
         scene_entities=(),
         character_state=(),
-        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )
     provider = _DelegateShapedStallsForeverProvider(stall_s=1.0)
@@ -349,8 +354,7 @@ def test_narrate_marks_failure_through_delegate_shaped_provider_when_stream_neve
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=ctx,
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=facts,
             rulebook_display_name="던전월드 계열",
             stall_timeout_s=0.05,
         )
@@ -361,10 +365,12 @@ def test_narrate_marks_failure_through_delegate_shaped_provider_when_stream_neve
 
 def test_narrate_keeps_already_emitted_sentence_through_delegate_shaped_provider() -> None:
     """위임 모양 이중체에서도 이미 나간 문장은 보존되고 실패 껍데기는 위임 대상에 도달한다."""
-    ctx = TurnContext(
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
         scene_entities=(),
         character_state=(),
-        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )
     provider = _DelegateShapedEmitsOneThenStallsForeverProvider(stall_s=1.0)
@@ -372,8 +378,7 @@ def test_narrate_keeps_already_emitted_sentence_through_delegate_shaped_provider
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=ctx,
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=facts,
             rulebook_display_name="던전월드 계열",
             stall_timeout_s=0.05,
         )
@@ -389,10 +394,12 @@ def test_narrate_keeps_already_emitted_sentence_through_delegate_shaped_provider
 
 
 def test_narrate_does_not_call_note_result_on_successful_completion() -> None:
-    ctx = TurnContext(
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
         scene_entities=(),
         character_state=(),
-        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )
     provider = _TwoSentenceStreamProvider()
@@ -403,8 +410,7 @@ def test_narrate_does_not_call_note_result_on_successful_completion() -> None:
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=ctx,
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=facts,
             rulebook_display_name="던전월드 계열",
         )
     )
@@ -470,18 +476,19 @@ def test_narrate_through_real_delegating_nim_provider_keeps_emitted_chunk_and_ma
 
     provider = NimProvider(_FAKE_KEY)
 
-    ctx = TurnContext(
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
         scene_entities=(),
         character_state=(),
-        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )
     sentences = list(
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=ctx,
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=facts,
             rulebook_display_name="던전월드 계열",
         )
     )

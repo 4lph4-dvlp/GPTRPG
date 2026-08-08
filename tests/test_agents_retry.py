@@ -10,7 +10,7 @@ import json
 from collections.abc import Callable
 
 from gptrpg.agents.action_classifier import UnknownMove, classify
-from gptrpg.agents.context import ClockState, TurnContext
+from gptrpg.agents.context import ClockState, NarrationFacts, TurnContext
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.invoke import CLASSIFIER_TIMEOUT_S, GM_TIMEOUT_S, MAX_ATTEMPTS, call_with_one_retry
 from gptrpg.agents.master_gm import narrate
@@ -202,6 +202,17 @@ def _blank_ctx() -> TurnContext:
     )
 
 
+def _blank_facts() -> NarrationFacts:
+    return NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+    )
+
+
 def test_classify_falls_back_to_empty_candidates_when_provider_fails_twice() -> None:
     provider = _FailingCompleteProvider(fail_times=99)
     proposal = classify(
@@ -272,8 +283,7 @@ def test_narrate_uses_gm_timeout() -> None:
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=_blank_ctx(),
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=_blank_facts(),
             rulebook_display_name="던전월드 계열",
         )
     )
@@ -286,8 +296,7 @@ def test_narrate_mid_stream_failure_keeps_emitted_chunks_and_marks_failure() -> 
         narrate(
             provider=provider,
             model="stub-model",
-            ctx=_blank_ctx(),
-            check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+            facts=_blank_facts(),
             rulebook_display_name="던전월드 계열",
         )
     )

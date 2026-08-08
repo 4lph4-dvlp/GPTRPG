@@ -47,6 +47,14 @@ CLOCK_JUDGE_TIMEOUT_S = 5.0
 값을 쓴다 — D-27이 잠근 두 값(`CLASSIFIER_TIMEOUT_S`·`GM_TIMEOUT_S`)은
 건드리지 않는다."""
 
+SITUATION_TIMEOUT_S = 15.0
+"""situation_judge(상황판단) 호출 타임아웃(09-02). 상황판단은 시나리오
+전체·최근 대화·판정 결과를 읽고 사실을 뽑는 깊은 추론이라 `master_gm`과
+같은 층의 값이다 — 닫힌 신호 하나만 고르는 `clock_judge`/`action_classifier`
+급이 아니다. 별도 상수로 두는 이유는 나중에 이 값만 따로 움직일 수 있어야
+하기 때문이고, D-27이 잠근 두 값(`CLASSIFIER_TIMEOUT_S`·`GM_TIMEOUT_S`)은
+여전히 건드리지 않는다."""
+
 MAX_ATTEMPTS = 2
 """첫 시도 + 재시도 한 번, 그것으로 끝 (D-28). 한 번의 호출 요청이 제공자를
 세 번 이상 때리는 경로가 없다는 것을 이 상수가 못박는다."""

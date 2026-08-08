@@ -681,12 +681,14 @@ def test_stall_is_not_retried(fake_session_log) -> None:
     store = None  # 문맥 조립에 저장소가 필요 없다 — 아래에서 만든 ctx를 그대로 쓴다
     del store
 
-    from gptrpg.agents.context import ClockState, TurnContext
+    from gptrpg.agents.context import NarrationFacts
 
-    ctx = TurnContext(
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 miss (목표 10)",
+        scene_summary="",
+        facts=(),
         scene_entities=(),
         character_state=(),
-        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
         recent_turns=(),
     )
 
@@ -694,8 +696,7 @@ def test_stall_is_not_retried(fake_session_log) -> None:
         narrate(
             provider=provider,
             model="m",
-            ctx=ctx,
-            check_summary="hack_and_slash 판정 결과 miss (목표 10)",
+            facts=facts,
             rulebook_display_name="던전월드 계열",
         )
     )

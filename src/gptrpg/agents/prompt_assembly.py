@@ -14,7 +14,12 @@
 자체가 다르다(D-32가 둘을 따로 설정하게 한 것과 같은 이유).
 """
 
-from gptrpg.agents.context import ClockJudgeContext, TurnContext
+from gptrpg.agents.context import (
+    ClockJudgeContext,
+    NarrationFacts,
+    SITUATION_FACTS_LIMIT,
+    TurnContext,
+)
 from gptrpg.rulebooks.moves import MoveDecl
 
 _CACHE_CONTROL = {"type": "ephemeral"}
@@ -94,11 +99,31 @@ def _format_recent_turns(recent_turns: tuple[str, ...]) -> str:
     return "\n".join(recent_turns)
 
 
+def _format_facts(facts: tuple[str, ...]) -> str:
+    if not facts:
+        return "(추가로 확정된 사실 없음)"
+    return "\n".join(f"- {fact}" for fact in facts)
+
+
 def _session_block_text(ctx: TurnContext) -> str:
     return (
         f"장면 대상:\n{_format_scene_entities(ctx.scene_entities)}\n\n"
         f"캐릭터 상태: {_format_character_state(ctx.character_state)}\n\n"
         f"위협 시계: {_format_clock_state(ctx.clock_state)}"
+    )
+
+
+def _narration_session_block_text(facts: NarrationFacts) -> str:
+    """서술이 보는 세션 고정 조각 — 장면 대상과 캐릭터 상태 둘만 담는다.
+
+    `_session_block_text`(TurnContext용)와 달리 위협 시계 상태를 담지
+    않는다 — `_format_clock_state`를 부르지 않는다. 서술은 시나리오
+    원문을 받지 않는다(ARCH-02) — `NarrationFacts` 자체가 그 칸을 갖고
+    있지 않으므로 여기서 새는 경로 자체가 없다.
+    """
+    return (
+        f"장면 대상:\n{_format_scene_entities(facts.scene_entities)}\n\n"
+        f"캐릭터 상태: {_format_character_state(facts.character_state)}"
     )
 
 
@@ -130,31 +155,83 @@ def build_classifier_prompt(
 def build_gm_prompt(
     *,
     rulebook_display_name: str,
-    ctx: TurnContext,
-    check_summary: str,
+    facts: NarrationFacts,
 ) -> tuple[list[dict], list[dict]]:
     """master_gm 프롬프트를 조립한다. `(system, messages)` 짝을 돌려준다.
 
-    아래 "최근 대화"/"판정 결과" 두 줄은 **분석 대상이 아니라 이어 쓸 이야기의
-    맥락**이다 — 화자 표시("플레이어: "/"진행자: ")를 붙이는 것은
-    `turn_flow._build_turn_context`가 하지만, 그 텍스트가 대화록이지 풀어야
-    할 과제가 아니라는 것을 모델에게 명시적으로 못박는 건 이 함수의 몫이다
-    (03-04 Task 3 라이브 검증에서 이 지시가 없어 모델이 "The user seems to
-    be trying multiple actions..." 식 메타 분석·원문 되풀이를 내놓은 사례가
-    나왔다).
+    **이 함수가 만드는 `system` 두 조각에는 진행자 판단 지시문도 시나리오
+    원문도 없다(ARCH-02, D-06).** "무엇을 판단할지"를 지시하던 문장들은
+    전부 `build_situation_prompt`로 옮겨 갔다 — 서술은 이미 상황판단이
+    정한 사실만 받아 서술만 한다. `session` 조각도 장면 대상·캐릭터 상태
+    둘만 담고(`_narration_session_block_text`), 위협 시계 상태를 담지
+    않는다 — `NarrationFacts` 자체가 그 칸을 갖고 있지 않다.
+
+    아래 "최근 대화"/"장면 요약"/"사실"/"판정 결과"는 **분석 대상이 아니라
+    이어 쓸 이야기의 맥락**이다 — 화자 표시("플레이어: "/"진행자: ")를
+    붙이는 것은 `turn_flow._build_turn_context`가 하지만, 그 텍스트가
+    대화록이지 풀어야 할 과제가 아니라는 것을 모델에게 명시적으로 못박는 건
+    이 함수의 몫이다(03-04 Task 3 라이브 검증에서 이 지시가 없어 모델이
+    "The user seems to be trying multiple actions..." 식 메타 분석·원문
+    되풀이를 내놓은 사례가 나왔다).
     """
     permanent = (
-        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 진행자다. 판정 결과를 "
-        "받아 다음에 무슨 일이 일어나는지 서술한다. 수치나 판정 결과를 새로 정하지 "
-        "않는다 — 이미 정해진 값을 그대로 반영해서 서술만 한다. 위협 시계가 다음 "
-        "칸으로 넘어갔는지도 네가 정하지 않는다 — 그건 판정 실패가 쌓이면 시스템이 "
-        "자동으로 결정하고, 넘어갔을 때는 다음 「위협 시계」 정보에 이미 반영되어 "
-        "너에게 주어진다. 지금 주어진 칸 안에서 벌어지는 일만 서술하고, '위협 시계'라는 "
-        "말이나 몇 번째 칸인지를 네 문장 안에 스스로 지어내지 않는다. 이어지는 "
-        "「최근 대화」와 「방금 판정 결과」는 지금까지의 대화록일 뿐, 분석하거나 "
-        "요약하거나 되풀이해 인용할 과제가 아니다 — 그 뒤에 무슨 일이 일어나는지 "
-        "자연스러운 한국어 서사 문장으로만 이어 쓴다. 사용자·플레이어를 3인칭으로 "
-        "지칭하며 상황을 설명하지 않는다 — 곧바로 다음 장면을 서술한다."
+        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 서술 담당이다. 이미 판단이 "
+        "끝난 장면 요약과 사실 목록을 받아 다음에 무슨 일이 일어나는지 서술한다. "
+        "수치나 판정 결과를 새로 정하지 않는다 — 이미 정해진 값을 그대로 반영해서 "
+        "서술만 한다. '위협 시계'라는 말이나 몇 번째 칸인지 같은 시스템 개념을 네 "
+        "문장 안에 스스로 지어내지 않는다 — 그런 개념이 필요하면 이미 「장면 요약」에 "
+        "녹아 있다. 이어지는 「최근 대화」・「장면 요약」・「사실」・「방금 판정 결과」는 "
+        "지금까지의 대화록과 상황판단이 이미 정리한 정보일 뿐, 분석하거나 요약하거나 "
+        "되풀이해 인용할 과제가 아니다 — 그 뒤에 무슨 일이 일어나는지 자연스러운 "
+        "한국어 서사 문장으로만 이어 쓴다. 사용자·플레이어를 3인칭으로 지칭하며 "
+        "상황을 설명하지 않는다 — 곧바로 다음 장면을 서술한다."
+    )
+    session = _narration_session_block_text(facts)
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = (
+        f"최근 대화:\n{_format_recent_turns(facts.recent_turns)}\n\n"
+        f"장면 요약: {facts.scene_summary}\n\n"
+        f"사실:\n{_format_facts(facts.facts)}\n\n"
+        f"방금 판정 결과: {facts.check_summary}"
+    )
+    messages = [{"role": "user", "content": turn}]
+    return system, messages
+
+
+def build_situation_prompt(
+    *,
+    rulebook_display_name: str,
+    ctx: TurnContext,
+    check_summary: str,
+) -> tuple[list[dict], list[dict]]:
+    """situation_judge 프롬프트를 조립한다. `(system, messages)` 짝을 돌려준다.
+
+    지금까지 `build_gm_prompt`가 갖고 있던 진행자 판단 지시문 전체가 이
+    함수로 옮겨왔다(ARCH-02) — 무엇을 언제 판단할지, 수치·판정 결과를 새로
+    정하지 않는다, 시계 진행을 스스로 정하지 않는다는 문장들이 여기 있다.
+    `session` 조각은 기존 `_session_block_text(ctx)` 그대로다(시계 상태
+    전문 포함) — 상황판단은 이것을 볼 자격이 있는 유일한 역할이다.
+    `messages`는 최근 대화 + 판정 결과다.
+
+    **닫힌 출력 계약** — 응답은 원소가 정확히 하나인 JSON 배열이고, 그
+    원소는 `scene_summary`(서술이 이번 장면을 쓰는 데 필요한 한두 문장)와
+    `facts`(문자열 배열, `SITUATION_FACTS_LIMIT`개 이하) 두 칸을 갖는다.
+    `facts`에는 시나리오 원문을 옮겨 적지 말고 이번 판정으로 확정된
+    사실만 적으라는 지시를 명시한다.
+    """
+    permanent = (
+        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 상황판단 담당이다. 판정 "
+        "결과와 지금까지의 장면·위협 시계 상태를 보고, 서술 담당이 다음 장면을 쓰는 "
+        "데 필요한 것만 뽑는다. 수치나 판정 결과를 새로 정하지 않는다 — 이미 정해진 "
+        "값을 그대로 반영한다. 위협 시계가 다음 칸으로 넘어갔는지도 네가 정하지 "
+        "않는다 — 그건 판정 실패가 쌓이거나 다른 판단이 결정하고, 넘어갔을 때는 "
+        "이미 반영된 「위협 시계」 정보로 너에게 주어진다. 응답은 원소가 정확히 "
+        "하나인 JSON 배열로만 한다 — 예: "
+        '[{"scene_summary": "문이 부서지고 서늘한 바람이 흘러든다", '
+        '"facts": ["경비병이 쓰러졌다"]}]. `scene_summary`는 서술이 이번 장면을 '
+        "쓰는 데 필요한 한두 문장이다. `facts`는 이번 판정으로 확정된 사실만 문자열 "
+        f"배열로 담는다 — 최대 {SITUATION_FACTS_LIMIT}개, 시나리오 원문을 그대로 "
+        "옮겨 적지 않는다. 설명 문장을 덧붙이지 않는다."
     )
     session = _session_block_text(ctx)
     system = [_cached_block(permanent), _cached_block(session)]

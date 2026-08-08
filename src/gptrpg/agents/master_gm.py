@@ -11,7 +11,7 @@ import threading
 import time
 from collections.abc import Iterable, Iterator
 
-from gptrpg.agents.context import TurnContext
+from gptrpg.agents.context import NarrationFacts
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.invoke import GM_TIMEOUT_S, MAX_ATTEMPTS
 from gptrpg.agents.prompt_assembly import build_gm_prompt
@@ -143,12 +143,17 @@ def narrate(
     *,
     provider: Provider,
     model: str,
-    ctx: TurnContext,
-    check_summary: str,
+    facts: NarrationFacts,
     rulebook_display_name: str,
     stall_timeout_s: float = STREAM_STALL_TIMEOUT_S,
 ) -> Iterator[str]:
     """서사를 문장 단위로 흘려보낸다. `provider.stream` 호출을 `GM_TIMEOUT_S`로 묶는다.
+
+    **이 함수는 이제 서술만 한다 — 상황 판단은 `situation_judge`가 한다
+    (D-06, 09-02).** `TurnContext`를 받을 방법 자체가 없다 — `facts`
+    (`NarrationFacts`)에는 위협 시계 상태를 담는 칸이 아예 없으므로,
+    이 함수를 거치는 한 진행자 지시문·규칙·시나리오 원문이 서술 호출에
+    도달할 경로가 타입 차원에서 막혀 있다(ARCH-02).
 
     스트리밍은 「호출 한 번」과 모양이 달라 재시도 의미가 애매하다 — 재시도
     규칙이 세 갈래다: ① 첫 조각 전에 실패했고 스톨이 아니면 재시도한다
@@ -183,9 +188,7 @@ def narrate(
     `TimeoutError`가 나고, 아래 `except Exception` 절이 다른 실패와
     똑같이 처리한다 — 새 분기 코드를 더하지 않는다.
     """
-    system, messages = build_gm_prompt(
-        rulebook_display_name=rulebook_display_name, ctx=ctx, check_summary=check_summary
-    )
+    system, messages = build_gm_prompt(rulebook_display_name=rulebook_display_name, facts=facts)
 
     start = time.monotonic()
     emitted_any = False
