@@ -236,7 +236,7 @@ Plans:
   5. 에이전트별로 무엇을 받는지가 코드에 명시되고 각자 상한이 있다 — 주입량이 세션 길이에
      비례해 늘지 않고, AI가 저장소 전체를 훑는 경로는 여전히 없다
 
-**Plans**: 2/4 plans executed
+**Plans**: 3/4 plans executed
 
 Plans:
 **Wave 1**
@@ -249,7 +249,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 09-03-PLAN.md — 장면 신규 대상 판단 추가, 세 판단을 하나의 gather로 정적 병렬화 (wave 3)
+- [x] 09-03-PLAN.md — 장면 신규 대상 판단 추가, 세 판단을 하나의 gather로 정적 병렬화 (wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 

@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 09
 current_phase_name: 에이전트 구조 재편
 status: executing
-stopped_at: Completed 09-02-PLAN.md
-last_updated: "2026-08-08T16:52:35.869Z"
+stopped_at: Completed 09-03-PLAN.md
+last_updated: "2026-08-08T17:09:53.000Z"
 last_activity: 2026-08-09
-last_activity_desc: Completed 09-01-PLAN.md
+last_activity_desc: Completed 09-03-PLAN.md
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 8
-  completed_plans: 6
+  completed_plans: 7
   percent: 9
 ---
 
@@ -31,11 +31,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 09 (에이전트 구조 재편) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
-Last activity: 2026-08-09 — Completed 09-01-PLAN.md
+Last activity: 2026-08-09 — Completed 09-03-PLAN.md
 
-Progress: [████████░░] 75%
+Progress: [███████░░░] 75%
 
 ## Performance Metrics
 
@@ -87,6 +87,7 @@ Progress: [████████░░] 75%
 | Phase 08 P04 | 13min | 3 tasks | 5 files |
 | Phase 09 P01 | ~3h (2 sessions, interrupted+resumed) | 3 tasks | 19 files |
 | Phase 09 P02 | ~45min | 3 tasks | 19 files |
+| Phase 09 P03 | ~12min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -158,6 +159,7 @@ Progress: [████████░░] 75%
 - [Phase ?]: 09-01: DP-01/DP-02/DP-03/DP-04 확정대로 구현 — clock_judge 관문/깊은 판단 분리, 배경 자동 반영(확인 화면 없음), AGENT_ROLES 다섯 역할 + ROLE_FALLBACKS, 새 사건 종류·스키마 판 올림 없음(ClockAdvanced(trigger="condition") 재사용)
 - [Phase ?]: 09-01 Task 3: D-05/ARCH-05 조용한 실패 계약을 판단 함수·웹 라우트·CLI 세 층 모두에서 시험으로 고정 — 소스 변경 없이 19개 새 단언 전부 통과
 - [Phase ?]: 09-02: DP-05/DP-06/DP-07 확정대로 구현 — 서술 system에서 시나리오 원문 완전 제거(NarrationFacts에 clock_state 칸 없음), narrate()는 facts 하나만 받음, situation_judge/clock_judge 병렬 판단을 turn/judgments.gather_turn_judgments 한 자리로 통합
+- [Phase ?]: 09-03: DP-08/DP-09 확정대로 구현 — scene_entity_judge가 turn/judgments.gather_turn_judgments의 세 번째 코루틴으로 들어감(각자 독립 호출, 관계 결과는 서술용 사실로만 쓰고 사건·Entity 목록에 안 씀). ARCH-04는 tests/test_parallel_judgment.py의 ast 기반 구문 검사로, ARCH-06은 tests/test_agent_context_caps.py의 세션-길이-무관 증명으로 회귀 방지 그물에 못박음. ARCH-04/05/06 셋 다 REQUIREMENTS.md에서 [x]로 완료
 
 ### Pending Todos
 
@@ -207,12 +209,11 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-08T16:52:35.837Z
-Stopped at: Completed 09-02-PLAN.md
+Last session: 2026-08-08T17:09:53.000Z
+Stopped at: Completed 09-03-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
-**다음 행동:** Phase 7(거버넌스 재논의 — D-20 · D-31) 착수. 코드 계획이 아니라 사용자와의
-직접 논의로 시작하는 편이 맞을 수 있다 — `/gsd-plan-phase 7` 실행 전에 D-20/D-31 재논의
-결과를 먼저 정하고 PROJECT.md에 기록한다. 이전 마일스톤의 단계 산출물은
-`.planning/milestones/v1.0-phases/`에 보관되어 있다.
+**다음 행동:** 09-04-PLAN.md 실행 — 결정·파이프라인 문서 갱신과 사람 확인(Phase 9 마지막
+계획, wave 4). ARCH-04/05/06 셋 다 REQUIREMENTS.md에서 완료로 표시됐다. 이전 마일스톤의
+단계 산출물은 `.planning/milestones/v1.0-phases/`에 보관되어 있다.
