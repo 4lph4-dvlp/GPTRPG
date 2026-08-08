@@ -11,6 +11,7 @@ Pitfall 1 회귀 방지가 목적이다: `run_clock_condition_check`을 `await`�
 """
 
 import json
+import threading
 
 from gptrpg.agents import providers as providers_module
 from gptrpg.agents.envelope import AgentResult
@@ -23,6 +24,7 @@ _CANDIDATE_JSON = json.dumps([{"move": "hack_and_slash", "stat": "STR"}])
 _SIGNAL_CHECK_JSON = json.dumps([{"signal": "check", "why": "판정이 다음 칸과 관련 있다"}])
 _SIGNAL_SKIP_JSON = json.dumps([{"signal": "skip", "why": "이번 턴은 무관하다"}])
 _VERDICT_ADVANCE_JSON = json.dumps([{"verdict": "advance", "why": "조건이 충족됐다"}])
+_SITUATION_JSON = json.dumps([{"scene_summary": "", "facts": []}])
 
 
 def _install_fake_provider(monkeypatch, fake_provider, *, name="fake", env_var="FAKE_API_KEY"):
@@ -62,11 +64,18 @@ def _read_events(db: str, session: str):
 
 
 class _MultiRoleProvider:
-    """`--provider fake --model fake-model`이 세 역할(action_classifier/
-    master_gm/clock_judge) 전부에 같은 제공자 이름을 쓰게 만들므로, `complete()`
-    호출 순서(① 분류 ② 시계 신호 관문 ③ 시계 조건 배경 판단)에 따라 다른
-    JSON을 돌려주는 대역 하나가 필요하다. `stream()`은 `master_gm.narrate()`
-    전용이라 `complete()`와 호출 수를 공유하지 않는다.
+    """`--provider fake --model fake-model`이 네 역할(action_classifier/
+    situation_judge/master_gm/clock_judge) 전부에 같은 제공자 이름을 쓰게
+    만드는 대역 하나가 필요하다.
+
+    09-02부터는 `situation_judge`와 `clock_judge`(관문)가 `asyncio.gather`로
+    **동시에** 돈다(ARCH-04) — 두 판단이 같은 이 대역 인스턴스의 `complete()`를
+    스레드 둘에서 부르므로, "호출 순서"로 역할을 가리는 방식은 더 이상
+    안전하지 않다(레이스). 그래서 `system` 프롬프트에 실린 역할 지시문
+    텍스트(각 `build_*_prompt`가 박아 넣는 고정 문구, `prompt_assembly.py`
+    참조)로 역할을 가린다 — 어느 스레드가 먼저 들어와도 항상 맞는 값을
+    돌려준다. `stream()`은 `master_gm.narrate()` 전용이라 `complete()`와
+    호출 수를 공유하지 않는다.
     """
 
     name = "fake"
@@ -75,34 +84,51 @@ class _MultiRoleProvider:
         self,
         *,
         classify_value: str = _CANDIDATE_JSON,
+        situation_value: str = _SITUATION_JSON,
         signal_value: str = _SIGNAL_CHECK_JSON,
         condition_value: str = _VERDICT_ADVANCE_JSON,
         stream_text: str = "문이 요란하게 부서진다. 안에서 서늘한 바람이 흘러나온다.",
         clock_judge_always_raises: bool = False,
     ) -> None:
         self.classify_value = classify_value
+        self.situation_value = situation_value
         self.signal_value = signal_value
         self.condition_value = condition_value
         self.stream_text = stream_text
         self.clock_judge_always_raises = clock_judge_always_raises
         self.complete_calls = 0
+        self._lock = threading.Lock()
         self._last_result: AgentResult | None = None
 
     def list_models(self) -> list[str]:
         return ["fake-model"]
 
     def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
-        self.complete_calls += 1
-        if self.complete_calls == 1:
-            # ① action_classifier
+        with self._lock:
+            self.complete_calls += 1
+        combined_system = " ".join(block.get("text", "") for block in system)
+
+        if "행동 분류기" in combined_system:
             return AgentResult(
                 ok=True, value=self.classify_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
             )
-        # ②·③ clock_judge (관문 + 배경 깊은 판단)
-        if self.clock_judge_always_raises:
-            raise RuntimeError("clock judge 대역이 일부러 실패한다")
-        value = self.signal_value if self.complete_calls == 2 else self.condition_value
-        return AgentResult(ok=True, value=value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1)
+        if "상황판단 담당" in combined_system:
+            return AgentResult(
+                ok=True, value=self.situation_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
+            )
+        if "위협 시계 관문 판단자" in combined_system:
+            if self.clock_judge_always_raises:
+                raise RuntimeError("clock judge 대역이 일부러 실패한다")
+            return AgentResult(
+                ok=True, value=self.signal_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
+            )
+        if "위협 시계 조건 판단자" in combined_system:
+            if self.clock_judge_always_raises:
+                raise RuntimeError("clock judge 대역이 일부러 실패한다")
+            return AgentResult(
+                ok=True, value=self.condition_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
+            )
+        raise AssertionError(f"알 수 없는 역할의 프롬프트: {combined_system[:120]!r}")
 
     def stream(self, *, model, system, messages, max_tokens, timeout_s):
         for word in self.stream_text.split(" "):
@@ -208,9 +234,9 @@ def test_signal_skip_never_calls_deep_judgment_provider(tmp_db_path, monkeypatch
     exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
     assert exit_code == 0
 
-    # ① action_classifier + ② clock_judge 관문(신호=skip) 두 번만 불렸다 —
-    # ③ 깊은 판단 호출은 없다.
-    assert provider.complete_calls == 2
+    # ① action_classifier + ② situation_judge + ③ clock_judge 관문(신호=skip)
+    # 세 번만 불렸다 — ④ 깊은 판단 호출은 없다.
+    assert provider.complete_calls == 3
 
     events = _read_events(db, "s1")
     clock_advanced = [event for event in events if event.event_type == "clock_advanced"]

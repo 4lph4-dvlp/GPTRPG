@@ -33,7 +33,6 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from gptrpg.agents.action_classifier import UnknownMove, classify
-from gptrpg.agents.clock_judge import judge_clock_signal
 from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
@@ -68,6 +67,7 @@ from gptrpg.session_actor.actor import (
 from gptrpg.session_actor.actor import SessionActor
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
+from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
 from gptrpg.web.characters_data import get_character, list_characters
 from gptrpg.web.cookie_auth import read_identity
 from gptrpg.web.media import media_file_path, media_url, scene_relative_path
@@ -460,29 +460,67 @@ async def confirm(
         character_names=_CHARACTER_NAMES,
     )
 
-    # 시계 신호 관문(문지기, DP-01) — narrate() 호출 **전**에 한 번 부른다
-    # (09-RESEARCH.md Pitfall 3이 지목한 정확한 구간). `choices`를 재사용하고
-    # `load_config`를 다시 부르지 않는다 — `clock_judge`가 설정 파일에 없어도
-    # `ROLE_FALLBACKS`가 이미 `action_classifier`의 선택을 물려줬다. 이 호출
-    # 구간 전체를 `try`로 감싸 실패 시 stderr 한 줄만 남기고 신호를 거짓으로
-    # 취급한다 — 판단 실패가 확인 요청을 막지 않는다(D-05).
+    # 상황판단·시계 신호 관문을 narrate() 호출 **전**에 병렬로 부른다
+    # (09-RESEARCH.md Pitfall 3이 지목한 정확한 구간, ARCH-04). `choices`를
+    # 재사용하고 `load_config`를 다시 부르지 않는다 — `situation_judge`/
+    # `clock_judge`가 설정 파일에 없어도 `ROLE_FALLBACKS`가 이미 다른 역할의
+    # 선택을 물려줬다. 이 구간 전체를 `try`로 감싸 실패 시 stderr 한 줄만
+    # 남기고 빈 판단으로 계속 간다 — 판단 실패가 확인 요청을 막지 않는다
+    # (D-05, ARCH-05).
+    situation_judge_choice = choices["situation_judge"]
+    situation_provider: Provider = request.app.state.provider_resolver(
+        "situation_judge", choices, os.environ
+    )
     clock_judge_choice = choices["clock_judge"]
     clock_provider: Provider = request.app.state.provider_resolver(
         "clock_judge", choices, os.environ
     )
-    judge_ctx = build_clock_judge_context(ctx, check_summary)
-    should_check_clock = False
     try:
-        clock_signal = await asyncio.to_thread(
-            judge_clock_signal,
-            provider=clock_provider,
-            model=clock_judge_choice.model,
-            ctx=judge_ctx,
+        judgments = await gather_turn_judgments(
+            situation_provider=situation_provider,
+            situation_model=situation_judge_choice.model,
+            clock_provider=clock_provider,
+            clock_model=clock_judge_choice.model,
+            ctx=ctx,
+            check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
         )
-        should_check_clock = clock_signal.should_check
     except Exception as exc:  # noqa: BLE001 - D-05, 판단 실패가 확인 요청을 막지 않는다
-        print(f"경고: 시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}", file=sys.stderr)
+        print(
+            f"경고: 상황판단/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
+            file=sys.stderr,
+        )
+        judgments = empty_turn_judgments()
+
+    # 새 에이전트 호출 둘의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
+    # (MEAS-02, `master_gm` 호출 기록과 같은 규율). 새 에이전트 호출이 계측에서
+    # 빠지지 않는다.
+    await actor.submit(
+        RecordAiCall(
+            agent_role="situation_judge",
+            model=situation_judge_choice.model,
+            provider=situation_judge_choice.provider,
+            prompt_tokens=judgments.situation.ai.prompt_tokens,
+            completion_tokens=judgments.situation.ai.completion_tokens,
+            cached_prompt_tokens=judgments.situation.ai.cached_prompt_tokens,
+            latency_ms=judgments.situation.ai.elapsed_ms,
+            caused_by_seq=confirm_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="clock_judge",
+            model=clock_judge_choice.model,
+            provider=clock_judge_choice.provider,
+            prompt_tokens=judgments.clock.ai.prompt_tokens,
+            completion_tokens=judgments.clock.ai.completion_tokens,
+            cached_prompt_tokens=judgments.clock.ai.cached_prompt_tokens,
+            latency_ms=judgments.clock.ai.elapsed_ms,
+            caused_by_seq=confirm_seq,
+        )
+    )
+
+    facts = build_narration_facts(ctx=ctx, check_summary=check_summary, judgments=judgments)
 
     # ⑤ 서사 — 판정 결과가 이미 기록된 뒤에야 시작한다.
     #
@@ -504,8 +542,7 @@ async def confirm(
         narration_iter = narrate(
             provider=gm_provider,
             model=gm_choice.model,
-            ctx=ctx,
-            check_summary=check_summary,
+            facts=facts,
             rulebook_display_name=rulebook.display_name,
         )
         first_sentence = await asyncio.to_thread(next, narration_iter, _NO_SENTENCE)
@@ -579,13 +616,13 @@ async def confirm(
     # 시계 조건 검사 배경 등록 — 관문 신호가 참일 때만 건다(ARCH-03/D-01).
     # 깊은 판단용 제공자 호출은 신호가 거짓이면 아예 일어나지 않는다 — 값싼
     # 관문이 값비싼 판단을 거른다는 DP-01의 구조가 여기서 그대로 지켜진다.
-    if should_check_clock:
+    if judgments.clock.should_check:
         background.add_task(
             run_clock_condition_check,
             actor=actor,
             provider=clock_provider,
             model=clock_judge_choice.model,
-            judge_ctx=judge_ctx,
+            judge_ctx=build_clock_judge_context(ctx, check_summary),
             rulebook_display_name=rulebook.display_name,
             narration_text="\n".join(narration_texts),
             resolve_seq=resolve_seq,

@@ -38,6 +38,22 @@ def _install_fake_provider(monkeypatch, fake_provider, *, name="fake", env_var="
     monkeypatch.setenv(env_var, "test-key")
 
 
+def _calls_matching(fake_provider, marker: str) -> list[tuple[list[dict], list[dict]]]:
+    """`fake_provider.calls`에서 `system` 블록에 `marker` 문구가 실린 호출만 골라낸다.
+
+    09-02부터 `situation_judge`/`clock_judge`(관문)가 `asyncio.gather`로
+    동시에 돈다(ARCH-04) — 같은 `fake_provider` 인스턴스의 `complete()`를
+    스레드 둘에서 부르므로, `fake_provider.calls` 안에서의 두 호출 순서가
+    매번 달라질 수 있다(레이스). 그래서 위치가 아니라 각 `build_*_prompt`가
+    시스템 프롬프트에 박아 넣는 고정 역할 지시문 텍스트로 호출을 가린다.
+    """
+    return [
+        (system, messages)
+        for system, messages in fake_provider.calls
+        if any(marker in block.get("text", "") for block in system)
+    ]
+
+
 def _run_turn(db: str, session: str, text: str, *, monkeypatch, confirmed: bool = True) -> int:
     monkeypatch.setattr("builtins.input", lambda *_args: "" if confirmed else "n")
     return main(
@@ -90,7 +106,8 @@ def test_turn_runs_full_loop_and_records_events_in_causal_order(
     assert check_event.seq < narration_events[0].seq
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    assert len(ai_events) == 2
+    # 09-02: 분류기 + 상황판단 + 시계 신호 관문 + 진행자 네 건.
+    assert len(ai_events) == 4
     for ai_event in ai_events:
         assert ai_event.latency_ms >= 0
         assert ai_event.prompt_tokens > 0
@@ -166,13 +183,14 @@ def test_classifier_system_prompt_is_byte_identical_across_calls_with_different_
     assert _run_turn(db, "s1", "문을 두드린다", monkeypatch=monkeypatch) == 0
     assert _run_turn(db, "s1", "창문으로 넘어간다", monkeypatch=monkeypatch) == 0
 
-    # calls 순서(09-01: clock_judge 관문 호출이 분류와 서사 사이에 끼어들며
-    # 턴당 셋으로 늘었다 — fake_provider의 fixture 기본값이 clock_judge의
-    # `signal` 계약을 만족하지 않아 배경 깊은 판단은 호출되지 않는다):
-    # [턴1 분류(complete), 턴1 시계 신호 관문(complete), 턴1 서사(stream),
-    #  턴2 분류(complete), 턴2 시계 신호 관문(complete), 턴2 서사(stream)]
-    turn1_classifier_system, _turn1_messages = fake_provider.calls[0]
-    turn2_classifier_system, _turn2_messages = fake_provider.calls[3]
+    # 09-02: 턴당 [분류, 상황판단, 시계 신호 관문, 서사] 넷 — 상황판단·시계
+    # 신호 관문은 `asyncio.gather`로 동시에 돌아 `fake_provider.calls` 안
+    # 순서가 매번 달라질 수 있다(레이스). 위치가 아니라 시스템 프롬프트의
+    # 역할 지시문 텍스트로 분류기 호출만 골라낸다.
+    classifier_calls = _calls_matching(fake_provider, "행동 분류기")
+    assert len(classifier_calls) == 2
+    turn1_classifier_system, _turn1_messages = classifier_calls[0]
+    turn2_classifier_system, _turn2_messages = classifier_calls[1]
 
     assert turn1_classifier_system == turn2_classifier_system
 
@@ -195,9 +213,10 @@ def test_second_turn_prompt_labels_prior_turn_with_speaker_prefixes(
     assert _run_turn(db, "s1", "문을 두드린다", monkeypatch=monkeypatch) == 0
     assert _run_turn(db, "s1", "창문으로 넘어간다", monkeypatch=monkeypatch) == 0
 
-    # calls 순서(09-01: 턴당 [분류, 시계 신호 관문, 서사] 셋 — 위
-    # `test_classifier_system_prompt_is_byte_identical_...`의 주석과 같은 이유)
-    _turn2_classifier_system, turn2_classifier_messages = fake_provider.calls[3]
+    # 위 `test_classifier_system_prompt_is_byte_identical_...`의 주석과 같은
+    # 이유로 위치가 아니라 역할 지시문 텍스트로 호출을 가린다.
+    classifier_calls = _calls_matching(fake_provider, "행동 분류기")
+    _turn2_classifier_system, turn2_classifier_messages = classifier_calls[-1]
     turn2_classifier_turn_text = turn2_classifier_messages[0]["content"]
 
     assert "플레이어: 문을 두드린다" in turn2_classifier_turn_text
@@ -205,7 +224,8 @@ def test_second_turn_prompt_labels_prior_turn_with_speaker_prefixes(
     # 진행자 화자 표시와 함께 실려 있어야 한다.
     assert "진행자: 문이 요란하게 부서진다." in turn2_classifier_turn_text
 
-    _turn2_gm_system, turn2_gm_messages = fake_provider.calls[5]
+    gm_calls = _calls_matching(fake_provider, "서술 담당")
+    _turn2_gm_system, turn2_gm_messages = gm_calls[-1]
     turn2_gm_turn_text = turn2_gm_messages[0]["content"]
     assert "플레이어: 문을 두드린다" in turn2_gm_turn_text
 

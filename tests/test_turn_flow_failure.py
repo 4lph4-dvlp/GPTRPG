@@ -218,7 +218,8 @@ def test_stream_always_fails_before_first_chunk_exits_nonzero_with_zero_narratio
     assert not any(event.event_type == "narration_appended" for event in events)
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    assert len(ai_events) == 2  # 분류기 하나 + 진행자 하나(실패해도 기록된다)
+    # 09-02: 분류기 + 상황판단 + 시계 신호 관문 + 진행자(실패해도 기록된다) 네 건.
+    assert len(ai_events) == 4
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +228,7 @@ def test_stream_always_fails_before_first_chunk_exits_nonzero_with_zero_narratio
 # ---------------------------------------------------------------------------
 
 
-def _stub_narrate_emits_one_then_raises(*, provider, model, ctx, check_summary, rulebook_display_name):
+def _stub_narrate_emits_one_then_raises(*, provider, model, facts, rulebook_display_name):
     yield "이미 나간 문장 하나."
     raise RuntimeError("서사 생성기 자체가 죽었다")
 
@@ -270,7 +271,8 @@ def test_narrate_name_replaced_with_failing_generator_exits_nonzero_and_keeps_em
     assert narration_events[0].text == "이미 나간 문장 하나."
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    assert len(ai_events) == 2
+    # 09-02: 분류기 + 상황판단 + 시계 신호 관문 + 진행자 네 건.
+    assert len(ai_events) == 4
 
 
 # ---------------------------------------------------------------------------
@@ -376,3 +378,78 @@ def test_record_ai_call_submission_failure_after_successful_narration_degrades_g
     events = _read_events(db, "s1")
     narration_events = [event for event in events if event.event_type == "narration_appended"]
     assert len(narration_events) == 2  # 서사 자체는 끝까지 정상적으로 나갔다
+
+
+# ---------------------------------------------------------------------------
+# 시험 7 (09-02, ARCH-05): situation_judge가 두 시도 모두 실패해도 서사는
+# 그대로 나오고 턴이 끝까지 간다 — 빈 사실 묶음으로 서술이 이어진다(D-05).
+# ---------------------------------------------------------------------------
+
+
+class _SituationJudgeAlwaysFailsProvider:
+    """`--provider fake --model fake-model`이 모든 역할에 같은 이름을 쓰게
+    만들므로, `system` 프롬프트의 역할 지시문 텍스트(`prompt_assembly.py`가
+    박아 넣는 고정 문구)로 상황판단 호출만 골라 실패시키는 대역이 필요하다.
+    분류기·시계 신호 관문·진행자는 정상 동작한다."""
+
+    name = "situation-judge-always-fails"
+
+    def __init__(self) -> None:
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        combined = " ".join(block.get("text", "") for block in system)
+        if "상황판단 담당" in combined:
+            raise RuntimeError("situation_judge 대역이 일부러 실패한다")
+        if "위협 시계 관문 판단자" in combined:
+            return AgentResult(
+                ok=True,
+                value=json.dumps([{"signal": "skip", "why": "이번 턴은 무관하다"}]),
+                elapsed_ms=1,
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+        # 행동 분류기
+        return AgentResult(ok=True, value=_CANDIDATE_JSON, elapsed_ms=1, prompt_tokens=5, completion_tokens=3)
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        yield "문이 삐걱거리며 열린다. "
+        yield "안에서 서늘한 바람이 흘러나온다."
+        self._last_result = AgentResult(ok=True, value="...", elapsed_ms=1, prompt_tokens=7, completion_tokens=4)
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("complete() 또는 stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_situation_judge_both_attempts_fail_narration_still_completes_and_turn_exits_zero(
+    tmp_db_path, monkeypatch
+):
+    """상황판단이 두 시도 모두 실패해도 서사는 빈 사실 묶음으로 그대로 나오고
+    턴이 끝까지 간다(ARCH-05, D-05) — `_turn_flow`의 종료 코드는 0이다."""
+    db = str(tmp_db_path)
+    provider = _SituationJudgeAlwaysFailsProvider()
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code == 0
+
+    events = _read_events(db, "s1")
+    narration_events = [event for event in events if event.event_type == "narration_appended"]
+    assert len(narration_events) == 2
+
+    situation_ai_events = [
+        event
+        for event in events
+        if event.event_type == "ai_invoked" and event.agent_role == "situation_judge"
+    ]
+    assert len(situation_ai_events) == 1
+    assert situation_ai_events[0].prompt_tokens == 0
+    assert situation_ai_events[0].completion_tokens == 0

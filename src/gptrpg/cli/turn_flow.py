@@ -7,7 +7,6 @@
 """
 
 import argparse
-import asyncio
 import os
 import sys
 import threading
@@ -17,7 +16,6 @@ from pathlib import Path
 from typing import TypeVar
 
 from gptrpg.agents.action_classifier import MoveCandidate, classify
-from gptrpg.agents.clock_judge import judge_clock_signal
 from gptrpg.agents.config import AgentChoice, load_config, resolve_provider
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
@@ -37,6 +35,7 @@ from gptrpg.session_actor.actor import (
 )
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
+from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
 
 _T = TypeVar("_T")
 
@@ -291,29 +290,65 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
 
     check_summary = f"{picked.move} 판정 결과 {check_event.grade} (목표 {check_event.target})"
 
-    # 시계 신호 관문(문지기, DP-01) — narrate() 호출 **전**에 한 번 부른다.
+    # 상황판단·시계 신호 관문을 narrate() 호출 **전**에 병렬로 부른다(ARCH-04).
     # 웹과 달리 여기서는 이벤트 루프를 막아도 되는 자리가 아니다(액터의 큐
-    # 소비 태스크가 같은 루프에 있다) — `asyncio.to_thread`로 감싼다. 이 호출
-    # 구간 전체를 `try`로 감싸 실패 시 stderr 한 줄만 남기고 신호를 거짓으로
-    # 취급한다(D-05) — 조건 검사가 실패해도 `_turn_flow`의 종료 코드는
-    # 영향받지 않는다.
+    # 소비 태스크가 같은 루프에 있다) — `gather_turn_judgments` 내부가 이미
+    # `asyncio.to_thread`로 두 판단을 작업 스레드로 내보낸다. 이 구간 전체를
+    # `try`로 감싸 실패 시 stderr 한 줄만 남기고 빈 판단으로 계속 간다(D-05)
+    # — 판단이 실패해도 `_turn_flow`의 종료 코드는 영향받지 않는다.
+    situation_judge_choice = _resolve_role_choice(args, "situation_judge")
+    situation_provider = resolve_provider(
+        "situation_judge", {"situation_judge": situation_judge_choice}, os.environ
+    )
     clock_judge_choice = _resolve_role_choice(args, "clock_judge")
     clock_provider = resolve_provider(
         "clock_judge", {"clock_judge": clock_judge_choice}, os.environ
     )
-    judge_ctx = build_clock_judge_context(ctx, check_summary)
-    clock_signal_should_check = False
     try:
-        clock_signal = await asyncio.to_thread(
-            judge_clock_signal,
-            provider=clock_provider,
-            model=clock_judge_choice.model,
-            ctx=judge_ctx,
+        judgments = await gather_turn_judgments(
+            situation_provider=situation_provider,
+            situation_model=situation_judge_choice.model,
+            clock_provider=clock_provider,
+            clock_model=clock_judge_choice.model,
+            ctx=ctx,
+            check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
         )
-        clock_signal_should_check = clock_signal.should_check
-    except Exception as exc:  # noqa: BLE001 - D-05, 판단 실패가 턴을 막지 않는다
-        print(f"경고: 시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - D-05, 판단이 실패해도 턴을 막지 않는다
+        print(
+            f"경고: 상황판단/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
+            file=sys.stderr,
+        )
+        judgments = empty_turn_judgments()
+
+    # 새 에이전트 호출 둘의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
+    # (MEAS-02, 아래 `master_gm` 호출 기록과 같은 규율).
+    await actor.submit(
+        RecordAiCall(
+            agent_role="situation_judge",
+            model=situation_judge_choice.model,
+            provider=situation_judge_choice.provider,
+            prompt_tokens=judgments.situation.ai.prompt_tokens,
+            completion_tokens=judgments.situation.ai.completion_tokens,
+            cached_prompt_tokens=judgments.situation.ai.cached_prompt_tokens,
+            latency_ms=judgments.situation.ai.elapsed_ms,
+            caused_by_seq=confirm_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="clock_judge",
+            model=clock_judge_choice.model,
+            provider=clock_judge_choice.provider,
+            prompt_tokens=judgments.clock.ai.prompt_tokens,
+            completion_tokens=judgments.clock.ai.completion_tokens,
+            cached_prompt_tokens=judgments.clock.ai.cached_prompt_tokens,
+            latency_ms=judgments.clock.ai.elapsed_ms,
+            caused_by_seq=confirm_seq,
+        )
+    )
+
+    facts = build_narration_facts(ctx=ctx, check_summary=check_summary, judgments=judgments)
 
     gm_choice = _resolve_role_choice(args, "master_gm")
     gm_provider = resolve_provider("master_gm", {"master_gm": gm_choice}, os.environ)
@@ -344,8 +379,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         narration_iter = narrate(
             provider=gm_provider,
             model=gm_choice.model,
-            ctx=ctx,
-            check_summary=check_summary,
+            facts=facts,
             rulebook_display_name=rulebook.display_name,
         )
         first_sentence = with_progress_dots(
@@ -421,7 +455,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         print(f"오류: 서사가 끝까지 나오지 못했다 — {reason}", file=sys.stderr)
         return 1
 
-    if clock_signal_should_check:
+    if judgments.clock.should_check:
         # **CLI/웹 비대칭(Pitfall 1)** — 웹은 응답을 보낸 뒤 `BackgroundTasks`로
         # 시계 조건 검사를 던지지만, CLI는 `asyncio.run()`이 반환하는 순간
         # 이벤트 루프가 닫히므로 "응답 후 배경"이 성립하지 않는다. 여기서
@@ -433,7 +467,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             actor=actor,
             provider=clock_provider,
             model=clock_judge_choice.model,
-            judge_ctx=judge_ctx,
+            judge_ctx=build_clock_judge_context(ctx, check_summary),
             rulebook_display_name=rulebook.display_name,
             narration_text="\n".join(narration_texts),
             resolve_seq=resolve_seq,

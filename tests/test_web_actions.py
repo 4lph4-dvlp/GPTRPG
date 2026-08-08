@@ -588,6 +588,68 @@ def test_narration_retry_reuses_roll_and_only_narration_appended_grows(
     assert len(narrations_after) > len(narrations_before)
 
 
+# ---------------------------------------------------------------------------
+# 09-02 (ARCH-05): situation_judge가 두 시도 모두 실패해도 서사는 빈 사실
+# 묶음으로 그대로 나오고 확인 요청이 성공으로 끝난다(D-05).
+# ---------------------------------------------------------------------------
+
+
+class _AlwaysRaisingCompleteProvider:
+    """`situation_judge`가 두 시도 모두 실패하는 상황을 흉내내는 대역 —
+    `complete()`을 부르면 항상 예외를 던진다. `judge_situation`만 쓰는
+    대역이라 `stream()`은 구현하지 않는다."""
+
+    name = "fake-situation-judge-failure"
+
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s):
+        raise RuntimeError("situation_judge 대역이 일부러 실패한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        raise NotImplementedError("이 대역은 complete()만 쓴다 — situation_judge는 스트리밍하지 않는다")
+
+    def last_result(self):
+        raise RuntimeError("complete() 또는 stream()을 먼저 불러야 last_result()를 부를 수 있다")
+
+    def note_result(self, result) -> None:
+        pass
+
+
+def test_situation_judge_both_attempts_fail_narration_still_completes(
+    web_client_with_fake_provider,
+) -> None:
+    """상황판단이 두 시도 모두 실패해도 서사는 빈 사실 묶음으로 그대로 나오고
+    확인 요청이 성공(200)으로 끝난다(ARCH-05, D-05) — 판단 실패가 HTTP
+    응답에 나타나지 않는다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    situation_judge = _AlwaysRaisingCompleteProvider()
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=gm, situation_judge=situation_judge
+    ) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert response.status_code == 200
+        body = response.json()
+
+        situation_ai = [
+            event
+            for event in _events_of_type(client, "ai_invoked")
+            if event["agent_role"] == "situation_judge"
+        ]
+        narrations = _events_of_type(client, "narration_appended")
+
+    assert body["narration_failed"] is False
+    assert body["narration_chunk_count"] == 2
+    assert len(situation_ai) == 1
+    assert situation_ai[0]["prompt_tokens"] == 0
+    assert narrations
+
+
 def test_confirm_different_move_after_confirmed_returns_400_and_appends_nothing(
     web_client_with_fake_provider,
 ) -> None:

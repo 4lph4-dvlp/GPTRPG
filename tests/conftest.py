@@ -520,6 +520,7 @@ def web_client_with_fake_provider(
         *,
         action_classifier: FakeProvider,
         master_gm: FakeProvider | None = None,
+        situation_judge: FakeProvider | None = None,
         clock_judge: FakeProvider | None = None,
     ) -> TestClient:
         config_path = tmp_path / "agents.json"
@@ -535,6 +536,8 @@ def web_client_with_fake_provider(
         providers: dict[str, FakeProvider] = {"action_classifier": action_classifier}
         if master_gm is not None:
             providers["master_gm"] = master_gm
+        if situation_judge is not None:
+            providers["situation_judge"] = situation_judge
         if clock_judge is not None:
             providers["clock_judge"] = clock_judge
 
