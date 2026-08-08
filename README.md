@@ -28,7 +28,11 @@
 
    빌드 결과는 `frontend/dist/`에 생기고 서버가 그 폴더를 그대로 내보낸다. **이 폴더가 없으면 `/`가 404다** — 서버는 정상으로 뜨는데 브라우저만 빈 화면이라 원인을 찾기 어렵다. 빌드 뒤 `frontend/dist/index.html`이 있는지 눈으로 확인한다.
 
-2. **에이전트 설정** — 역할별 제공자·모델을 `.gptrpg/agents.json`에 적는다. **이 파일은 저장소에 안 들어간다**(`.gitignore`의 `.gptrpg/`) — 새로 받은 작업 사본이나 다른 기기에는 **없다.** 없으면 서버는 뜨지만 행동 선언이 전부 503으로 떨어진다. `docs/experiment/session-prep.md`의 "한도 대응 결정"대로 NIM 두 모델을 그대로 적는다:
+2. **에이전트 설정** — 역할별 제공자·모델을 `.gptrpg/agents.json`에 적는다. **이 파일은 저장소에 안 들어간다**(`.gitignore`의 `.gptrpg/`) — 새로 받은 작업 사본이나 다른 기기에는 **없다.** 없으면 서버는 뜨지만 행동 선언이 전부 503으로 떨어진다.
+
+   **역할이 둘에서 다섯으로 늘었다** (Phase 9) — `action_classifier`·`master_gm`(기존 둘)에
+   `situation_judge`·`scene_entity_judge`·`clock_judge`가 더해졌다. `docs/experiment/session-prep.md`의
+   "한도 대응 결정"대로 NIM 두 모델을 그대로 적는다:
 
    ```
    uv run gptrpg agents set --role action_classifier --provider nim --model meta/llama-3.1-8b-instruct
@@ -41,7 +45,16 @@
    uv run gptrpg agents show
    ```
 
-   *(모델 이름을 모를 때는 `uv run gptrpg agents select`로 살아 있는 목록을 받아 번호로 고를 수 있다. 다만 그건 대화형이고 네트워크 왕복을 하므로, 세션 당일에는 위 `set` 두 줄이 확실하다.)*
+   **기존 두 역할만 든 `.gptrpg/agents.json`은 그대로 계속 동작한다** — 새로 생긴 세 역할
+   (`situation_judge`·`scene_entity_judge`·`clock_judge`)을 안 정하면 대체 역할의 선택을
+   물려받고, 그 사실이 서버를 띄우는 터미널의 표준오류에 한 줄 뜬다(서버가 죽지는 않는다).
+   역할별로 따로 정하고 싶으면 다섯 번 중 필요한 역할만 골라 같은 형식으로 친다:
+
+   ```
+   uv run gptrpg agents set --role <역할> --provider <이름> --model <식별자>
+   ```
+
+   *(모델 이름을 모를 때는 `uv run gptrpg agents select`로 살아 있는 목록을 받아 번호로 고를 수 있다 — 다섯 역할을 순서대로 다섯 번 묻는다. 다만 그건 대화형이고 네트워크 왕복을 하므로, 세션 당일에는 위 `set` 줄들이 확실하다.)*
 
 3. **환경 변수 로드** — 서버를 띄우는 그 셸에서 반드시 먼저 실행한다(`uv run`이 `.env.local`을 자동으로 읽지 않는다):
 

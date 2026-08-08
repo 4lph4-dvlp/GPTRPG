@@ -15,8 +15,12 @@
         └──────┬──────────────┘
                ▼
           gptrpg.turn          ← cli·web 양쪽이 공유하는 TurnContext 조립 자리
+                                  turn/clock_condition.py (배경 조건 검사) ·
+                                  turn/judgments.py (세 판단을 한 자리에서 gather)
                ▼
           gptrpg.agents        ← event_log·session_actor·sqlite3 import 금지 (contract:3)
+                                  agents/situation_judge.py · agents/scene_entity_judge.py ·
+                                  agents/clock_judge.py (Phase 9가 추가한 세 판단 역할)
                ▼
        gptrpg.session_actor    ← 세션당 유일한 쓰기 주체 + 집계 저장
                ▼
@@ -85,14 +89,29 @@
                                                   (trigger="fail_counter", RIG-04)
 ④ check_summary 조립 ← 방금 쓴 사건을 다시 읽어서 만든다 (store.read_events)
 ⑤ build_turn_context() 재호출  ← 시계·최근 대화가 ③에서 바뀌었으므로 다시 접는다
-⑥ narrate()  ── asyncio.to_thread(next, ...) ──▶  [AI 호출 #2]
+⑤-a gather_turn_judgments()  ── asyncio.gather(situation_judge + scene_entity_judge +
+      turn/judgments.py           clock_judge 관문) ──▶  [AI 호출 #2·#3·#4, 동시에 돈다]
+      └─ 세 판단은 서로의 출력을 안 쓴다(ARCH-04) — 무엇을 병렬로 돌릴지는 런타임 분기가
+         아니라 이 함수의 코드 모양 자체다. 하나가 두 시도 다 실패해도 예외를 던지지
+         않는다(D-05/ARCH-05) — 없으면 없는 대로 진행한다
+⑤-b build_narration_facts()  ── NarrationFacts 조립 ──▶ situation_judge의 scene_summary·
+      turn/judgments.py           facts, scene_entity_judge의 new_entities(있을 때만)가
+                                   서술의 messages에 실린다. 진행자 지시문·시나리오 원문은
+                                   이 객체에 애초에 담을 칸이 없다(ARCH-02, D-06)
+⑥ narrate(facts=...)  ── asyncio.to_thread(next, ...) ──▶  [AI 호출 #5]
       master_gm.py:103   15초 타임아웃 + 90초 스트림 정지 워치독(:34)
       └─ chunk_sentences(:75) 가 .!? 경계로 문장 하나씩 흘려보낸다
            문장이 나오는 족족 ──────────────────▶ seq ... : narration_appended
                                                   (caused_by_seq = M+1, chunk_index 0,1,2…)
-⑦ RecordAiCall 제출 (성공·실패 무조건) ─────────▶ seq ... : ai_invoked
+⑦ RecordAiCall 제출 (성공·실패 무조건, situation_judge·scene_entity_judge·clock_judge·
+   master_gm 네 역할 각각) ────────────────────▶ seq ... : ai_invoked
                                                   (caused_by_seq = M)
-⑧ 실패였으면 502 + 고정 문구. 성공이면 판정 결과 + 조각 수
+⑧ clock_judge 관문의 신호가 참이면 응답이 나간 뒤 배경 작업을 건다 ──▶
+      background.add_task(run_clock_condition_check, ...)   web/routes_actions.py
+      └─ 배경에서 judge_clock_condition(깊은 판단)이 조건을 다시 확인하고, 맞으면
+         actor.submit()을 거쳐                     ──────────────────▶ seq ... : clock_advanced
+         AdvanceClock(trigger="condition")을 제출한다              (다음 칸 번호는 코드가 계산, D14)
+⑨ 실패였으면 502 + 고정 문구. 성공이면 판정 결과 + 조각 수
 ```
 
 **이 순서가 조건 분기가 아니라 코드 순서로 고정된 것이 요점이다.** ③이 ⑥보다 위에 있으므로 지연이 1초든 15초를 넘기든 판정 사건이 서사 사건보다 앞선 순번을 갖는 것이 뒤집힐 수 없다(D-33 / MEAS-02).
@@ -172,19 +191,37 @@ GET  /characters/{character_id} → 시트. **이 주소에 GET 처리기 하나
 
 ## 5. 파이프라인 D — 프롬프트 조립 (원가를 3.7배 가르는 순서)
 
-`agents/prompt_assembly.py:105` / `:130`
+`agents/prompt_assembly.py` — 조립 함수가 **둘(action_classifier·master_gm)에서 다섯**으로
+늘었다. `build_situation_prompt`·`build_scene_entity_prompt`·`build_clock_signal_prompt`·
+`build_clock_condition_prompt`가 Phase 9(09-01~09-03)에서 새로 생겼다. **서술
+(`build_gm_prompt`)의 `system`에서 시나리오 내용(정체·원하는 것·시계 칸 원문)이 빠지고
+그 자리가 `build_situation_prompt`로 옮겨 갔다** — ARCH-02가 관례가 아니라 값 객체의
+칸 자체로 강제되는 지점이다(`NarrationFacts`에 `clock_state` 필드가 없다).
 
+서술(`narrate`) 쪽:
 ```
-system[0]  영구 고정   룰북 이름 + 무브 10개 목록 + 역할 지시문        + cache_control
-system[1]  세션 고정   장면 캐스트 4명 · 캐릭터 상태값 · 위협 시계     + cache_control
-                       (이름·정체·원하는 것·지나온 칸·다음 칸,
-                        파국은 시계를 다 지났을 때만)
-messages   턴마다     "최근 대화 10턴" + 이번 문장 또는 판정 요약
+system[0]  영구 고정   룰북 이름 + 무브 10개 목록 + 서술 전용 지시문(네 문장)         + cache_control
+system[1]  세션 고정   서술이 받는 세션 고정 블록 — 시나리오 원문·시계 칸 없음        + cache_control
+messages   턴마다     situation_judge의 scene_summary·facts, scene_entity_judge의
+                       new_entities(있을 때만), 최근 대화, 판정 요약
 ```
+
+상황판단(`situation_judge`) 쪽 — 옛 서술 permanent 블록의 판단·페르소나 지시문 전체를 물려받았다:
+```
+system[0]  영구 고정   룰북 이름 + 무브 목록 + 판단 지시문                            + cache_control
+system[1]  세션 고정   시나리오 원문 + 장면 캐스트 4명 · 캐릭터 상태값 · 위협 시계     + cache_control
+                       (이름·정체·원하는 것·지나온 칸·다음 칸, 파국은 시계를 다 지났을 때만)
+messages   턴마다     최근 대화 10턴 + 이번 문장 또는 판정 요약
+```
+
+캐싱 순서 규약(영구 고정 → 세션 고정 → 턴마다 변함)은 새로 생긴 세 판단 함수
+(`build_scene_entity_prompt`·`build_clock_signal_prompt`·`build_clock_condition_prompt`)에도
+그대로 적용된다 — **턴마다 달라지는 판단 결과는 언제나 `messages`에만 실리고 `system`에는
+안 들어간다.**
 
 규율은 두 줄이다. **① 시각·플레이어 표시 이름·세션 식별자처럼 호출마다 달라지는 값을 `system`에 한 글자도 넣지 않는다.** ② 관측 지표(`clock_advances` / `fails_since_clock`)를 `ClockState`에 애초에 담지 않는다 — AI가 "봐주기를 재는 지표"를 보면 그 지표를 만족시키는 쪽으로 서술을 바꿔 계측 자체가 무의미해진다.
 
-`TurnContext`는 칸이 정확히 넷이고(`agents/context.py:51`), `recent_turns`가 10개를 넘으면 조용히 자르지 않고 `TooMuchContext`를 던진다. AI가 저장소 전체를 훑는 경로는 구조적으로 없다(D-31).
+`TurnContext`(action_classifier·situation_judge가 씀)는 칸이 정확히 넷이고(`agents/context.py:51`), `recent_turns`가 10개를 넘으면 조용히 자르지 않고 `TooMuchContext`를 던진다. `ClockJudgeContext`·`EntityJudgeContext`·`NarrationFacts`는 Phase 9가 만든 각자 더 좁은 값 객체다 — 저마다 자기 몫만 받고 상한도 따로 갖는다(ARCH-06). AI가 저장소 전체를 훑는 경로는 구조적으로 없다(D-31).
 
 ---
 
@@ -238,10 +275,25 @@ gptrpg replay    사건 기록에서 상태 재구성 후 10칸 출력 (벽시�
 gptrpg report    집계 조회 + JSON 저장 (여기서만 latency/friction 이 계산된다)
 gptrpg agents    set  — 제공자·모델을 대화 없이 그대로 적는다 (실행 절차서용)
                  select — 살아 있는 모델 목록을 받아 번호로 고른다 (대화형 + 네트워크)
-                 show — 지금 저장된 두 역할을 찍는다
+                 show — 지금 저장된 **다섯** 역할을 찍는다
 ```
 
 `agents set`과 `select`가 갈라져 있는 이유는 **런북에 적을 수 있어야** 하기 때문이다 — `select`는 대화형이고 모델 목록 조회 왕복을 하므로 "이렇게 치면 이 상태가 된다"를 절차서에 쓸 수 없다. 둘 다 완성되지 않은 설정 파일을 `load_partial_config`로 읽는다(엄격한 `load_config`로 읽으면 역할 하나만 저장된 파일에서 예외가 나고, 그것을 빈 사전으로 받으면 방금 저장한 다른 역할이 지워진다).
+
+**Phase 9가 `AGENT_ROLES`를 둘에서 다섯으로 넓혔다** (`action_classifier`·`master_gm`·
+`situation_judge`·`scene_entity_judge`·`clock_judge`). 기존 두 역할만 든 `agents.json`은
+그대로 계속 동작한다 — 새 세 역할은 `ROLE_FALLBACKS`가 다른 역할의 선택을 물려받고,
+그 사실이 표준오류에 한 줄 뜬다. `STRICT_AGENT_ROLES`(`action_classifier`·`master_gm`)는
+값이 아예 없으면 여전히 즉시 예외를 던진다.
+
+**웹과 CLI의 배경 실행은 비대칭이다.** 웹은 `confirm()` 응답이 나간 뒤 FastAPI
+`BackgroundTasks`가 `run_clock_condition_check`를 진짜 논블로킹으로 돌린다 — 사람은 그
+완료를 기다리지 않는다. CLI는 `gptrpg turn` 프로세스가 서사를 찍고 나면 곧 끝나므로
+(`asyncio.run()`이 닫히면 배경 태스크를 예약할 이벤트 루프 자체가 사라진다), `cli/turn_flow.py`가
+`actor.stop()`을 부르기 **전에** `await run_clock_condition_check(...)`로 명시적으로 기다린다
+— 그러지 않으면 조건이 맞아도 프로세스가 먼저 죽어 `clock_advanced` 사건이 영영 안 남는다.
+웹·CLI 둘 다 같은 함수(`turn/clock_condition.run_clock_condition_check`)를 부르므로 조건
+판단 로직 자체는 갈라지지 않는다 — 갈라지는 것은 "언제 기다리는가"뿐이다.
 
 `submit clock`이 **D-21의 나머지 두 진행 규칙(조건·AI 선택)에 닿는 유일한 경로**다 — 웹 화면에는 시계를 손으로 돌리는 버튼이 없다(§9-10).
 
@@ -269,7 +321,7 @@ gptrpg agents    set  — 제공자·모델을 대화 없이 그대로 적는다
 2026-08-04에 11건을 적었고, 2026-08-05에 그중 8건을 고쳤다. **고친 항목도 지우지 않는다** —
 무엇이 왜 문제였는지가 다음에 같은 실수를 막는 유일한 기록이다.
 
-### 9-A. 고쳐진 것 (8건)
+### 9-A. 고쳐진 것 (9건)
 
 1. ~~**`.gptrpg/agents.json`이 저장소에 없다.**~~ **[고침]** 설정 파일은 여전히 저장소에 안 들어가지만(`.gitignore`의 `.gptrpg/`), 이제 그 상태를 벗어나는 절차가 재현 가능하다 — `gptrpg agents set --role … --provider … --model …`이 대화·네트워크 없이 값을 적고, README A절 2번이 그 두 줄을 그대로 담고 있다. 예전에는 `agents select`(대화형 + 모델 목록 조회 왕복)뿐이라 절차서에 적을 수 없었고, README는 "이미 설정되어 있다. 확인만"이라고 **사실이 아닌 것**을 적고 있었다. 이 작업 중에 관련 버그도 하나 잡았다: `set`을 두 번 쳐서 두 역할을 채우면 두 번째가 첫 번째를 지웠다(`load_config`가 역할 하나만 있는 파일에 예외를 던지고, 호출부가 그것을 빈 사전으로 받았다) — `load_partial_config`가 「고치기 위해 읽는 경로」를 분리해 해결했고, `agents select --role`에 있던 같은 함정도 함께 고쳤다.
 
@@ -287,10 +339,12 @@ gptrpg agents    set  — 제공자·모델을 대화 없이 그대로 적는다
 
 8. ~~**드라이런의 호출 수 계산이 코드와 안 맞는다.**~~ **[고침]** `session-prep.md`에 「정정」 절을 넣었다. 완주한 행동당 AI 호출은 정확히 2회이고 세션 하나는 약 60~80회다(적혀 있던 120회가 아니다). 한도 결정은 안 바뀌지만(NIM에 일일 상한이 없다) 같은 숫자가 H5 원가 환산의 입력값이라 1.5배 과대 추정을 만들고 있었다.
 
-### 9-B. 남은 것 (3건)
+9. ~~**진행자 지시문·시나리오 원문이 서술 프롬프트에 들어가던 구조.**~~ **[고침, Phase 9]** 세션1의 지시문 유출·캐릭터 이탈 원인이었던 "한 프롬프트에 지시문·시나리오·규칙·대화가 전부 들어가 있던 것"이 구조로 제거됐다 — `narrate()`가 받는 `NarrationFacts`에는 `clock_state`도 시나리오 정체·원하는 것 필드도 아예 없다(타입 자체가 그 칸을 안 가진다). 판단·페르소나 지시문은 `situation_judge`로 전부 옮겨 갔다(D-06/ARCH-02). 남은 것은 §9-B 항목 12(situation_judge 요약이 시나리오 원문을 그대로 옮길 가능성)다 — Phase 10의 몫이다.
 
-9. **읽기 비용이 사건 수에 선형으로 는다 — 절반만 줄였다.** 요청 하나가 사건 전체를 **두 번** 읽던 것을 한 번으로 줄였다(`rebuild_state_from_events`가 이미 읽은 목록을 접는다 — 폴링 처리기와 `build_turn_context` 양쪽. 행동 하나당 전체 읽기가 4회에서 2회로). 그러나 **매 요청이 전체를 읽는다는 구조 자체는 그대로다** — 상태는 언제나 처음부터 접어 만들어야 하기 때문이다(D-08, 중간 저장 없음). 스냅샷이나 증분 폴링은 M1의 첫 숙제다. `_write_report_snapshot`도 사건마다 JSON 파일을 통째로 다시 쓴다(그쪽은 상태 한 칸만 보므로 O(1)이다).
+### 9-B. 남은 것 (4건)
 
-10. **D-21의 세 진행 규칙 중 하나만 있다 — 그래서 H2를 비율로 판정할 수 없다.** `_maybe_auto_advance`가 `fail_counter`만 만들고, `condition`/`ai_choice`는 CLI `submit clock`으로만 닿는다. 서버가 떠 있는 중에 CLI가 같은 세션에 쓰면 두 번째 쓰기 프로세스가 되어 `next_seq` 경합이 나고(PK 제약이 잡아 주지만 CLI가 실패한다), 즉 **세션 중에 시계를 손으로 돌리는 안전한 경로가 없다.** 더 중요한 결과는 계측 쪽이다 — 실패 3회마다 정확히 한 칸이 도므로 `failure_to_clock_ratio`가 **항상 3.0에 고정되어 정보량이 0**이다. ②③ 구현은 M1로 넘기고, 그때까지 H2를 어떻게 판정하는지는 `hypothesis-scoring-rules.md` §3이 정한다.
+10. **읽기 비용이 사건 수에 선형으로 는다 — 절반만 줄였다.** 요청 하나가 사건 전체를 **두 번** 읽던 것을 한 번으로 줄였다(`rebuild_state_from_events`가 이미 읽은 목록을 접는다 — 폴링 처리기와 `build_turn_context` 양쪽. 행동 하나당 전체 읽기가 4회에서 2회로). 그러나 **매 요청이 전체를 읽는다는 구조 자체는 그대로다** — 상태는 언제나 처음부터 접어 만들어야 하기 때문이다(D-08, 중간 저장 없음). 스냅샷이나 증분 폴링은 M1의 첫 숙제다. `_write_report_snapshot`도 사건마다 JSON 파일을 통째로 다시 쓴다(그쪽은 상태 한 칸만 보므로 O(1)이다).
+
+11. **D-21의 세 진행 규칙 중 `condition`이 Phase 9에서 최소판으로 생겼다(D-68) — 그래도 H2를 비율로 판정할 수 없는 것은 그대로다.** `_maybe_auto_advance`(fail_counter)에 더해, 이제 배경의 `run_clock_condition_check`가 `clock_judge`의 AI 판단으로 `condition` 트리거 사건도 자동 제출한다 — 사람 확인 화면 없이 곧장 반영된다(CLOCK-02의 확인 게이트는 Phase 15 몫, ROADMAP Phase 15 주석 참조). `ai_choice`는 여전히 CLI `submit clock`으로만 닿는다. 서버가 떠 있는 중에 CLI가 같은 세션에 쓰면 두 번째 쓰기 프로세스가 되어 `next_seq` 경합이 나고(PK 제약이 잡아 주지만 CLI가 실패한다), 즉 **세션 중에 시계를 손으로 `ai_choice`를 돌리는 안전한 경로는 여전히 없다.** 더 중요한 결과는 계측 쪽이다 — 실패 3회마다 정확히 한 칸이 도는 `fail_counter` 경로는 그대로 살아 있어 `failure_to_clock_ratio`가 **여전히 3.0 근방에 고정되기 쉽다**(condition 트리거가 별도로 세어지지 않는 한). ②(`condition`)는 Phase 9가 최소판을 만들었고 완성형(CLOCK-01의 관측 지표 회복)·③(`ai_choice`)은 Phase 15로 넘기고, 그때까지 H2를 어떻게 판정하는지는 `hypothesis-scoring-rules.md` §3이 정한다.
 
 11. **실험 설계 자체의 유보 3건.** D-57 이탈(7일 → 1~3일), D-58(무료 모델로 D18의 "품질 상한선" 취지 미충족), 그리고 오너가 참가자 겸 관찰자라 **H1의 실질 표본이 3명**이라는 것(D-55·D-56의 귀결이며 어느 문서에도 적혀 있지 않던 사실). 셋 다 코드 문제가 아니라 **판정을 제약하는 조건**이다. 이 셋이 H1의 킬 판정을 불가능하게 만든다는 판단과 그 대응은 `hypothesis-scoring-rules.md` §1~§2에 있다.

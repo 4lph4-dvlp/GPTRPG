@@ -559,12 +559,14 @@ Phase 11 (담을 그릇 — 자원 축 표현), Phase 12 (`StatEntry` 쓰기 경
 
 **Goal**: 시계가 실패 누적 하나에만 매이지 않고, 이야기 조건과 AI 제안으로도 진행되며,
 진행자가 화면에서 직접 돌릴 수 있고, 왜 돌았는지가 보인다
-**Depends on**: Phase 9 (조건 검사가 배경층에서 돈다), Phase 14 (AI 제안 → 사람 확인이 같은
-패턴을 재사용한다)
+**Depends on**: Phase 9 (조건 검사 판단 함수·배경 실행 레인·`AdvanceClock(trigger="condition")`
+자동 발동 경로가 이미 존재한다 — `turn/clock_condition.run_clock_condition_check`), Phase 14
+(AI 제안 → 사람 확인이 같은 패턴을 재사용한다)
 **Requirements**: CLOCK-01, CLOCK-02, CLOCK-03, CLOCK-04, CLOCK-05
 **Success Criteria** (what must be TRUE):
 
-  1. 시계가 이야기의 조건에 따라서도 진행한다 (실패 누적 외의 두 번째 경로)
+  1. 시계가 이야기의 조건에 따라서도 진행한다 (실패 누적 외의 두 번째 경로) — **최소판은
+     Phase 9가 이미 만들었다. 이 단계가 더할 것은 사람 확인 화면과 「왜 돌았는지」 표시다**
   2. AI가 시계 진행을 제안하고 사람이 확인한다 — AI가 서사 안에서 스스로 시계 진행을
      선언하는 경로는 계속 막혀 있다
 
@@ -578,6 +580,15 @@ Phase 11 (담을 그릇 — 자원 축 표현), Phase 12 (`StatEntry` 쓰기 경
 > **진행 규칙 ①(실패 3회)만 구현되어 봐주기 관측 지표가 항상 3.0에 고정돼 있었다(D-60).**
 > ②③을 마저 붙여야 그 지표가 정보량을 갖는다. AI가 서사 안에서 스스로 시계 진행을 선언하는
 > 경로는 계속 막아 둔다 — 이미 한 번 막았던 유출을 다시 열지 않는다.
+>
+> **Phase 9가 자동 반영으로 갔으므로, 이 단계의 CLOCK-02는 "없던 것을 만드는 일"이 아니라
+> "이미 도는 자동 반영 앞에 확인 게이트를 끼워 넣는 일"이다.** `clock_judge`의 관문
+> (`judge_clock_signal`)과 깊은 판단(`judge_clock_condition`)이 배경에서 조건을 확인하고
+> 곧장 `AdvanceClock(trigger="condition")`을 제출하는 경로가 이미 Phase 9에서 만들어졌다 —
+> 이 단계는 그 제출 직전에 사람 확인을 끼워 넣는다. AI가 서사 안에서 스스로 시계 진행을
+> 선언하는 경로는 Phase 9에서도 계속 막혀 있었다(판단 함수는 조건이 맞았는지만 참/거짓으로
+> 돌려주고, 다음 칸 번호는 항상 `run_clock_condition_check`의 코드가 `actor.state.clock_segment
+> + 1`로 계산한다 — D14, AI는 수치에 안 닿는다).
 
 ---
 
