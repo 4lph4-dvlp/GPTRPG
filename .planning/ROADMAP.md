@@ -236,7 +236,7 @@ Plans:
   5. 에이전트별로 무엇을 받는지가 코드에 명시되고 각자 상한이 있다 — 주입량이 세션 길이에
      비례해 늘지 않고, AI가 저장소 전체를 훑는 경로는 여전히 없다
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 Plans:
 **Wave 1**
@@ -245,7 +245,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 09-02-PLAN.md — 상황판단/서술 분리, 서술이 시나리오 원문을 받을 칸 자체를 없앤다 (wave 2)
+- [x] 09-02-PLAN.md — 상황판단/서술 분리, 서술이 시나리오 원문을 받을 칸 자체를 없앤다 (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -670,7 +670,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 6. 가설 판정 게이트 | M0 | 0/TBD | Deferred (D-62) | - |
 | 7. 거버넌스 재논의 — D17 · D-20 · D31 | v1.1 | — (논의) | **Complete** | 2026-08-05 |
 | 8. 신원 검증과 멱등성 | v1.1 | 4/4 | Complete    | 2026-08-06 |
-| 9. 에이전트 구조 재편 | v1.1 | 1/4 | In Progress|  |
+| 9. 에이전트 구조 재편 | v1.1 | 2/4 | In Progress|  |
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 0/TBD | Not started | - |
 | 11. 룰북 표현 어휘 확장 | v1.1 | 0/TBD | Not started | - |
 | 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 0/TBD | Not started | - |

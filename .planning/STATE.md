@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 09
 current_phase_name: 에이전트 구조 재편
 status: executing
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-08-08T16:24:47.710Z"
-last_activity: 2026-08-07
-last_activity_desc: Phase 09 execution started
+stopped_at: Completed 09-02-PLAN.md
+last_updated: "2026-08-08T16:52:35.869Z"
+last_activity: 2026-08-09
+last_activity_desc: Completed 09-01-PLAN.md
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 8
-  completed_plans: 5
+  completed_plans: 6
   percent: 9
 ---
 
@@ -31,11 +31,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 09 (에이전트 구조 재편) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-08-09 — Completed 09-01-PLAN.md
 
-Progress: [██████░░░░] 63%
+Progress: [████████░░] 75%
 
 ## Performance Metrics
 
@@ -86,6 +86,7 @@ Progress: [██████░░░░] 63%
 | Phase 08 P03 | 20min | 4 tasks | 8 files |
 | Phase 08 P04 | 13min | 3 tasks | 5 files |
 | Phase 09 P01 | ~3h (2 sessions, interrupted+resumed) | 3 tasks | 19 files |
+| Phase 09 P02 | ~45min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -156,6 +157,7 @@ Progress: [██████░░░░] 63%
 - [Phase ?]: 08-04: ConfirmRequest.target bounded ge=-200/le=200 (covers d100 skill 0-100 + OpenQuest difficulty shifts, and 2d6's low-teens targets); new MAX_MODIFIERS_COUNT=20/MAX_MODIFIER_LEN=128 constants cap ConfirmRequest.modifiers list length + item length; DeclareRequest/ConfirmRequest.rulebook_id reuse existing MAX_ID_LEN
 - [Phase ?]: 09-01: DP-01/DP-02/DP-03/DP-04 확정대로 구현 — clock_judge 관문/깊은 판단 분리, 배경 자동 반영(확인 화면 없음), AGENT_ROLES 다섯 역할 + ROLE_FALLBACKS, 새 사건 종류·스키마 판 올림 없음(ClockAdvanced(trigger="condition") 재사용)
 - [Phase ?]: 09-01 Task 3: D-05/ARCH-05 조용한 실패 계약을 판단 함수·웹 라우트·CLI 세 층 모두에서 시험으로 고정 — 소스 변경 없이 19개 새 단언 전부 통과
+- [Phase ?]: 09-02: DP-05/DP-06/DP-07 확정대로 구현 — 서술 system에서 시나리오 원문 완전 제거(NarrationFacts에 clock_state 칸 없음), narrate()는 facts 하나만 받음, situation_judge/clock_judge 병렬 판단을 turn/judgments.gather_turn_judgments 한 자리로 통합
 
 ### Pending Todos
 
@@ -205,8 +207,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-08T16:24:47.679Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-08-08T16:52:35.837Z
+Stopped at: Completed 09-02-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
