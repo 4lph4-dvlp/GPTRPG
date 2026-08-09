@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 09
 current_phase_name: 에이전트 구조 재편
-status: executing
-stopped_at: Completed 09-03-PLAN.md
-last_updated: "2026-08-08T17:09:53.000Z"
+status: verifying
+stopped_at: Completed 09-04-PLAN.md (Task 2 checkpoint resolved with human-accepted verification gaps) — Phase 9 complete
+last_updated: "2026-08-09T12:20:01.000Z"
 last_activity: 2026-08-09
-last_activity_desc: Completed 09-03-PLAN.md
+last_activity_desc: Completed 09-04-PLAN.md — Phase 9 complete
 progress:
   total_phases: 11
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 8
-  completed_plans: 7
-  percent: 9
+  completed_plans: 8
+  percent: 18
 ---
 
 # Project State
@@ -30,12 +30,12 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 09 (에이전트 구조 재편) — EXECUTING
+Phase: 09 (에이전트 구조 재편) — VERIFYING
 Plan: 4 of 4
-Status: Ready to execute
-Last activity: 2026-08-09 — Completed 09-03-PLAN.md
+Status: Phase complete — ready for verification
+Last activity: 2026-08-09 — Completed 09-04-PLAN.md (Task 2 체크포인트, 사람이 수용한 미확인 항목과 함께 종료)
 
-Progress: [███████░░░] 75%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -88,6 +88,7 @@ Progress: [███████░░░] 75%
 | Phase 09 P01 | ~3h (2 sessions, interrupted+resumed) | 3 tasks | 19 files |
 | Phase 09 P02 | ~45min | 3 tasks | 19 files |
 | Phase 09 P03 | ~12min | 3 tasks | 20 files |
+| Phase 09 P04 | ~15min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -160,6 +161,8 @@ Progress: [███████░░░] 75%
 - [Phase ?]: 09-01 Task 3: D-05/ARCH-05 조용한 실패 계약을 판단 함수·웹 라우트·CLI 세 층 모두에서 시험으로 고정 — 소스 변경 없이 19개 새 단언 전부 통과
 - [Phase ?]: 09-02: DP-05/DP-06/DP-07 확정대로 구현 — 서술 system에서 시나리오 원문 완전 제거(NarrationFacts에 clock_state 칸 없음), narrate()는 facts 하나만 받음, situation_judge/clock_judge 병렬 판단을 turn/judgments.gather_turn_judgments 한 자리로 통합
 - [Phase ?]: 09-03: DP-08/DP-09 확정대로 구현 — scene_entity_judge가 turn/judgments.gather_turn_judgments의 세 번째 코루틴으로 들어감(각자 독립 호출, 관계 결과는 서술용 사실로만 쓰고 사건·Entity 목록에 안 씀). ARCH-04는 tests/test_parallel_judgment.py의 ast 기반 구문 검사로, ARCH-06은 tests/test_agent_context_caps.py의 세션-길이-무관 증명으로 회귀 방지 그물에 못박음. ARCH-04/05/06 셋 다 REQUIREMENTS.md에서 [x]로 완료
+- [Phase ?]: 09-04: D-68 확정 기록 — CLOCK-01 최소판(위협 시계 조건 검사)은 Phase 9에 남고, 관계 기록(MEM-02)·문맥 압축(MEM-03)은 최소판까지 포함해 전부 Phase 14로 되돌림. ROADMAP Phase 15 Depends-on/성공조건 1을 그 전제로 갱신, Phase 14 절은 무변경. docs/PIPELINE.md·README.md를 실제 다섯 역할 구조와 재동기화
+- [Phase ?]: 09-04 Task 2 체크포인트: 사람이 6개 확인 항목 중 0/1/4①만 통과 확인하고 2(사건 기록 역할별 분해 — replay 도구 한계로 미확인)·3(시계 폭주 5턴 검사 — 미실행)·4②③(브라우저 지시문 유출·시계 표시 — 미확인)·5(D-05 실사용 복원력 — 미실행)는 남겨둔 채 '미확인 항목은 남겨두고 넘어가자'는 명시적 판단으로 통과 처리. 항목 3·5는 향후 UAT 후속 작업으로 남김(단계 완료를 막지 않음)
 
 ### Pending Todos
 
@@ -195,6 +198,8 @@ v1.1이 완료되면 조건을 갖춘 재실험을 새로 설계할지 결정한
 Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-11(D-11의 3주 재개
 검증) · M1-14(동적 파티).
 
+- [열린 UAT 후속 항목 — Phase 9 완료를 막지 않음] 09-04 Task 2 체크포인트에서 사람이 명시적으로 미확인 처리한 두 항목: ① 시계 폭주 검사(연속 5턴 안에 위협 시계가 4/4에 닿는지) — clock_judge 조건 판단 프롬프트가 너무 헐거우면 페이싱이 깨질 위험, 자동 시험으로는 못 잡는 종류라 사람 확인이 유일한 그물이었다(T-09-20). ② D-05 실사용 복원력(clock_judge를 존재하지 않는 모델로 바꾸고 실제 앱에서 한 턴 — 턴이 정상 종료하고 실패는 표준오류에만 뜨는지) — 코드 수준 단위/통합 시험은 09-01에서 이미 통과했으나 살아있는 앱에서의 확인은 아직 없다. 둘 다 후속 UAT 패스에서 확인 권장
+
 ### Roadmap Evolution
 
 - Phase 12.1 inserted after Phase 12: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22). Phase 8 논의 중 사용자가 지적해 발견: D22가 잠긴 결정인데도 v1.1·M1~M4 어디에도 배정된 적이 없었음. CHAR-01~05 요구사항 신설, REQUIREMENTS.md 69→74건 (URGENT)
@@ -209,11 +214,13 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-08T17:09:53.000Z
-Stopped at: Completed 09-03-PLAN.md
+Last session: 2026-08-09T12:20:00.969Z
+Stopped at: Completed 09-04-PLAN.md (Task 2 checkpoint resolved with human-accepted verification gaps) — Phase 9 complete
 Traceability 갱신 완료
 Resume file: None
 
-**다음 행동:** 09-04-PLAN.md 실행 — 결정·파이프라인 문서 갱신과 사람 확인(Phase 9 마지막
-계획, wave 4). ARCH-04/05/06 셋 다 REQUIREMENTS.md에서 완료로 표시됐다. 이전 마일스톤의
+**다음 행동:** Phase 9(에이전트 구조 재편) 완료 — 09-04까지 4개 계획 전부 종료. ARCH-02~06
+다섯 다 REQUIREMENTS.md에서 완료로 표시됐다. Task 2 체크포인트는 사람이 일부 항목만
+확인하고 나머지(3·5 포함)는 명시적으로 미확인 상태로 남긴 채 통과시켰다 — Blockers/Concerns의
+"열린 UAT 후속 항목" 참조. 다음은 Phase 10(AI 출력 검증과 탈옥 방어) 착수. 이전 마일스톤의
 단계 산출물은 `.planning/milestones/v1.0-phases/`에 보관되어 있다.
