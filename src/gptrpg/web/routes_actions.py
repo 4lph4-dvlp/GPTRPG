@@ -466,20 +466,27 @@ async def confirm(
     # `situation_judge`/`scene_entity_judge`/`clock_judge`가 설정 파일에
     # 없어도 `ROLE_FALLBACKS`가 이미 다른 역할의 선택을 물려줬다. 이 구간
     # 전체를 `try`로 감싸 실패 시 stderr 한 줄만 남기고 빈 판단으로 계속
-    # 간다 — 판단 실패가 확인 요청을 막지 않는다(D-05, ARCH-05).
+    # 간다 — 판단 실패가 확인 요청을 막지 않는다(D-05, ARCH-05). **제공자
+    # 구성(`provider_resolver` 호출) 자체도 이 `try` 안에 있다(CR-01 리뷰
+    # 발견)** — `master_gm` 제공자 구성(440~453줄)과 달리 여기 세 역할은
+    # 구성 실패가 판단 *호출* 실패와 똑같은 방식으로 처리돼야 한다: 이미
+    # 굴린 주사위(`ResolveCheck`)를 버리지 않고 빈 판단으로 계속 간다.
+    # `choices[...]` 사전 조회는 예외를 던지지 않는다(위 ROLE_FALLBACKS
+    # 설명)므로 `try` 밖에 남긴다 — `RecordAiCall`이 성공/실패 어느 쪽에서도
+    # `*.model`/`*.provider`를 읽어야 하기 때문이다.
     situation_judge_choice = choices["situation_judge"]
-    situation_provider: Provider = request.app.state.provider_resolver(
-        "situation_judge", choices, os.environ
-    )
     entity_judge_choice = choices["scene_entity_judge"]
-    entity_provider: Provider = request.app.state.provider_resolver(
-        "scene_entity_judge", choices, os.environ
-    )
     clock_judge_choice = choices["clock_judge"]
-    clock_provider: Provider = request.app.state.provider_resolver(
-        "clock_judge", choices, os.environ
-    )
     try:
+        situation_provider: Provider = request.app.state.provider_resolver(
+            "situation_judge", choices, os.environ
+        )
+        entity_provider: Provider = request.app.state.provider_resolver(
+            "scene_entity_judge", choices, os.environ
+        )
+        clock_provider: Provider = request.app.state.provider_resolver(
+            "clock_judge", choices, os.environ
+        )
         judgments = await gather_turn_judgments(
             situation_provider=situation_provider,
             situation_model=situation_judge_choice.model,
@@ -491,12 +498,17 @@ async def confirm(
             check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
         )
-    except Exception as exc:  # noqa: BLE001 - D-05, 판단 실패가 확인 요청을 막지 않는다
+    except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성) 실패가 확인 요청을 막지 않는다
         print(
             f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
             file=sys.stderr,
         )
         judgments = empty_turn_judgments()
+        # 제공자 구성이 실패했을 수 있으므로 아래 배경 시계 조건 검사 등록에서
+        # 이 변수를 참조하기 전에 안전한 값으로 되돌린다 — `judgments.clock.should_check`는
+        # `empty_turn_judgments()`에서 항상 False이므로 실제로 쓰이지는 않지만,
+        # unbound 변수를 남겨 두지 않는다(CR-01).
+        clock_provider = None
 
     # 새 에이전트 호출 셋의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
     # (MEAS-02, `master_gm` 호출 기록과 같은 규율). 새 에이전트 호출이 계측에서
@@ -634,7 +646,11 @@ async def confirm(
     # 시계 조건 검사 배경 등록 — 관문 신호가 참일 때만 건다(ARCH-03/D-01).
     # 깊은 판단용 제공자 호출은 신호가 거짓이면 아예 일어나지 않는다 — 값싼
     # 관문이 값비싼 판단을 거른다는 DP-01의 구조가 여기서 그대로 지켜진다.
-    if judgments.clock.should_check:
+    # `clock_provider is not None`도 함께 확인한다(CR-01) — 위 제공자 구성이
+    # 실패했으면 `judgments.clock.should_check`가 항상 False이므로 이 조건은
+    # 방어적 이중 확인이지만, `clock_provider`가 unbound인 채로 아래에서
+    # 참조되는 경로를 코드로도 남겨 두지 않는다.
+    if judgments.clock.should_check and clock_provider is not None:
         background.add_task(
             run_clock_condition_check,
             actor=actor,

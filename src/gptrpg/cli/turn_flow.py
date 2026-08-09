@@ -296,20 +296,27 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     # `gather_turn_judgments` 내부가 이미 `asyncio.to_thread`로 세 판단을
     # 작업 스레드로 내보낸다. 이 구간 전체를 `try`로 감싸 실패 시 stderr
     # 한 줄만 남기고 빈 판단으로 계속 간다(D-05) — 판단이 실패해도
-    # `_turn_flow`의 종료 코드는 영향받지 않는다.
+    # `_turn_flow`의 종료 코드는 영향받지 않는다. **제공자 구성
+    # (`resolve_provider` 호출) 자체도 이 `try` 안에 있다(CR-01 리뷰 발견)** —
+    # 웹 경로(`routes_actions.py`)의 `master_gm` 제공자 구성과 같은 이유로,
+    # 이 세 역할의 구성 실패도 판단 *호출* 실패와 똑같이 처리돼야 한다: 이미
+    # 굴린 주사위(`ResolveCheck`)를 버리지 않고 빈 판단으로 계속 간다.
+    # `_resolve_role_choice`는 예외를 던지지 않는 저장/CLI 인자 조회이므로
+    # `try` 밖에 남긴다 — 아래 `RecordAiCall`이 성공/실패 어느 쪽에서도
+    # `*.model`/`*.provider`를 읽어야 하기 때문이다.
     situation_judge_choice = _resolve_role_choice(args, "situation_judge")
-    situation_provider = resolve_provider(
-        "situation_judge", {"situation_judge": situation_judge_choice}, os.environ
-    )
     entity_judge_choice = _resolve_role_choice(args, "scene_entity_judge")
-    entity_provider = resolve_provider(
-        "scene_entity_judge", {"scene_entity_judge": entity_judge_choice}, os.environ
-    )
     clock_judge_choice = _resolve_role_choice(args, "clock_judge")
-    clock_provider = resolve_provider(
-        "clock_judge", {"clock_judge": clock_judge_choice}, os.environ
-    )
     try:
+        situation_provider = resolve_provider(
+            "situation_judge", {"situation_judge": situation_judge_choice}, os.environ
+        )
+        entity_provider = resolve_provider(
+            "scene_entity_judge", {"scene_entity_judge": entity_judge_choice}, os.environ
+        )
+        clock_provider = resolve_provider(
+            "clock_judge", {"clock_judge": clock_judge_choice}, os.environ
+        )
         judgments = await gather_turn_judgments(
             situation_provider=situation_provider,
             situation_model=situation_judge_choice.model,
@@ -321,12 +328,17 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
         )
-    except Exception as exc:  # noqa: BLE001 - D-05, 판단이 실패해도 턴을 막지 않는다
+    except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성)이 실패해도 턴을 막지 않는다
         print(
             f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
             file=sys.stderr,
         )
         judgments = empty_turn_judgments()
+        # 제공자 구성이 실패했을 수 있으므로 아래 배경 시계 조건 검사 호출에서
+        # 이 변수를 참조하기 전에 안전한 값으로 되돌린다 — `judgments.clock.should_check`는
+        # `empty_turn_judgments()`에서 항상 False이므로 실제로 쓰이지는 않지만,
+        # unbound 변수를 남겨 두지 않는다(CR-01, `web/routes_actions.py`와 동일).
+        clock_provider = None
 
     # 새 에이전트 호출 셋의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
     # (MEAS-02, 아래 `master_gm` 호출 기록과 같은 규율).
@@ -474,7 +486,13 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         print(f"오류: 서사가 끝까지 나오지 못했다 — {reason}", file=sys.stderr)
         return 1
 
-    if judgments.clock.should_check:
+    if judgments.clock.should_check and clock_provider is not None:
+        # `clock_provider is not None`도 함께 확인한다(CR-01) — 위 제공자
+        # 구성이 실패했으면 `judgments.clock.should_check`가 항상 False이므로
+        # 이 조건은 방어적 이중 확인이지만, `clock_provider`가 unbound인 채로
+        # 아래에서 참조되는 경로를 코드로도 남겨 두지 않는다
+        # (`web/routes_actions.py`와 동일한 이유).
+        #
         # **CLI/웹 비대칭(Pitfall 1)** — 웹은 응답을 보낸 뒤 `BackgroundTasks`로
         # 시계 조건 검사를 던지지만, CLI는 `asyncio.run()`이 반환하는 순간
         # 이벤트 루프가 닫히므로 "응답 후 배경"이 성립하지 않는다. 여기서
