@@ -66,6 +66,8 @@ Two additional lower-severity issues (a same-process race on the new "condition"
 
 ### CR-01: New judgment-role provider resolution isn't guarded, so a config error crashes the turn *after* the dice have already been rolled
 
+**Fixed:** commit `334aa05` (2026-08-09) — provider-resolution calls for the three new roles moved inside the existing try/except; falls back to `empty_turn_judgments()` on failure. Verified: `uv run pytest` 629 passed, `lint-imports` 4/4 kept, `ruff check` clean.
+
 **File:** `src/gptrpg/web/routes_actions.py:471-494` and `src/gptrpg/cli/turn_flow.py:300-329`
 
 **Issue:**
@@ -130,6 +132,8 @@ except Exception as exc:  # noqa: BLE001 - D-05, provider construction failures 
 ---
 
 ### CR-02: CLI turn flow reuses a stale `TurnContext` for the three parallel judgments and the background clock check, unlike the web path
+
+**Fixed:** commit `0ab0605` (2026-08-09) — CLI now rebuilds `ctx` after `ResolveCheck`, mirroring the web handler; rebuilt context confirmed threaded into `gather_turn_judgments`/`build_narration_facts`/`run_clock_condition_check`. Verified: `uv run pytest` 629 passed, `lint-imports` 4/4 kept, `ruff check` clean.
 
 **File:** `src/gptrpg/cli/turn_flow.py:192` (context built) vs. `src/gptrpg/cli/turn_flow.py:312-323, 370, 485-495` (context reused) — contrast with `src/gptrpg/web/routes_actions.py:455-461` (context rebuilt)
 
