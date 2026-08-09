@@ -290,6 +290,17 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
 
     check_summary = f"{picked.move} 판정 결과 {check_event.grade} (목표 {check_event.target})"
 
+    # `TurnContext`를 다시 접는다(CR-02 리뷰 발견) — 웹 경로
+    # (`web/routes_actions.py`의 `confirm()`, 455~461줄)와 정확히 같은 이유다:
+    # `ResolveCheck` 처리 중 실패 횟수 자동 진행(fail-counter auto-advance)이
+    # 시계를 이미 옮겼을 수 있다(`docs/PIPELINE.md` §2 "⑤ build_turn_context()
+    # 재호출 ← 시계·최근 대화가 ③에서 바뀌었으므로 다시 접는다"). 판정 전에
+    # 만든 `ctx`(192줄)를 그대로 아래 세 판단(`gather_turn_judgments`)·서사
+    # (`build_narration_facts`)·배경 시계 조건 검사(`run_clock_condition_check`)에
+    # 넘기면 이 판정 자신이 옮긴 시계 위치를 놓친 채로 판단하게 된다 — 웹과
+    # 똑같이 여기서도 다시 접어 뒤 구간에 넘긴다.
+    ctx = _build_turn_context(store, args.session, args.rulebook)
+
     # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
     # 병렬로 부른다(ARCH-04). 웹과 달리 여기서는 이벤트 루프를 막아도 되는
     # 자리가 아니다(액터의 큐 소비 태스크가 같은 루프에 있다) —
