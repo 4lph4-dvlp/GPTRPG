@@ -32,7 +32,9 @@ created: 2026-08-13
 
 - **After every task commit:** Run `uv run pytest tests/test_master_gm.py tests/test_narration_isolation.py tests/test_prompt_assembly_scenario.py tests/test_action_classifier.py -x` (related files only)
 - **After every plan wave:** Run `uv run pytest` + `uv run lint-imports` (.importlinter 4-contract check) + `uv run ruff check src`
-- **Before `/gsd-verify-work`:** Full suite green AND `.gptrpg/events.db` (schema v5, 895 events) replay regression passes
+- **Before `/gsd-verify-work`:** Full suite green AND the replay regression passes against **both** on-disk event stores — `.gptrpg/events.db` (895 events, `schema_version = 2`) and `.gptrpg/uat9.db` (221 events, `schema_version = 5`)
+
+> **Correction (2026-08-13, verified against the live files):** 10-CONTEXT.md, 10-RESEARCH.md, and the first draft of this file all stated `.gptrpg/events.db` holds 895 events at schema v5. It actually holds 895 events at `schema_version = 2`; the v5 records live in `.gptrpg/uat9.db` (221 events). The v6 migration regression must cover both.
 - **Max feedback latency:** 60 seconds
 
 ---
@@ -49,7 +51,7 @@ created: 2026-08-13
 | *pending* | — | — | SAFE-06 | T-10-02 | adversarial families (direct command / role swap / in-story hiding) × ko/en are not stopped by a single phrase match | unit | `pytest tests/test_adversarial_fence.py -x` | ❌ W0 (new file) | ⬜ pending |
 | *pending* | — | — | SAFE-07 | T-10-04 | unknown classifier move name is absorbed via the "no move" path, contract violation logged for operators | integration | `pytest tests/test_web_actions.py -k unknown_move -x`, `pytest tests/test_cli.py -k unknown_move -x` | ❌ W0 (both) | ⬜ pending |
 | *pending* | — | — | QUAL-08 | — | provider-adapter assumptions enforced in code, not comments | unit | `pytest tests/test_providers.py -k reasoning -x` | ⚠️ partial (`test_providers.py:250-267` covers `note_result`) | ⬜ pending |
-| *pending* | — | — | TEST-03 | — | v5 event records still read under v6 code | integration | `pytest tests/test_event_schema_migration.py -k v5_to_v6 -x` | ❌ W0 (new file) | ⬜ pending |
+| *pending* | — | — | TEST-03 | — | existing v2 and v5 event records still read under v6 code | integration | `pytest tests/test_event_schema_migration.py -k v5_to_v6 -x` | ❌ W0 (new file) | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 

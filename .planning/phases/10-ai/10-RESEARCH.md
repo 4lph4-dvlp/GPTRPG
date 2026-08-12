@@ -18,7 +18,8 @@
 - **D-03:** 확실한 것(①②)만 자동으로 자르고, 애매한 것(③)은 통과시키되 기록만 한다.
 - **D-04:** 걸러낸 것·의심스러운 것을 운영자 화면(표준오류)과 사건 기록 양쪽에 남긴다.
   `EVENT_SCHEMA_VERSION`을 5 → 6으로 올리고 `reducer.py` 분기를 **같은 커밋에** 낸다
-  (08-CONTEXT.md D-06 재사용). 판 5로 기록된 세션1 기록(895건)을 계속 읽을 수 있어야 한다.
+  (08-CONTEXT.md D-06 재사용). 이미 디스크에 있는 옛 기록 — `.gptrpg/events.db`의 판 2 기록
+  895건과 `.gptrpg/uat9.db`의 판 5 기록 221건 — 을 계속 읽을 수 있어야 한다.
   Reversibility: one-way.
 - **D-05:** 걸렀다는 사실만 알린다 — "이야기 한 부분을 걸렀어요. 이어서 씁니다" 정도. 어떤
   종류였는지는 운영자 기록에만, 화면엔 안 띄운다.
@@ -450,8 +451,8 @@ D-06/D-07의 "재생성"은 **이 재시도 루프와는 다른 개념**이다 �
 안에서** `event_log/schema.py`(GameEvent Union에 추가) + `rules_core/reducer.py`(`apply_event`
 분기 추가, `scene_illustrated`/`character_occupied`가 이미 보여준 "상태를 안 바꾸지만 `last_seq`는
 갱신하는" 패턴을 재사용 가능) + `session_actor/actor.py`(새 Command + `_prepare_*` 함수 +
-`submit()`의 `isinstance` 분기)까지 세 파일을 함께 끝내라. `.gptrpg/events.db`의 판 5 기록
-895건이 판 6 코드로도 읽히는지(새 종류가 없는 옛 기록은 그냥 새 분기를 안 타면 되므로 정상
+`submit()`의 `isinstance` 분기)까지 세 파일을 함께 끝내라. `.gptrpg/events.db`의 판 2 기록 895건과
+`.gptrpg/uat9.db`의 판 5 기록 221건이 판 6 코드로도 읽히는지(새 종류가 없는 옛 기록은 그냥 새 분기를 안 타면 되므로 정상
 읽혀야 함, 08-CONTEXT.md D-13 패턴과 동일) 회귀 테스트를 반드시 포함하라.
 **Warning signs:** `schema.py`만 diff에 있고 `reducer.py`가 diff에 없는 커밋 — 리뷰 단계에서
 바로 잡아야 한다.
@@ -688,7 +689,7 @@ gemini/nim/openrouter) API 키 요구사항은 이미 이전 phase들이 확인�
 - **Per task commit:** 위 "Quick run command" (관련 파일만)
 - **Per wave merge:** `uv run pytest` (전체) + `uv run lint-imports`(.importlinter 4계약 유지 확인,
   09-VERIFICATION.md가 이미 이 커맨드를 정규 검증 스텝으로 씀) + `uv run ruff check src`
-- **Phase gate:** 전체 스위트 green + `.gptrpg/events.db`(판 5, 895건) 재생 회귀 테스트 통과가
+- **Phase gate:** 전체 스위트 green + `.gptrpg/events.db`(판 2, 895건) + `.gptrpg/uat9.db`(판 5, 221건) 재생 회귀 테스트 통과가
   `/gsd-verify-work` 이전 필수
 
 ### Wave 0 Gaps

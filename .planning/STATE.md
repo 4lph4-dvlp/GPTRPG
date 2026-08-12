@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 10
+current_phase: 09
 current_phase_name: AI 출력 검증과 탈옥 방어
-status: discussed
+status: executing
 stopped_at: Phase 10 context gathered
-last_updated: "2026-08-12T18:01:17.688Z"
+last_updated: "2026-08-12T19:03:06.643Z"
 last_activity: 2026-08-13
 last_activity_desc: Phase 10 논의 완료 — 13개 결정 잠금, SAFE-07 신설
 progress:
   total_phases: 11
   completed_phases: 3
-  total_plans: 8
+  total_plans: 13
   completed_plans: 8
   percent: 18
 ---
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 09 (에이전트 구조 재편) — VERIFYING
 Plan: 4 of 4
-Status: Phase complete — ready for verification
+Status: Ready to execute
 Last activity: 2026-08-09 — Completed 09-04-PLAN.md (Task 2 체크포인트, 사람이 수용한 미확인 항목과 함께 종료)
 
 Progress: [██████████] 100%
@@ -230,9 +230,11 @@ Resume file: .planning/phases/10-ai/10-CONTEXT.md
 
 1. **판을 5 → 6으로 올린다**(D-04, 안내를 사건 기록에 남기기 위해). `reducer.py` 분기를
    **같은 커밋에** 내야 한다 — 이 프로젝트에서 이미 한 번 사고가 난 자리다(08-CONTEXT.md D-06)
+
 2. **「한 문장씩 늦추기」가 구조를 정한다**(D-01). 서사가 지금은 문장이 완성되는 즉시
    기록·표시되는데, 그 사이에 한 칸을 끼운다. `master_gm.narrate()`의 재시도 규칙 세 갈래
    (특히 스톨은 절대 재시도 안 함)를 깨면 안 된다
+
 3. **SAFE-07이 신설됐다** — 분류기가 목록 밖 이름을 내면 「무브 없음」과 같은 경로로 보낸다
    (D-12). 2026-08-12 Phase 9 UAT에서 발견
 
