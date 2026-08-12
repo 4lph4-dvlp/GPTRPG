@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 09
-current_phase_name: 에이전트 구조 재편
-status: verifying
+current_phase: 10
+current_phase_name: AI 출력 검증과 탈옥 방어
+status: discussed
 stopped_at: Phase 10 context gathered
 last_updated: "2026-08-12T18:01:17.688Z"
-last_activity: 2026-08-09
-last_activity_desc: Completed 09-04-PLAN.md — Phase 9 complete
+last_activity: 2026-08-13
+last_activity_desc: Phase 10 논의 완료 — 13개 결정 잠금, SAFE-07 신설
 progress:
   total_phases: 11
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 8
   completed_plans: 8
   percent: 18
@@ -223,9 +223,19 @@ Stopped at: Phase 10 context gathered
 Traceability 갱신 완료
 Resume file: .planning/phases/10-ai/10-CONTEXT.md
 
-**다음 행동:** Phase 9(에이전트 구조 재편)가 이제 검증까지 완전히 닫혔다 — 09-04까지 4개
-계획 종료, ARCH-02~06 다섯 다 REQUIREMENTS.md에서 완료, 09-04 Task 2에서 미확인으로 남았던
-UAT 4항목도 2026-08-12에 전부 PASS(사건 기록 증거는 `.gptrpg/uat9.db`의 `pacing5`·`uatweb`
-세션). 다음은 Phase 10(AI 출력 검증과 탈옥 방어) 착수 — **논의 시 UAT에서 나온 「닫힌 목록
-밖 무브가 나오면 턴이 안내 없이 죽는다」를 함께 다룰 것.** 이전 마일스톤의 단계 산출물은
-`.planning/milestones/v1.0-phases/`에 보관되어 있다.
+**다음 행동:** Phase 10(AI 출력 검증과 탈옥 방어) **논의 완료** — `10-CONTEXT.md`에 결정
+13개가 잠겼다. 다음은 `/gsd-plan-phase 10`(조사 → 계획).
+
+**계획 단계가 반드시 알아야 할 것 셋:**
+
+1. **판을 5 → 6으로 올린다**(D-04, 안내를 사건 기록에 남기기 위해). `reducer.py` 분기를
+   **같은 커밋에** 내야 한다 — 이 프로젝트에서 이미 한 번 사고가 난 자리다(08-CONTEXT.md D-06)
+2. **「한 문장씩 늦추기」가 구조를 정한다**(D-01). 서사가 지금은 문장이 완성되는 즉시
+   기록·표시되는데, 그 사이에 한 칸을 끼운다. `master_gm.narrate()`의 재시도 규칙 세 갈래
+   (특히 스톨은 절대 재시도 안 함)를 깨면 안 된다
+3. **SAFE-07이 신설됐다** — 분류기가 목록 밖 이름을 내면 「무브 없음」과 같은 경로로 보낸다
+   (D-12). 2026-08-12 Phase 9 UAT에서 발견
+
+Phase 9는 검증까지 완전히 닫혔다 — 09-04까지 4개 계획 종료, ARCH-02~06 다섯 다 완료, 열린
+UAT 4항목도 2026-08-12에 전부 PASS(증거는 `.gptrpg/uat9.db`의 `pacing5`·`uatweb` 세션).
+이전 마일스톤의 단계 산출물은 `.planning/milestones/v1.0-phases/`에 보관되어 있다.
