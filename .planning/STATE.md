@@ -198,7 +198,11 @@ v1.1이 완료되면 조건을 갖춘 재실험을 새로 설계할지 결정한
 Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-11(D-11의 3주 재개
 검증) · M1-14(동적 파티).
 
-- [열린 UAT 후속 항목 — Phase 9 완료를 막지 않음] 09-04 Task 2 체크포인트에서 사람이 명시적으로 미확인 처리한 두 항목: ① 시계 폭주 검사(연속 5턴 안에 위협 시계가 4/4에 닿는지) — clock_judge 조건 판단 프롬프트가 너무 헐거우면 페이싱이 깨질 위험, 자동 시험으로는 못 잡는 종류라 사람 확인이 유일한 그물이었다(T-09-20). ② D-05 실사용 복원력(clock_judge를 존재하지 않는 모델로 바꾸고 실제 앱에서 한 턴 — 턴이 정상 종료하고 실패는 표준오류에만 뜨는지) — 코드 수준 단위/통합 시험은 09-01에서 이미 통과했으나 살아있는 앱에서의 확인은 아직 없다. 둘 다 후속 UAT 패스에서 확인 권장
+- [해소됨 2026-08-12 — Phase 9 열린 UAT 4항목 전부 확인] 09-04 Task 2 체크포인트에서 미확인으로 남겼던 항목을 후속 UAT 패스에서 전부 돌렸다(`09-UAT.md`, 4/4 PASS). ① 시계 폭주 검사(T-09-20): 완결 5턴 뒤 시계 **2/4** — 마지막 칸에 닿지 않았다. 진행 두 번 다 `trigger="condition"`(Phase 9 배경 경로)이고 사건으로 기록됐다. ② D-05 실사용 복원력: clock_judge를 존재하지 않는 모델로 바꾸고 브라우저에서 한 턴 완주 — 서사까지 정상, 실패는 서버 표준오류에만(`404 page not found`), 화면·콘솔 유출 0건. ③ 역할별 `ai_invoked`: situation_judge·scene_entity_judge·clock_judge가 같은 `caused_by_seq` 아래 각각 한 번씩(정적 병렬 gather 증거). ④ 브라우저 육안: 시나리오 원문 특징 문구 6개 전부 미출현, 지시문·사고블록 흔적 0건, 시계 표시 정상
+
+- [Phase 9 UAT에서 새로 관찰된 것 3건 — `09-UAT.md` Gaps 참조] ① 분류기가 닫힌 목록 밖 무브(`'track'`)를 내면 그 턴이 안내 없이 죽는다(exit 1, 방어 자체는 정상) — **Phase 10 논의에 올릴 것**. ② 실패한 제공자 호출도 `ai_invoked`로 기록되고 토큰이 0이라 정상 응답과 구분되지 않는다 — **Phase 14 성공 조건 5가 가리키는 바로 그 상황이고, 이제 실물 증거가 있다**. ③ 제공자 시간초과가 실제로 났는데도 턴이 완주했다 — 성공 조건 4의 실사용 증거
+
+- [`gptrpg replay`의 한계] replay 출력에는 「AI 호출 수」 합계만 있고 역할별 내역이 없다 — UAT 항목 ③은 사건 기록의 `ai_invoked.agent_role`을 직접 읽어 확인했다. replay에 역할별 집계 한 줄을 붙이면 이 확인이 명령 하나로 끝난다(후속 제안, 미착수)
 
 ### Roadmap Evolution
 
@@ -214,13 +218,14 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-09T12:20:00.969Z
-Stopped at: Completed 09-04-PLAN.md (Task 2 checkpoint resolved with human-accepted verification gaps) — Phase 9 complete
+Last session: 2026-08-12T11:35:00Z
+Stopped at: Phase 9 열린 UAT 4항목 확인 완료 (4/4 PASS) — `09-UAT.md`
 Traceability 갱신 완료
 Resume file: None
 
-**다음 행동:** Phase 9(에이전트 구조 재편) 완료 — 09-04까지 4개 계획 전부 종료. ARCH-02~06
-다섯 다 REQUIREMENTS.md에서 완료로 표시됐다. Task 2 체크포인트는 사람이 일부 항목만
-확인하고 나머지(3·5 포함)는 명시적으로 미확인 상태로 남긴 채 통과시켰다 — Blockers/Concerns의
-"열린 UAT 후속 항목" 참조. 다음은 Phase 10(AI 출력 검증과 탈옥 방어) 착수. 이전 마일스톤의
-단계 산출물은 `.planning/milestones/v1.0-phases/`에 보관되어 있다.
+**다음 행동:** Phase 9(에이전트 구조 재편)가 이제 검증까지 완전히 닫혔다 — 09-04까지 4개
+계획 종료, ARCH-02~06 다섯 다 REQUIREMENTS.md에서 완료, 09-04 Task 2에서 미확인으로 남았던
+UAT 4항목도 2026-08-12에 전부 PASS(사건 기록 증거는 `.gptrpg/uat9.db`의 `pacing5`·`uatweb`
+세션). 다음은 Phase 10(AI 출력 검증과 탈옥 방어) 착수 — **논의 시 UAT에서 나온 「닫힌 목록
+밖 무브가 나오면 턴이 안내 없이 죽는다」를 함께 다룰 것.** 이전 마일스톤의 단계 산출물은
+`.planning/milestones/v1.0-phases/`에 보관되어 있다.
