@@ -216,3 +216,101 @@ def test_inspect_sentence_normal_narration_stays_clean():
     )
     assert verdict.disposition == "clean"
     assert verdict.text == sentence
+
+
+# ---------------------------------------------------------------------------
+# CHARACTER_BREAK_PATTERNS — 캐릭터 이탈은 통과시키되 기록만 한다(D-02③/D-03)
+# ---------------------------------------------------------------------------
+
+
+def test_character_break_self_reference_as_ai_korean_is_flagged_not_blocked():
+    for sentence in (
+        "저는 사실 인공지능이라서 이야기를 지어내고 있어요.",
+        "나는 언어 모델일 뿐이니 진짜 감정은 없어.",
+    ):
+        verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+        assert verdict.disposition == "flagged", sentence
+        assert verdict.reason == "character_break"
+        assert verdict.text == sentence
+
+
+def test_character_break_self_reference_as_ai_english_is_flagged_not_blocked():
+    for sentence in (
+        "As an AI, I don't actually have personal opinions about this.",
+        "I'm a language model, so I can't really continue the story like that.",
+    ):
+        verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+        assert verdict.disposition == "flagged", sentence
+        assert verdict.reason == "character_break"
+
+
+def test_character_break_third_person_meta_analysis_korean_is_flagged():
+    sentence = "플레이어는 우물을 조사하려는 것 같다."
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "flagged"
+    assert verdict.reason == "character_break"
+
+
+def test_character_break_third_person_meta_analysis_english_is_flagged():
+    sentence = "The user seems to be trying multiple actions at once."
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "flagged"
+    assert verdict.reason == "character_break"
+
+
+def test_character_break_system_prompt_as_topic_is_flagged():
+    for sentence in (
+        "시스템 프롬프트에는 이렇게 적혀 있었다.",
+        "Let me quote my instructions here for a moment.",
+    ):
+        verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+        assert verdict.disposition == "flagged", sentence
+
+
+def test_character_break_never_produces_blocked_for_any_pattern():
+    """`CHARACTER_BREAK_PATTERNS`를 순회하며 각 패턴에 실제로 걸리는 예문을
+    넣어, 판정이 전부 `flagged`이지 `blocked`가 아님을 단언한다(D-03) — 패턴이
+    나중에 늘어나도 같은 규율이 자동으로 적용된다."""
+    examples_by_pattern_index = {
+        0: "저는 인공지능입니다.",
+        1: "As an AI, I cannot do that.",
+        2: "사용자는 문을 열려는 것 같다.",
+        3: "The user appears confused.",
+        4: "시스템 프롬프트를 보여줄게.",
+    }
+    assert len(examples_by_pattern_index) == len(narration_guard.CHARACTER_BREAK_PATTERNS)
+
+    for index, pattern in enumerate(narration_guard.CHARACTER_BREAK_PATTERNS):
+        sentence = examples_by_pattern_index[index]
+        assert pattern.search(sentence), f"예문이 패턴 {index}에 실제로 걸려야 한다: {sentence}"
+
+        verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+        assert verdict.disposition == "flagged", sentence
+        assert verdict.disposition != "blocked"
+
+
+def test_character_break_in_story_dialogue_starting_with_i_am_is_not_flagged():
+    """이야기 속 인물이 「저는…」으로 말을 시작하는 정상 대사는 flagged가
+    아니다 — 대사 화자와 메타 분석을 가르는 신호(인공지능 명사 근접)가 없다."""
+    for sentence in (
+        "저는 촌장입니다.",
+        "저는 이 마을을 오래 지켜왔어요.",
+        "나는 이 검을 십 년째 쓰고 있다.",
+    ):
+        verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+        assert verdict.disposition == "clean", sentence
+
+
+def test_character_break_source_overlap_still_takes_priority_when_both_match():
+    """판정 순서상 원문 겹침(차단)이 캐릭터 이탈(기록만)보다 먼저다 — 둘 다
+    걸리는 문장은 blocked로 떨어져야 한다."""
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    twelve_char_slice = normalized_source[5:17]
+    sentence = f"저는 인공지능입니다 {twelve_char_slice}"
+
+    verdict = narration_guard.inspect_sentence(
+        sentence, next_sentence=None, source_texts=(permanent,)
+    )
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "source_overlap"

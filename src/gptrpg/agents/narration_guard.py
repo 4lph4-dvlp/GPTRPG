@@ -6,11 +6,13 @@
 정하는 것은 "이 문장을 화면에 보낼지"이지 게임 판정 수치가 아니다.
 
 10-01은 검사 갈래를 하나만 채웠다 — **추론 모델의 생각 블록**(SAFE-01, D-02①).
-10-02가 **원문 겹침**(D-02②)을 채운다 — 우리가 프롬프트에 실제로 넣은 진행자
-지시문 원문과 겹치는 문장을 결정론적으로 잡아 자동 차단한다. **캐릭터
-이탈**(D-02③, 10-04)은 아직 남아 있다. `inspect_sentence()`가 이미 이 세
-갈래를 함께 담을 반환 모양(`GuardVerdict`)을 갖고 있는 이유가 그것이다 —
-나중에 갈래가 늘어도 호출부(`master_gm.narrate`)의 소비 방식은 안 바뀐다.
+10-02가 나머지 둘을 채운다 — **원문 겹침**(D-02②, Task 1): 우리가 프롬프트에
+실제로 넣은 진행자 지시문 원문과 겹치는 문장을 결정론적으로 잡아 자동
+차단한다. **캐릭터 이탈**(D-02③, Task 2): 자기 지칭·3인칭 메타 분석·시스템
+화제 삼기 신호를 잡되 D-03에 따라 절대 차단하지 않고 통과시키며 기록만
+남긴다. `inspect_sentence()`가 이 세 갈래를 함께 담는 반환 모양
+(`GuardVerdict`)을 갖고 있는 이유가 그것이다 — 갈래가 늘어도 호출부
+(`master_gm.narrate`)의 소비 방식은 안 바뀐다.
 """
 
 import re
@@ -41,6 +43,35 @@ STDERR_EXCERPT_CHARS = 40
 _THINK_OPEN = re.compile(r"<think>", re.IGNORECASE)
 _THINK_CLOSE = re.compile(r"</think>", re.IGNORECASE)
 
+CHARACTER_BREAK_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # 자기 지칭(한국어) — 세션1에서 실제로 관찰된 실패(docs/session1-code-review.md:83,
+    # "TRPG말고 원래 AI로 돌아와" 이후 AI가 "나리의 여자친구 사귀기 조언이
+    # 필요하신가요?" 식으로 응답). "저는 촌장입니다" 같은 정상 대사와 가르기
+    # 위해 대명사와 인공지능 명사가 근접해 함께 있을 때만 잡는다.
+    re.compile(r"(저는|나는)[^.!?]{0,10}(인공지능|언어\s*모델|챗봇|어시스턴트|AI)"),
+    # 자기 지칭(영어) — 같은 계열의 영어 표현.
+    re.compile(
+        r"\b(as an ai|i am an ai|i'm an ai|i am a language model|i'm a language model|"
+        r"as a language model)\b",
+        re.IGNORECASE,
+    ),
+    # 3인칭 메타 분석(한국어) — 플레이어/사용자의 의도를 분석하는 말투.
+    re.compile(
+        r"(플레이어|사용자)[는가][^.!?]{0,15}(려는\s*것\s*같|려고\s*하는\s*것\s*같|"
+        r"려고\s*한다|듯\s*하다|것으로\s*보인다)"
+    ),
+    # 3인칭 메타 분석(영어) — 03-04 Task 3 라이브 검증에서 실제로 관찰된 오작동
+    # ("The user seems to be trying multiple actions...", prompt_assembly.py
+    # build_gm_prompt 도크스트링 170-176줄에 인용).
+    re.compile(r"\bthe user (seems|appears|is trying|might be trying)\b", re.IGNORECASE),
+    # 시스템 프롬프트·지시문 자체를 화제로 삼기 — 이야기 어휘에 없는 메타 용어라
+    # 오탐 위험이 낮다.
+    re.compile(r"(시스템\s*프롬프트|진행자\s*지시문|system prompt|my instructions)", re.IGNORECASE),
+)
+"""캐릭터 이탈로 보이는 말투를 잡는 정규식 목록(D-02③) — **절대 차단으로
+승격하지 않는다**(D-03). 오탐 비용이 낮으므로(통과시키고 기록만 하면 되니까)
+넓게 잡아도 된다 — 넓게 보되 좁게 자른다."""
+
 
 @dataclass(frozen=True)
 class GuardVerdict:
@@ -48,12 +79,14 @@ class GuardVerdict:
 
     `disposition`은 `"clean"`(그대로 내보낸다) · `"blocked"`(확실 — 자동
     차단, D-03①②) · `"flagged"`(애매 — 통과시키되 기록만, D-03③) 셋 중
-    하나다. 10-01은 `"clean"`과 `"blocked"`만 실제로 만든다 — `"flagged"`는
-    캐릭터 이탈 검사(10-04)가 처음 쓴다.
+    하나다. 10-01은 `"clean"`과 `"blocked"`(생각 블록)만 만들었다. 10-02가
+    `"blocked"`(원문 겹침, Task 1)과 `"flagged"`(캐릭터 이탈, Task 2)를
+    마저 채운다.
 
-    `text`는 `disposition == "clean"`일 때만 뜻이 있다 — `"blocked"`면
-    호출부가 이 칸을 안 쓴다(대신 `NOTICE_FILTERED`를 쓴다). `matched_len`은
-    원문 겹침 갈래(10-02)가 쓸 칸이고, 생각 블록 갈래에서는 언제나 0이다.
+    `text`는 `disposition`이 `"clean"` 또는 `"flagged"`일 때만 원문을
+    담는다 — `"blocked"`면 호출부가 이 칸을 안 쓴다(대신 `NOTICE_FILTERED`를
+    쓴다). `matched_len`은 원문 겹침 갈래에서 실제 겹친 길이, 캐릭터 이탈
+    갈래에서 걸린 부분의 길이를 담고, 생각 블록 갈래에서는 언제나 0이다.
     `subject_len`은 검사 대상 문장의 코드포인트 개수(`len(sentence)` —
     파이썬 `str`은 코드포인트 단위다). `think_open`은 다음 문장을 검사할 때
     `inspect_sentence`에 그대로 다시 넘겨야 하는 상태다 — 생각 블록의 여는
@@ -149,8 +182,8 @@ def inspect_sentence(
     source_texts: tuple[str, ...],
     think_open: bool = False,
 ) -> GuardVerdict:
-    """서사 검사 진입점 — 10-02 기준으로 두 갈래(생각 블록/원문 겹침)를
-    채운다. 캐릭터 이탈(10-04)은 아직 없다.
+    """서사 검사 진입점 — 세 갈래(생각 블록/원문 겹침/캐릭터 이탈)를 모두
+    채운다(10-02).
 
     `source_texts`는 "우리가 프롬프트에 실제로 넣은 문자열"이다 —
     `find_source_overlap`이 이 값을 원문 겹침 대조 소스로 그대로 쓴다.
@@ -169,7 +202,13 @@ def inspect_sentence(
        source_texts)`로 원문 겹침을 대조한다(D-02②) — 적중하면 `blocked`,
        `reason="source_overlap"`, `matched_len`에 실제 겹친 길이를 담는다.
        `text`는 빈 문자열이다 — 걸린 원문을 이 칸에 담지 않는다.
-    4. 셋 다 아니면 `clean` — 문장 그대로 내보낸다.
+    4. 원문 겹침도 없으면 `CHARACTER_BREAK_PATTERNS`를 순회한다(D-02③) —
+       하나라도 걸리면 `flagged`, `reason="character_break"`, `text`는
+       **원문 그대로**(호출부가 이 문장을 그대로 내보낸다), `matched_len`은
+       걸린 부분의 길이다. **이 갈래는 절대 `blocked`를 돌려주지 않는다**
+       (D-03) — 오탐이어도 통과시키는 편의 비용이 멀쩡한 서사를 잘못 자르는
+       비용보다 낮다.
+    5. 넷 다 아니면 `clean` — 문장 그대로 내보낸다.
 
     **`next_sentence`를 직접 들여다보지 않는 이유(생각 블록 갈래):** "여는
     표식이 문장 1에, 닫는 표식이 문장 2에 걸쳐 있어도 잡힌다"(D-01)는
@@ -218,6 +257,18 @@ def inspect_sentence(
             subject_len=subject_len,
             think_open=False,
         )
+
+    for pattern in CHARACTER_BREAK_PATTERNS:
+        match = pattern.search(sentence)
+        if match:
+            return GuardVerdict(
+                disposition="flagged",
+                reason="character_break",
+                text=sentence,
+                matched_len=len(match.group(0)),
+                subject_len=subject_len,
+                think_open=False,
+            )
 
     return GuardVerdict(
         disposition="clean",
