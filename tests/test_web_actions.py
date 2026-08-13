@@ -96,20 +96,63 @@ def test_declare_no_candidates_returns_tier_none(web_client_with_fake_provider) 
     assert body["candidates"] == []
 
 
-def test_action_declared_event_persists_even_when_classification_fails(
+def test_action_declared_event_persists_when_classifier_names_unknown_move(
     web_client_with_fake_provider,
 ) -> None:
-    """모델이 닫힌 목록에 없는 무브 이름을 돌려줘 분류가 400으로 실패해도,
-    `action_declared` 사건은 이미 기록되어 있다 — 선언이 분류보다 먼저 남는다."""
+    """모델이 닫힌 목록에 없는 무브 이름을 돌려줘도(SAFE-07/D-12, 10-05)
+    응답은 200이고 `action_declared` 사건은 이미 기록되어 있다 — 플레이어가
+    친 문장이 안내 없이 사라지지 않는다는 것이 이 요구사항의 핵심이다."""
     fake = FakeProvider(complete_value=json.dumps([{"move": "not_a_real_move", "stat": "STR"}]))
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = _declare(client)
 
-        assert response.status_code == 400
+        assert response.status_code == 200
+        body = response.json()
+        assert body["tier"] == "none"
+        assert body["candidates"] == []
         declared = _events_of_type(client, "action_declared")
 
     assert len(declared) == 1
     assert declared[0]["raw_text"] == "경비병을 설득해 통로를 열어 보려 한다"
+
+
+def test_classifier_unknown_move_records_one_safety_flagged_event_without_the_name(
+    web_client_with_fake_provider,
+) -> None:
+    """계약 위반이었다는 사실이 `safety_flagged` 사건 한 건으로 남는다
+    (source="classifier", reason="unknown_move") — 사건 payload에는 문제의
+    이름 문자열이 들어 있지 않고 길이 숫자만 남는다(T-10-03)."""
+    fake = FakeProvider(complete_value=json.dumps([{"move": "not_a_real_move", "stat": "STR"}]))
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = _declare(client)
+        assert response.status_code == 200
+        declare_seq = response.json()["declare_seq"]
+
+        flagged = _events_of_type(client, "safety_flagged")
+
+    assert len(flagged) == 1
+    assert flagged[0]["source"] == "classifier"
+    assert flagged[0]["reason"] == "unknown_move"
+    assert flagged[0]["disposition"] == "blocked"
+    assert flagged[0]["subject_len"] == len("not_a_real_move")
+    assert flagged[0]["caused_by_seq"] == declare_seq
+    assert "not_a_real_move" not in json.dumps(flagged[0])
+
+
+def test_classifier_empty_candidates_records_no_safety_flagged_event(
+    web_client_with_fake_provider,
+) -> None:
+    """모델이 빈 배열을 내면(못 골랐다) 목록 밖 이름을 낸 경우와 구분되어
+    `safety_flagged` 사건이 0건이다."""
+    fake = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = _declare(client)
+        assert response.status_code == 200
+        assert response.json()["tier"] == "none"
+
+        flagged = _events_of_type(client, "safety_flagged")
+
+    assert flagged == []
 
 
 def test_ai_invoked_event_caused_by_seq_points_at_declare(

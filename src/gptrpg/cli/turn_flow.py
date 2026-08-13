@@ -264,6 +264,19 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             caused_by_seq=declare_seq,
         )
     )
+    if proposal.unknown_move is not None:
+        # SAFE-07/D-12, 10-05 — 웹(`web/routes_actions.py`)과 똑같은 자리·
+        # 똑같은 조건으로 계약 위반을 운영자 기록에 남긴다. 이름 문자열
+        # 자체는 사건에 안 들어간다(T-10-03).
+        await actor.submit(
+            RecordSafetyFlag(
+                source="classifier",
+                reason="unknown_move",
+                disposition="blocked",
+                subject_len=len(proposal.unknown_move),
+                caused_by_seq=declare_seq,
+            )
+        )
 
     tier = proposal.tier
 

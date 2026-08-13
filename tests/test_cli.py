@@ -691,6 +691,38 @@ def test_turn_no_candidates_proceeds_without_check_and_records_no_confirm_event(
     assert not any(e.event_type == "check_resolved" for e in events)
 
 
+def test_turn_classifier_unknown_move_proceeds_without_check_and_records_safety_flag(
+    tmp_db_path, monkeypatch, fake_provider, capsys
+):
+    """분류기가 룰북 목록 밖 무브 이름을 내도(SAFE-07/D-12, 10-05) 종료
+    코드는 0이고 「무브 없음」과 같은 안내가 나온다 — 2026-08-12 Phase 9
+    UAT에서 실제로 `'track'`이 이 경로에서 exit 1로 턴을 죽였던 결함의
+    회귀 방지 시험이자, 웹 쪽 짝 시험(`test_web_actions.py`)과 같은
+    시나리오를 명령줄에서 돈다."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps([{"move": "not_a_real_move", "stat": "STR"}])
+
+    exit_code = _run_turn_with_fake(
+        db, "s1", "저 사람한테 뭔가 해 본다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+        input_answers=[],
+    )
+    assert exit_code == 0
+
+    out, err = capsys.readouterr()
+    assert "판정 없이 진행" in out  # 기존 「무브 없음」 문구를 그대로 재사용한다
+    assert "not_a_real_move" in err  # 운영자는 stderr로 어떤 이름이었는지 확인할 수 있다
+
+    events = _read_events(db, "s1")
+    assert any(e.event_type == "action_declared" for e in events)
+    flagged = [e for e in events if e.event_type == "safety_flagged"]
+    assert len(flagged) == 1
+    assert flagged[0].source == "classifier"
+    assert flagged[0].reason == "unknown_move"
+    assert flagged[0].disposition == "blocked"
+    assert flagged[0].subject_len == len("not_a_real_move")
+    assert not any(e.event_type == "action_confirmed" for e in events)
+
+
 def test_turn_provider_call_failure_looks_like_no_move_but_leaves_a_stderr_trail(
     tmp_db_path, monkeypatch, capsys
 ):

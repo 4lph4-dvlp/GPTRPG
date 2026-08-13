@@ -32,7 +32,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from gptrpg.agents.action_classifier import UnknownMove, classify
+from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
@@ -227,6 +227,13 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
     캐릭터가 요청 본문의 캐릭터와 다르면 `actor.submit`을 부르기 전에 403을
     던진다 — 이 검증은 게임 상태가 아니라 요청 형식에 대한 판단이므로
     사건을 하나도 남기지 않는다(281~285줄이 적어 둔 관례).
+
+    **`UnknownMove`는 여기서 더 이상 예외로 나타나지 않는다(SAFE-07, D-12,
+    10-05).** `classify()`가 함수 경계에서 이미 흡수했다 — `proposal.tier`가
+    `"none"`이고 `candidates`가 빈 목록인 평소 「무브 없음」 응답이 그대로
+    돌아온다. 계약 위반이었다는 사실은 `proposal.unknown_move`에 남고,
+    아래에서 `RecordSafetyFlag(source="classifier")`로 운영자 기록에
+    남긴다 — 새 응답 칸도 새 상태 코드도 만들지 않는다.
     """
     identity = read_identity(request, session_id)
     if identity is None or identity.character_id != body.character_id:
@@ -280,7 +287,7 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
             moves=moves,
             rulebook_display_name=rulebook.display_name,
         )
-    except (UnknownMove, CommandRejected, UnknownRulebook) as exc:
+    except (CommandRejected, UnknownRulebook) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SequenceConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -308,6 +315,19 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
             caused_by_seq=declare_seq,
         )
     )
+    if proposal.unknown_move is not None:
+        # SAFE-07/D-12, 10-05 — 계약 위반이었다는 사실을 운영자 기록에
+        # 남긴다. 이름 문자열 자체는 사건에 안 들어간다 — 길이 숫자만
+        # 남는다(T-10-03, 10-01이 세운 규율).
+        await actor.submit(
+            RecordSafetyFlag(
+                source="classifier",
+                reason="unknown_move",
+                disposition="blocked",
+                subject_len=len(proposal.unknown_move),
+                caused_by_seq=declare_seq,
+            )
+        )
 
     return DeclareResponse(
         declare_seq=declare_seq,

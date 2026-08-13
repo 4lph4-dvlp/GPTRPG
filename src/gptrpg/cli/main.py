@@ -9,7 +9,6 @@ import os
 import sys
 from pathlib import Path
 
-from gptrpg.agents.action_classifier import UnknownMove
 from gptrpg.agents.config import (
     AGENT_ROLES,
     DEFAULT_CONFIG_PATH,
@@ -456,6 +455,16 @@ def _cmd_agents_show(args: argparse.Namespace) -> int:
 
 
 def _cmd_turn(args: argparse.Namespace) -> int:
+    """`turn` 하위 명령의 진입점.
+
+    **닫힌 목록 밖 무브 이름 예외(`action_classifier` 모듈, SAFE-07/D-12,
+    10-05)는 이 except 튜플에 없다.** 그 예외를 던지는 곳은
+    `_parse_candidates` 하나뿐이고 그것을 부르는 곳은 `classify()` 하나뿐이다
+    — `classify()`가 함수 경계에서 이미 흡수하므로(`turn_flow.py`) 흡수
+    이후엔 여기 도달할 경로가 없다. **일부러 catch-all에 남겨 두지 않는다**
+    — 흡수가 나중에 깨지면 조용히 exit 1로 돌아가는 대신 잡히지 않은
+    예외(raw traceback)로 시끄럽게 실패해야 한다(회귀를 침묵시키지 않는다).
+    """
     if bool(args.provider) != bool(args.model):
         print("오류: --provider와 --model은 항상 함께 줘야 한다", file=sys.stderr)
         return 1
@@ -468,7 +477,6 @@ def _cmd_turn(args: argparse.Namespace) -> int:
         CommandRejected,
         SequenceConflict,
         UnknownRulebook,
-        UnknownMove,
         UnknownProvider,
         MissingApiKey,
         ProviderNotImplemented,

@@ -9,7 +9,7 @@
 import json
 from collections.abc import Callable
 
-from gptrpg.agents.action_classifier import UnknownMove, classify
+from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.context import ClockState, NarrationFacts, TurnContext
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.invoke import CLASSIFIER_TIMEOUT_S, GM_TIMEOUT_S, MAX_ATTEMPTS, call_with_one_retry
@@ -244,24 +244,24 @@ def test_classify_failed_envelope_has_nonnegative_elapsed_and_zero_tokens() -> N
     assert proposal.ai.completion_tokens == 0
 
 
-def test_classify_raises_unknown_move_without_retrying() -> None:
-    """목록 위반은 재시도 대상이 아니다 — call_with_one_retry 밖에서 즉시 드러난다."""
+def test_classify_absorbs_unknown_move_without_retrying() -> None:
+    """목록 위반은 재시도 대상이 아니다 — `call_with_one_retry` 밖에서 즉시
+    드러나고, 10-05부터는 `classify()`가 그 자리에서 흡수해 예외 없이
+    「무브 없음」 모양의 `Proposal`을 돌려준다(SAFE-07/D-12). 재시도가
+    없다는 것은 여전히 `provider.call_count == 1`로 확인한다."""
     provider = _FailingCompleteProvider(
         fail_times=0, complete_value=json.dumps([{"move": "fireball", "stat": "INT"}])
     )
-    try:
-        classify(
-            provider=provider,
-            model="stub-model",
-            ctx=_blank_ctx(),
-            raw_text="불덩이를 던진다",
-            moves=DUNGEONWORLD_LIKE_MOVES,
-            rulebook_display_name="던전월드 계열",
-        )
-    except UnknownMove:
-        pass
-    else:
-        raise AssertionError("UnknownMove가 뜨지 않았다")
+    proposal = classify(
+        provider=provider,
+        model="stub-model",
+        ctx=_blank_ctx(),
+        raw_text="불덩이를 던진다",
+        moves=DUNGEONWORLD_LIKE_MOVES,
+        rulebook_display_name="던전월드 계열",
+    )
+    assert proposal.tier == "none"
+    assert proposal.unknown_move == "fireball"
     assert provider.call_count == 1
 
 

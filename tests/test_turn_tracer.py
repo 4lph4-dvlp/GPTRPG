@@ -6,10 +6,8 @@
 
 import json
 
-import pytest
-
 from gptrpg.agents import providers as providers_module
-from gptrpg.agents.action_classifier import UnknownMove, classify
+from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.context import RECENT_TURNS_LIMIT, ClockState, TurnContext
 from gptrpg.cli.main import _build_turn_context, main
 from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ActionDeclared, utc_now_iso
@@ -231,12 +229,15 @@ def test_second_turn_prompt_labels_prior_turn_with_speaker_prefixes(
 
 
 # ---------------------------------------------------------------------------
-# 닫힌 목록에 없는 무브 이름은 조용히 통과하지 않고 UnknownMove로 거부된다
-# (RIG-01, D-16) — action_classifier.classify()를 CLI 없이 직접 부른다.
+# 닫힌 목록에 없는 무브 이름은 조용히 통과하지 않는다(RIG-01, D-16) —
+# action_classifier.classify()를 CLI 없이 직접 부른다. 10-05부터는 이
+# 위반이 `classify()` 경계에서 흡수되어 「무브 없음」 모양으로 돌아온다
+# (SAFE-07/D-12) — 받아들이는 것이 아니라 거부한 뒤 부드러운 경로에
+# 태우는 것이다.
 # ---------------------------------------------------------------------------
 
 
-def test_classify_raises_unknown_move_for_name_outside_closed_list(fake_provider):
+def test_classify_absorbs_move_name_outside_closed_list_into_no_move_proposal(fake_provider):
     fake_provider.complete_value = json.dumps([{"move": "fireball", "stat": "INT"}])
     ctx = TurnContext(
         scene_entities=(EXAMPLE_SINGLE_STAT_FOE,),
@@ -245,15 +246,17 @@ def test_classify_raises_unknown_move_for_name_outside_closed_list(fake_provider
         recent_turns=(),
     )
 
-    with pytest.raises(UnknownMove):
-        classify(
-            provider=fake_provider,
-            model="fake-model",
-            ctx=ctx,
-            raw_text="불덩이를 던진다",
-            moves=get_moves(DUNGEONWORLD_LIKE_ID),
-            rulebook_display_name="Dungeonworld-like",
-        )
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=ctx,
+        raw_text="불덩이를 던진다",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "none"
+    assert proposal.candidates == ()
+    assert proposal.unknown_move == "fireball"
 
 
 # ---------------------------------------------------------------------------
