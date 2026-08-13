@@ -163,18 +163,26 @@ class NarrationChunk:
 
 
 def _judge_sentence(
-    sentence: str, *, next_sentence: str | None, think_open: bool
+    sentence: str,
+    *,
+    next_sentence: str | None,
+    think_open: bool,
+    source_texts: tuple[str, ...],
 ) -> tuple[NarrationChunk, bool]:
     """보류 중이던 `sentence`를 판정해 `NarrationChunk`로 만든다.
 
-    `inspect_sentence`의 갈래는 10-01에서 생각 블록 하나뿐이다(원문 겹침·
-    캐릭터 이탈은 10-02·10-04가 채운다) — `source_texts=()`를 넘긴다.
-    `disposition == "blocked"`이면 화면에는 `NOTICE_FILTERED`를 대신 싣고,
-    운영자 표준오류에 사유·겹친 글자 수·문장 길이·짧은 발췌를 한 줄 찍는다
-    (T-10-03 — 사람이 읽을 발췌는 네트워크를 안 타는 표준오류에만).
+    `inspect_sentence`의 세 갈래(생각 블록/원문 겹침/캐릭터 이탈)가 모두
+    채워져 있다(10-01·10-02) — `source_texts`는 `narrate()`가 넘겨주는
+    영구 고정 블록 텍스트 하나다. `disposition == "blocked"`이면 화면에는
+    `NOTICE_FILTERED`를 대신 싣고, 운영자 표준오류에 사유·겹친 글자 수·
+    문장 길이·짧은 발췌를 한 줄 찍는다(T-10-03 — 사람이 읽을 발췌는
+    네트워크를 안 타는 표준오류에만). `disposition == "flagged"`(캐릭터
+    이탈, D-03)는 걸러내지 않고 원문 그대로 내보낸다 — 아래 `else` 갈래가
+    `clean`과 `flagged` 둘 다 같은 방식으로 처리한다(`verdict.text`가
+    이미 두 경우 모두 올바른 값을 담고 있다).
     """
     verdict = inspect_sentence(
-        sentence, next_sentence=next_sentence, source_texts=(), think_open=think_open
+        sentence, next_sentence=next_sentence, source_texts=source_texts, think_open=think_open
     )
     if verdict.disposition == "blocked":
         excerpt = sentence[:STDERR_EXCERPT_CHARS]
@@ -230,6 +238,18 @@ def narrate(
     이 함수를 거치는 한 진행자 지시문·규칙·시나리오 원문이 서술 호출에
     도달할 경로가 타입 차원에서 막혀 있다(ARCH-02).
 
+    **원문 겹침 대조 소스는 영구 고정 블록 하나뿐이다(D-02②, 10-02).**
+    `build_gm_prompt`가 돌려주는 `system`은 `[영구 고정, 세션 고정]` 두
+    조각이다 — 이 함수는 `system[0]["text"]`(영구 고정 블록)만 새로 조립
+    하지 않고 그대로 `inspect_sentence(..., source_texts=...)`에 넘긴다.
+    **세션 고정 블록(`system[1]`)은 의도적으로 뺀다.** 그 블록은
+    `_narration_session_block_text`가 만드는 장면 대상·캐릭터 상태이고,
+    서사가 당연히 언급해야 할 정당한 이야기 맥락이다 — 이것을 대조 소스에
+    넣으면 "부서진 등불이 흔들린다" 같은 정상 서사가 걸린다. 이것은
+    10-RESEARCH.md 가정 A1("영구+세션 둘 다")을 좁힌 판단이다 — RESEARCH.md가
+    이미 `NarrationFacts` 값(장면 요약·사실 등, `messages` 쪽)을 대조
+    소스에서 빼라고 한 것과 정확히 같은 이유가 세션 블록에도 적용된다.
+
     스트리밍은 「호출 한 번」과 모양이 달라 재시도 의미가 애매하다 — 재시도
     규칙이 세 갈래다: ① 첫 조각 전에 실패했고 스톨이 아니면 재시도한다
     ② 이미 조각이 하나라도 나갔으면 재시도하지 않는다(이미 화면에 찍힌
@@ -264,6 +284,7 @@ def narrate(
     똑같이 처리한다 — 새 분기 코드를 더하지 않는다.
     """
     system, messages = build_gm_prompt(rulebook_display_name=rulebook_display_name, facts=facts)
+    source_texts = (system[0]["text"],)
 
     start = time.monotonic()
     emitted_any = False
@@ -297,7 +318,10 @@ def narrate(
                     # 지금 모양 그대로 그 결정을 내리게 둔다.
                     if held is not None:
                         chunk, _think_open = _judge_sentence(
-                            held, next_sentence=None, think_open=think_open
+                            held,
+                            next_sentence=None,
+                            think_open=think_open,
+                            source_texts=source_texts,
                         )
                         emitted_any = True
                         yield chunk
@@ -305,13 +329,18 @@ def narrate(
                     raise
                 if held is not None:
                     chunk, think_open = _judge_sentence(
-                        held, next_sentence=sentence, think_open=think_open
+                        held,
+                        next_sentence=sentence,
+                        think_open=think_open,
+                        source_texts=source_texts,
                     )
                     emitted_any = True
                     yield chunk
                 held = sentence
             if held is not None:
-                chunk, think_open = _judge_sentence(held, next_sentence=None, think_open=think_open)
+                chunk, think_open = _judge_sentence(
+                    held, next_sentence=None, think_open=think_open, source_texts=source_texts
+                )
                 emitted_any = True
                 yield chunk
         except StreamStalled:

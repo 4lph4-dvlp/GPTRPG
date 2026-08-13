@@ -6,9 +6,14 @@
 새 값을 본다.
 """
 
+from collections.abc import Iterator
+
 from gptrpg.agents import narration_guard, prompt_assembly
 from gptrpg.agents.context import NarrationFacts
+from gptrpg.agents.envelope import AgentResult
+from gptrpg.agents.master_gm import narrate
 from gptrpg.rulebooks.threat_clocks import THREAT_CAST
+from gptrpg.rules_core.entities import StatEntry
 
 _CHECK_SUMMARY = "hack_and_slash 판정 결과 miss (목표 10)"
 
@@ -314,3 +319,136 @@ def test_character_break_source_overlap_still_takes_priority_when_both_match():
     )
     assert verdict.disposition == "blocked"
     assert verdict.reason == "source_overlap"
+
+
+# ---------------------------------------------------------------------------
+# narrate() 배선 — 오탐 경계(Task 3, SAFE-02) — 실제 narrate()를 통해 지연
+# 버퍼·판정·NarrationChunk까지 관통하는 것을 확인한다.
+# ---------------------------------------------------------------------------
+
+_RULEBOOK_DISPLAY_NAME = "던전월드 계열"
+
+
+def _real_narration_facts() -> NarrationFacts:
+    """장면 대상·캐릭터 상태가 채워진 실제 `NarrationFacts` — 세션 고정
+    블록이 대조 소스에서 빠졌다는 판단이 실제로 오탐을 안 낸다는 증거로
+    쓴다."""
+    return NarrationFacts(
+        check_summary=_CHECK_SUMMARY,
+        scene_summary="문이 부서지고 서늘한 바람이 흘러든다.",
+        facts=("경비병이 쓰러졌다",),
+        scene_entities=THREAT_CAST,
+        character_state=(StatEntry(name="체력", current=5, max=10),),
+        recent_turns=(),
+        new_entities=(),
+    )
+
+
+class _NormalNarrationProvider:
+    """장면 대상 이름과 캐릭터 상태값을 자연스럽게 언급하는 서사를 낸다."""
+
+    name = "normal-narration"
+
+    def __init__(self) -> None:
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        raise NotImplementedError("이 이중체는 stream()만 시험한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s) -> Iterator[str]:
+        yield "촌장 담녹이 문 앞에서 걱정스러운 얼굴로 서 있다. "
+        yield "체력 5로 버티며 다음 상황을 지켜본다."
+        self._last_result = AgentResult(
+            ok=True, value="", elapsed_ms=5, prompt_tokens=2, completion_tokens=2
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+
+def test_narrate_does_not_block_narration_mentioning_scene_entity_and_character_state():
+    """세션 고정 블록을 대조 소스에서 뺀 판단이 실제로 오탐을 없앤다는 증거
+    — 장면 대상 이름·캐릭터 상태값을 언급하는 서사가 clean으로 나온다."""
+    provider = _NormalNarrationProvider()
+    chunks = list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=_real_narration_facts(),
+            rulebook_display_name=_RULEBOOK_DISPLAY_NAME,
+        )
+    )
+    assert len(chunks) == 2
+    for chunk in chunks:
+        assert chunk.disposition == "clean", chunk
+    assert "촌장 담녹" in chunks[0].text
+    assert "체력 5" in chunks[1].text
+
+
+class _LeakingProvider:
+    """영구 고정 블록의 한 구절을 그대로 옮긴 문장을 낸다(세션1에서 실제로
+    난 "진행자 지시문 전체가 서사로 유출"의 축소판)."""
+
+    name = "leaking-narration"
+
+    def __init__(self, leaked_phrase: str) -> None:
+        self._leaked_phrase = leaked_phrase
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        raise NotImplementedError("이 이중체는 stream()만 시험한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s) -> Iterator[str]:
+        yield "평범한 서사 한 문장이 먼저 나간다. "
+        yield f"{self._leaked_phrase}. "
+        yield "평범한 서사 한 문장이 뒤이어 나간다."
+        self._last_result = AgentResult(
+            ok=True, value="", elapsed_ms=5, prompt_tokens=2, completion_tokens=2
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+
+def test_narrate_blocks_narration_that_quotes_permanent_block_verbatim():
+    """영구 고정 블록 구절을 그대로 옮긴 문장은 걸리고, `NarrationChunk`가
+    `reason="source_overlap"`과 0보다 큰 `matched_len`을 싣고 나온다 —
+    호출부가 사건에 담을 값이 실제로 채워진다는 뜻이다."""
+    system, _messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name=_RULEBOOK_DISPLAY_NAME, facts=_real_narration_facts()
+    )
+    permanent = system[0]["text"]
+    # 문장부호가 안 섞인 구간을 골라 leaked_phrase 자체가 chunk_sentences의
+    # 문장 경계로 조각나지 않게 한다(정규화해도 정확히 12자 — 문턱 그대로).
+    # 앞뒤 정상 서사(어느 문장이든 "다"로 끝나는 흔한 한국어 종결)와 이어
+    # 붙여도 우연히 소스 다른 자리와 겹치지 않는 구절을 골랐다.
+    anchor = "네 문장 안에 스스로 지어내지"
+    assert anchor in permanent, "테스트 전제: 이 구절이 영구 블록에 있어야 한다"
+    leaked_phrase = anchor
+
+    provider = _LeakingProvider(leaked_phrase)
+    chunks = list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=_real_narration_facts(),
+            rulebook_display_name=_RULEBOOK_DISPLAY_NAME,
+        )
+    )
+    assert len(chunks) == 3
+    assert chunks[0].disposition == "clean"
+    assert chunks[1].disposition == "blocked"
+    assert chunks[1].reason == "source_overlap"
+    assert chunks[1].matched_len > 0
+    assert chunks[1].text == narration_guard.NOTICE_FILTERED
+    assert chunks[2].disposition == "clean"
