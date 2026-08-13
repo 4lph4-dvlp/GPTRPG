@@ -176,9 +176,13 @@ def test_replayed_clock_segment_is_one_after_condition_advance(
     assert state.clock_segment == 1
 
 
-def test_event_schema_version_still_five() -> None:
-    """DP-04 — 새 사건 종류도 스키마 판 올림도 필요 없다."""
-    assert EVENT_SCHEMA_VERSION == 5
+def test_event_schema_version_at_least_six() -> None:
+    """DP-04(Phase 9) — 위협 시계 조건 검사 자체는 새 사건 종류도 판 올림도
+    필요 없었다(그래서 Phase 9 시점에는 5였다). 판이 6으로 오른 것은 Phase 10
+    (`safety_flagged`, SAFE-01/03) 때문이지 이 갈래가 다시 올린 것이 아니다 —
+    이 시험은 그 사실이 뒤집히지 않았음(위협 시계 조건 검사가 스스로 판을
+    또 올리지 않는다)만 확인한다."""
+    assert EVENT_SCHEMA_VERSION >= 6
 
 
 def test_clock_segment_count_unchanged() -> None:

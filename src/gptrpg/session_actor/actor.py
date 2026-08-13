@@ -24,6 +24,7 @@ from gptrpg.event_log.schema import (
     ClockAdvanced,
     ModifierRecord,
     NarrationAppended,
+    SafetyFlagged,
     SceneIllustrated,
     utc_now_iso,
 )
@@ -178,6 +179,24 @@ class RecordSceneIllustration:
     caused_by_seq: int | None = None
 
 
+@dataclass(frozen=True)
+class RecordSafetyFlag:
+    """AI 출력 안전 장치가 걸렀거나 의심스럽다고 표시했다는 사실을 기록하는 명령(판 6).
+
+    `AppendNarration`과 같은 모양이다 — 칸은 `SafetyFlagged` 사건의 칸과 짝이
+    맞는다. `source`가 서사 검사(`"narration"`)인지 분류기 계약 위반
+    (`"classifier"`)인지를 가른다(Task 1 checkpoint option-a).
+    """
+
+    source: str
+    reason: str
+    disposition: str
+    matched_len: int = 0
+    subject_len: int = 0
+    chunk_index: int | None = None
+    caused_by_seq: int | None = None
+
+
 Command = (
     DeclareAction
     | ConfirmAction
@@ -187,9 +206,15 @@ Command = (
     | AdvanceClock
     | RecordAiCall
     | RecordSceneIllustration
+    | RecordSafetyFlag
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
+_VALID_SAFETY_FLAG_SOURCES = frozenset({"narration", "classifier"})
+_VALID_SAFETY_FLAG_REASONS = frozenset(
+    {"think_block", "source_overlap", "character_break", "unknown_move"}
+)
+_VALID_SAFETY_FLAG_DISPOSITIONS = frozenset({"blocked", "flagged"})
 
 _EVENT_CLASSES: dict[str, type] = {
     "action_declared": ActionDeclared,
@@ -200,6 +225,7 @@ _EVENT_CLASSES: dict[str, type] = {
     "ai_invoked": AiInvoked,
     "scene_illustrated": SceneIllustrated,
     "character_occupied": CharacterOccupied,
+    "safety_flagged": SafetyFlagged,
 }
 
 
@@ -425,6 +451,8 @@ class SessionActor:
             return self._prepare_ai_call(command)
         if isinstance(command, RecordSceneIllustration):
             return self._prepare_scene_illustration(command)
+        if isinstance(command, RecordSafetyFlag):
+            return self._prepare_safety_flag(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -707,6 +735,45 @@ class SessionActor:
                 "steps": command.steps,
                 "size": command.size,
                 "latency_ms": command.latency_ms,
+            },
+        )
+
+    def _prepare_safety_flag(self, command: RecordSafetyFlag) -> tuple[str, int | None, dict]:
+        """닫힌 목록 밖 값·음수 길이를 거절한다(`_prepare_narration`과 같은 검증 모양).
+
+        자유 문자열이 사건에 들어갈 길이 하나 없다 — `source`/`reason`/
+        `disposition` 셋 다 여기서 닫힌 목록으로 강제된다(T-10-03).
+        """
+        if command.source not in _VALID_SAFETY_FLAG_SOURCES:
+            raise CommandRejected(
+                f"source는 {sorted(_VALID_SAFETY_FLAG_SOURCES)} 중 하나여야 한다: {command.source!r}"
+            )
+        if command.reason not in _VALID_SAFETY_FLAG_REASONS:
+            raise CommandRejected(
+                f"reason은 {sorted(_VALID_SAFETY_FLAG_REASONS)} 중 하나여야 한다: {command.reason!r}"
+            )
+        if command.disposition not in _VALID_SAFETY_FLAG_DISPOSITIONS:
+            raise CommandRejected(
+                f"disposition은 {sorted(_VALID_SAFETY_FLAG_DISPOSITIONS)} 중 하나여야 한다: "
+                f"{command.disposition!r}"
+            )
+        if command.matched_len < 0:
+            raise CommandRejected("matched_len은 0 이상이어야 한다")
+        if command.subject_len < 0:
+            raise CommandRejected("subject_len은 0 이상이어야 한다")
+        if command.chunk_index is not None and command.chunk_index < 0:
+            raise CommandRejected("chunk_index는 0 이상이어야 한다")
+        self._validate_caused_by(command.caused_by_seq)
+        return (
+            "safety_flagged",
+            command.caused_by_seq,
+            {
+                "source": command.source,
+                "reason": command.reason,
+                "disposition": command.disposition,
+                "matched_len": command.matched_len,
+                "subject_len": command.subject_len,
+                "chunk_index": command.chunk_index,
             },
         )
 

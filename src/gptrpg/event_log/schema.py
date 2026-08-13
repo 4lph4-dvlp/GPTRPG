@@ -15,7 +15,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-EVENT_SCHEMA_VERSION = 5
+EVENT_SCHEMA_VERSION = 6
 """판 1 -> 판 2: `CheckResolved`에 `counts_as_failure` 필수 칸이 늘었다(D-12).
 판 3 -> 판 4: 사건 종류가 하나 늘었다 — `SceneIllustrated`. 기존 여섯 종류의
 칸은 하나도 바뀌지 않았으므로 판 1~3으로 쓰인 기록은 글자 그대로 다시 읽힌다
@@ -42,7 +42,20 @@ D-05/D-06). `ActionDeclared`·`ActionConfirmed`에 선택 칸
 `CheckResolved`에는 `person_id`·`character_id`가 늘었고, 판 5 이상 기록에서만
 **필수**다(D-12) — 판 5 미만 기록은 이 두 칸이 없어도 그대로 읽힌다. 이
 구분이 `.gptrpg/events.db`에 실제로 살아 있는 판 2 기록 895건을 판 5 코드가
-예외 없이 읽는 유일한 길이다."""
+예외 없이 읽는 유일한 길이다.
+
+판 5 -> 판 6: AI 출력 검증(Phase 10, SAFE-01/03, D-04)이 사건 형식에 닿았다.
+새 사건 종류가 하나 늘었다 — `SafetyFlagged`(서사 안전 장치가 걸렀거나,
+분류기가 닫힌 목록 밖 응답을 냈다는 운영자 기록). 서사 검사(`source=
+"narration"`)와 분류기 계약 위반(`source="classifier"`) 둘을 한 종류로
+묶는다 — 판 올리기가 되돌릴 수 없는 조작이므로 한 번에 둘 다 덮는다
+(10-01-PLAN.md Task 1 checkpoint, option-a). 자유 문자열 칸은 없다 — 닫힌
+목록 셋과 숫자 둘뿐이다(T-10-03, 사람이 읽을 발췌는 사건이 아니라 표준오류
+에만). 기존 여덟 종류의 칸은 하나도 바뀌지 않았으므로 판 1~5로 쓰인
+기록은 글자 그대로 다시 읽힌다 — `.gptrpg/events.db`의 판 2 기록 895건과
+`.gptrpg/uat9.db`의 판 5 기록 221건 둘 다 이 판 올리기 뒤에도 예외 없이
+읽혀야 한다(`rules_core/reducer.py`의 `safety_flagged` 분기가 이 판 올리기와
+반드시 같은 커밋이다, 08-CONTEXT.md D-06)."""
 
 Visibility = Literal["public"]
 
@@ -233,6 +246,37 @@ class CharacterOccupied(EventEnvelope):
     browser_id: str
 
 
+class SafetyFlagged(EventEnvelope):
+    """AI 출력 안전 장치가 걸렀거나 의심스럽다고 표시한 사실의 운영자 기록(판 6).
+
+    `source`가 어느 방어가 남긴 기록인지를 가른다 — `"narration"`은 서사
+    스트림 검사(`narration_guard.inspect_sentence`, Phase 10), `"classifier"`는
+    분류기가 룰북 목록 밖 무브를 낸 계약 위반(D-12/SAFE-07)이다. 둘을 한
+    종류로 묶은 것은 Task 1 checkpoint의 명시적 선택(option-a)이다 — 판
+    올리기는 되돌릴 수 없는 조작이므로(D-04 Reversibility: one-way) 한 번에
+    두 운영자 기록을 다 덮는다.
+
+    **자유 문자열 칸을 두지 않는다** — `reason`·`disposition`은 닫힌 목록,
+    `matched_len`·`subject_len`은 코드포인트 개수 숫자뿐이다(T-10-03). 모델이
+    쓴 글자나 걸린 원문의 부분열은 이 사건 어디에도 담기지 않는다 — 사람이
+    읽을 발췌는 표준오류에만 찍힌다(`agents/master_gm._judge_sentence`).
+
+    **상태를 하나도 바꾸지 않는다** — `rules_core.reducer.apply_event`의
+    `safety_flagged` 분기는 `scene_illustrated`와 같은 최소 모양
+    (`last_seq`만 갱신)이다. 그래도 그 분기가 있어야 한다 — 없으면 이 종류의
+    사건이 하나라도 있는 세션이 폴링마다 `UnknownEventType`을 맞고 영구히
+    안 열린다(08-CONTEXT.md D-06, 이미 두 번 난 사고).
+    """
+
+    event_type: Literal["safety_flagged"]
+    source: Literal["narration", "classifier"]
+    reason: Literal["think_block", "source_overlap", "character_break", "unknown_move"]
+    disposition: Literal["blocked", "flagged"]
+    matched_len: int = 0
+    subject_len: int = 0
+    chunk_index: int | None = None
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -243,6 +287,7 @@ GameEvent = Annotated[
         AiInvoked,
         SceneIllustrated,
         CharacterOccupied,
+        SafetyFlagged,
     ],
     Field(discriminator="event_type"),
 ]

@@ -10,10 +10,12 @@ import sys
 import threading
 import time
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 
 from gptrpg.agents.context import NarrationFacts
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.invoke import GM_TIMEOUT_S, MAX_ATTEMPTS
+from gptrpg.agents.narration_guard import NOTICE_FILTERED, STDERR_EXCERPT_CHARS, inspect_sentence
 from gptrpg.agents.prompt_assembly import build_gm_prompt
 from gptrpg.agents.providers.base import Provider
 
@@ -139,6 +141,67 @@ def chunk_sentences(deltas: Iterable[str]) -> Iterator[str]:
         yield buf.strip()
 
 
+@dataclass(frozen=True)
+class NarrationChunk:
+    """`narrate()`가 문장 하나씩 내보내는 반환 단위 — 걸렸는지 여부까지 함께 싣는다(10-01).
+
+    `disposition`은 `narration_guard.GuardVerdict`와 같은 값 집합
+    (`"clean"`/`"blocked"`/`"flagged"`)을 그대로 물려받는다. `text`는
+    `disposition == "clean"`(또는 `"flagged"`, 10-04부터)이면 문장 원문이고,
+    `"blocked"`면 `narration_guard.NOTICE_FILTERED`다 — 걸린 원문은 이 칸에
+    담기지 않는다. `narrate()`는 `gptrpg.event_log`·`gptrpg.session_actor`를
+    모르므로(`.importlinter` 계약 3) 사건 제출은 이 값을 보고 호출부(웹/CLI)가
+    한다 — `disposition != "clean"`이면 호출부가 `RecordSafetyFlag`를 추가로
+    제출한다.
+    """
+
+    text: str
+    disposition: str = "clean"
+    reason: str = ""
+    matched_len: int = 0
+    subject_len: int = 0
+
+
+def _judge_sentence(
+    sentence: str, *, next_sentence: str | None, think_open: bool
+) -> tuple[NarrationChunk, bool]:
+    """보류 중이던 `sentence`를 판정해 `NarrationChunk`로 만든다.
+
+    `inspect_sentence`의 갈래는 10-01에서 생각 블록 하나뿐이다(원문 겹침·
+    캐릭터 이탈은 10-02·10-04가 채운다) — `source_texts=()`를 넘긴다.
+    `disposition == "blocked"`이면 화면에는 `NOTICE_FILTERED`를 대신 싣고,
+    운영자 표준오류에 사유·겹친 글자 수·문장 길이·짧은 발췌를 한 줄 찍는다
+    (T-10-03 — 사람이 읽을 발췌는 네트워크를 안 타는 표준오류에만).
+    """
+    verdict = inspect_sentence(
+        sentence, next_sentence=next_sentence, source_texts=(), think_open=think_open
+    )
+    if verdict.disposition == "blocked":
+        excerpt = sentence[:STDERR_EXCERPT_CHARS]
+        print(
+            f"경고: 서사 한 문장을 걸렀다 — 사유={verdict.reason} "
+            f"겹친글자수={verdict.matched_len} 문장길이={verdict.subject_len} "
+            f"발췌='{excerpt}'",
+            file=sys.stderr,
+        )
+        chunk = NarrationChunk(
+            text=NOTICE_FILTERED,
+            disposition=verdict.disposition,
+            reason=verdict.reason,
+            matched_len=verdict.matched_len,
+            subject_len=verdict.subject_len,
+        )
+    else:
+        chunk = NarrationChunk(
+            text=verdict.text,
+            disposition=verdict.disposition,
+            reason=verdict.reason,
+            matched_len=verdict.matched_len,
+            subject_len=verdict.subject_len,
+        )
+    return chunk, verdict.think_open
+
+
 def narrate(
     *,
     provider: Provider,
@@ -146,8 +209,20 @@ def narrate(
     facts: NarrationFacts,
     rulebook_display_name: str,
     stall_timeout_s: float = STREAM_STALL_TIMEOUT_S,
-) -> Iterator[str]:
+) -> Iterator[NarrationChunk]:
     """서사를 문장 단위로 흘려보낸다. `provider.stream` 호출을 `GM_TIMEOUT_S`로 묶는다.
+
+    **한 문장 지연 버퍼(D-01, 10-01).** 문장을 만드는 즉시 내보내지 않고
+    보류 중인 문장을 하나 들고 있다가, 다음 문장이 나오면 그 둘을
+    `narration_guard.inspect_sentence`에 함께 넘겨 판정한 뒤 내보내고 새
+    문장을 보류로 옮긴다. 스트림이 끝나면(정상 종료든 스톨·실패로 중간에
+    끊기든) 그 시점에 들고 있던 보류 문장도 `next_sentence=None`으로 같은
+    검사를 거쳐 내보낸다 — "이미 모델에서 나온 문장은 스톨 뒤에도 살아남는다"
+    는 03-04의 기존 보장을 지연 버퍼 안에서도 그대로 지킨다. 이 흐름은
+    아래 재시도 세 갈래(다음 문단)와는 다른 자리에서 일어난다 — 보류 문장
+    판정·방출은 문장을 만드는 안쪽 반복에서 처리하고, 재시도 여부 결정은
+    바깥 `except StreamStalled`/`except Exception` 두 갈래가 지금 모양
+    그대로 한다.
 
     **이 함수는 이제 서술만 한다 — 상황 판단은 `situation_judge`가 한다
     (D-06, 09-02).** `TurnContext`를 받을 방법 자체가 없다 — `facts`
@@ -194,6 +269,8 @@ def narrate(
     emitted_any = False
 
     for _attempt in range(MAX_ATTEMPTS):
+        held: str | None = None
+        think_open = False
         try:
             deltas = provider.stream(
                 model=model,
@@ -203,9 +280,40 @@ def narrate(
                 timeout_s=GM_TIMEOUT_S,
             )
             bounded_deltas = _drain_with_stall_timeout(deltas, stall_timeout_s=stall_timeout_s)
-            for sentence in chunk_sentences(bounded_deltas):
+            sentences = chunk_sentences(bounded_deltas)
+            while True:
+                try:
+                    sentence = next(sentences)
+                except StopIteration:
+                    break
+                except Exception:  # noqa: BLE001 - 문장 생성 도중 죽은 스트림, 재시도 판단은 아래 두 except가 그대로 한다
+                    # 스트림이 다음 문장을 만드는 도중 죽었다. 이미 모델에서
+                    # 나와 보류 중이던 문장이 있으면 여기서 놓치지 않고
+                    # 판정해 내보낸다 — "이미 나간 조각은 스톨·실패 뒤에도
+                    # 살아남는다"는 03-04의 기존 보장을 지연 버퍼 안에서도
+                    # 지키는 자리다. 재시도할지 말지는 이 갈래가 정하지
+                    # 않는다 — 판정·방출만 하고 그대로 다시 던져서, 아래
+                    # `except StreamStalled`/`except Exception` 두 갈래가
+                    # 지금 모양 그대로 그 결정을 내리게 둔다.
+                    if held is not None:
+                        chunk, _think_open = _judge_sentence(
+                            held, next_sentence=None, think_open=think_open
+                        )
+                        emitted_any = True
+                        yield chunk
+                        held = None
+                    raise
+                if held is not None:
+                    chunk, think_open = _judge_sentence(
+                        held, next_sentence=sentence, think_open=think_open
+                    )
+                    emitted_any = True
+                    yield chunk
+                held = sentence
+            if held is not None:
+                chunk, think_open = _judge_sentence(held, next_sentence=None, think_open=think_open)
                 emitted_any = True
-                yield sentence
+                yield chunk
         except StreamStalled:
             # **스톨은 재시도하지 않는다.** 스톨이 났다는 것은 이 시도의 배경
             # 펌프 스레드가 아직 막힌 네트워크 읽기 안에 살아 있다는 뜻이고,

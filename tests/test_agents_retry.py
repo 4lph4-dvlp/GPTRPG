@@ -292,6 +292,13 @@ def test_narrate_uses_gm_timeout() -> None:
 
 
 def test_narrate_mid_stream_failure_keeps_emitted_chunks_and_marks_failure() -> None:
+    """10-01부터 `narrate()`는 `NarrationChunk`를 낸다 — `.text`만 비교한다.
+
+    1문장 지연 버퍼가 생겼어도 이 보장은 그대로다: 두 번째 문장이 나온
+    시점에 첫 문장이 판정·방출되고, 세 번째 델타를 구하다 스트림이 죽으면
+    그때 보류 중이던 둘째 문장도 안쪽 `except`가 판정해 내보낸 뒤 예외를
+    다시 던진다(`agents/master_gm.narrate`) — 그래서 두 문장 다 살아남는다.
+    """
     provider = _StreamThenFailProvider(chunks=("문이 요란하게 부서진다. ", "안에서 서늘한 바람이 흘러나온다. "))
     sentences = list(
         narrate(
@@ -301,7 +308,11 @@ def test_narrate_mid_stream_failure_keeps_emitted_chunks_and_marks_failure() -> 
             rulebook_display_name="던전월드 계열",
         )
     )
-    assert sentences == ["문이 요란하게 부서진다.", "안에서 서늘한 바람이 흘러나온다."]
+    assert [chunk.text for chunk in sentences] == [
+        "문이 요란하게 부서진다.",
+        "안에서 서늘한 바람이 흘러나온다.",
+    ]
+    assert all(chunk.disposition == "clean" for chunk in sentences)
     # 조각이 이미 나갔으므로 재시도하지 않는다 — stream()은 딱 한 번만 불린다
     assert provider.stream_call_count == 1
     assert provider.last_result().ok is False

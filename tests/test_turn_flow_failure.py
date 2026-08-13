@@ -12,6 +12,7 @@ import json
 
 from gptrpg.agents import providers as providers_module
 from gptrpg.agents.envelope import AgentResult
+from gptrpg.agents.master_gm import NarrationChunk
 from gptrpg.cli import turn_flow as turn_flow_module
 from gptrpg.cli.main import main
 from gptrpg.event_log.store import EventStore
@@ -229,7 +230,10 @@ def test_stream_always_fails_before_first_chunk_exits_nonzero_with_zero_narratio
 
 
 def _stub_narrate_emits_one_then_raises(*, provider, model, facts, rulebook_display_name):
-    yield "이미 나간 문장 하나."
+    """`narrate()` 이름 자체를 바꿔치기하는 이중체(10-01부터 `NarrationChunk`를
+    낸다) — `turn_flow._submit_narration_chunk`가 기대하는 반환 모양을
+    맞춘다."""
+    yield NarrationChunk(text="이미 나간 문장 하나.")
     raise RuntimeError("서사 생성기 자체가 죽었다")
 
 

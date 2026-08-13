@@ -61,6 +61,7 @@ from gptrpg.session_actor.actor import (
     ConfirmAction,
     DeclareAction,
     RecordAiCall,
+    RecordSafetyFlag,
     RecordSceneIllustration,
     ResolveCheck,
 )
@@ -157,6 +158,43 @@ def _last_result_or_failure_envelope(provider: Provider, *, elapsed_ms: int) -> 
             completion_tokens=0,
             cached_prompt_tokens=0,
         )
+
+
+async def _submit_narration_chunk(
+    *,
+    actor: SessionActor,
+    chunk,  # NarrationChunk — 순환 import를 피하려 타입만 값으로 쓴다(agents는 이 모듈을 모른다)
+    chunk_index: int,
+    resolve_seq: int,
+    narration_texts: list[str],
+) -> None:
+    """`narrate()`가 낸 `NarrationChunk` 하나를 사건으로 옮긴다(10-01, Task 2 ⑦).
+
+    `chunk.text`는 지금처럼 `AppendNarration`으로 제출한다 — 걸린 조각이면
+    `chunk.text`가 이미 `NOTICE_FILTERED`다(`master_gm._judge_sentence`가
+    바꿔치기했다). `disposition != "clean"`이면 이어서 `RecordSafetyFlag`를
+    같은 `caused_by_seq`로 제출한다. **`disposition == "blocked"`인 조각은
+    `narration_texts`에 넣지 않는다** — 그 목록은 배경 시계 조건 검사가
+    "이번 턴 서사"로 받는 값이라, 시스템 안내문이 이야기 텍스트로 섞이면
+    안 된다.
+    """
+    await actor.submit(
+        AppendNarration(text=chunk.text, chunk_index=chunk_index, caused_by_seq=resolve_seq)
+    )
+    if chunk.disposition != "clean":
+        await actor.submit(
+            RecordSafetyFlag(
+                source="narration",
+                reason=chunk.reason,
+                disposition=chunk.disposition,
+                matched_len=chunk.matched_len,
+                subject_len=chunk.subject_len,
+                chunk_index=chunk_index,
+                caused_by_seq=resolve_seq,
+            )
+        )
+    if chunk.disposition != "blocked":
+        narration_texts.append(chunk.text)
 
 
 class MoveCandidateView(BaseModel):
@@ -581,12 +619,13 @@ async def confirm(
         first_sentence = _NO_SENTENCE
 
     if first_sentence is not _NO_SENTENCE:
-        await actor.submit(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
-            AppendNarration(
-                text=first_sentence, chunk_index=chunk_index, caused_by_seq=resolve_seq
-            )
+        await _submit_narration_chunk(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
+            actor=actor,
+            chunk=first_sentence,
+            chunk_index=chunk_index,
+            resolve_seq=resolve_seq,
+            narration_texts=narration_texts,
         )
-        narration_texts.append(first_sentence)
         chunk_index += 1
         while True:
             try:
@@ -600,10 +639,13 @@ async def confirm(
                 break
             if sentence is _NO_SENTENCE:
                 break
-            await actor.submit(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
-                AppendNarration(text=sentence, chunk_index=chunk_index, caused_by_seq=resolve_seq)
+            await _submit_narration_chunk(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
+                actor=actor,
+                chunk=sentence,
+                chunk_index=chunk_index,
+                resolve_seq=resolve_seq,
+                narration_texts=narration_texts,
             )
-            narration_texts.append(sentence)
             chunk_index += 1
 
     # ⑥ 두 번째 AI 호출 기록 — 성공·실패 어느 쪽에서도 항상 제출한다. 실패한

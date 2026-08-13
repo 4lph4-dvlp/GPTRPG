@@ -30,6 +30,13 @@ from gptrpg.agents.providers.nim_provider import NimProvider
 _FAKE_KEY = "fake-key-does-not-touch-network"
 
 
+def _texts(chunks) -> list[str]:
+    """`narrate()`가 이제 `NarrationChunk`를 낸다(10-01) — 이 파일의 기존
+    시험은 순서·조각 수만 보면 되므로 `.text`만 뽑아 비교한다. `disposition`
+    까지 확인하는 시험은 `tests/test_safety_flag_pipeline.py`가 담당한다."""
+    return [chunk.text for chunk in chunks]
+
+
 def test_three_sentences_yield_three_chunks() -> None:
     result = list(chunk_sentences(["문장 하나. 문장 둘! 문장 셋?"]))
     assert result == ["문장 하나.", "문장 둘!", "문장 셋?"]
@@ -126,7 +133,8 @@ def test_narrate_yields_at_least_two_chunks_in_order() -> None:
         )
     )
     assert len(sentences) >= 2
-    assert sentences == ["문이 요란하게 부서진다.", "안에서 서늘한 바람이 흘러나온다."]
+    assert _texts(sentences) == ["문이 요란하게 부서진다.", "안에서 서늘한 바람이 흘러나온다."]
+    assert all(chunk.disposition == "clean" for chunk in sentences)
     assert provider.last_result().ok is True
 
 
@@ -308,7 +316,14 @@ def test_narrate_gives_up_and_marks_failure_when_stream_never_produces_anything(
 
 
 def test_narrate_keeps_already_emitted_sentence_when_stream_stalls_mid_way() -> None:
-    """이미 나간 조각은 스톨 뒤에도 살아남고, 재시도 없이 거기서 끝난다."""
+    """이미 나간 조각은 스톨 뒤에도 살아남고, 재시도 없이 거기서 끝난다.
+
+    10-01부터 `narrate()`는 문장을 1개 지연 버퍼에 보류했다가 다음 문장(또는
+    스트림 종료)이 와야 판정해 내보낸다 — 이 문장은 스톨이 나기 전까지
+    다음 문장을 못 만나 보류 중이었다. 그래도 이 보장은 깨지지 않는다:
+    스톨 예외가 지연 버퍼를 빠져나가기 직전에 보류 문장을 판정해 내보낸다
+    (`agents/master_gm.narrate`의 안쪽 `except Exception: ... raise` 갈래).
+    """
     facts = NarrationFacts(
         check_summary="hack_and_slash 판정 결과 hit (목표 10)",
         scene_summary="",
@@ -328,7 +343,7 @@ def test_narrate_keeps_already_emitted_sentence_when_stream_stalls_mid_way() -> 
             stall_timeout_s=0.05,
         )
     )
-    assert sentences == ["이미 나간 문장이다."]
+    assert _texts(sentences) == ["이미 나간 문장이다."]
     assert provider.last_result().ok is False
 
 
@@ -388,7 +403,7 @@ def test_narrate_keeps_already_emitted_sentence_through_delegate_shaped_provider
             stall_timeout_s=0.05,
         )
     )
-    assert sentences == ["이미 나간 문장이다(위임 모양)."]
+    assert _texts(sentences) == ["이미 나간 문장이다(위임 모양)."]
     assert provider.last_result().ok is False
 
 
@@ -421,7 +436,7 @@ def test_narrate_does_not_call_note_result_on_successful_completion() -> None:
         )
     )
 
-    assert sentences == ["문이 요란하게 부서진다.", "안에서 서늘한 바람이 흘러나온다."]
+    assert _texts(sentences) == ["문이 요란하게 부서진다.", "안에서 서늘한 바람이 흘러나온다."]
     assert provider.last_result().ok is True
     assert note_result_calls == []
 
@@ -500,5 +515,5 @@ def test_narrate_through_real_delegating_nim_provider_keeps_emitted_chunk_and_ma
         )
     )
 
-    assert sentences == ["문이 삐걱거리며 열린다."]
+    assert _texts(sentences) == ["문이 삐걱거리며 열린다."]
     assert provider.last_result().ok is False

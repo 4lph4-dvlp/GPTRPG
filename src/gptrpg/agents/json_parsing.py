@@ -9,7 +9,10 @@
 import json
 import re
 
-_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+"""공개 이름(10-01) — 서사 경로(`agents/narration_guard.py`)가 이 정규식을 그대로
+가져다 쓴다. 정규식 본문은 한 글자도 바뀌지 않았다 — 이름만 `_THINK_BLOCK`에서
+`THINK_BLOCK`으로 올랐다(leaf 성질은 그대로 유지)."""
 _CODE_FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 _JSON_ARRAY = re.compile(r"\[.*\]", re.DOTALL)
 
@@ -39,7 +42,7 @@ def try_parse_json_array(raw_text: str) -> list:
     except json.JSONDecodeError:
         pass
 
-    text = _THINK_BLOCK.sub("", raw_text)
+    text = THINK_BLOCK.sub("", raw_text)
     fence_match = _CODE_FENCE.search(text)
     if fence_match:
         text = fence_match.group(1)

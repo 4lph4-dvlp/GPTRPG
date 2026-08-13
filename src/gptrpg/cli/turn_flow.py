@@ -29,6 +29,7 @@ from gptrpg.session_actor.actor import (
     ConfirmAction,
     DeclareAction,
     RecordAiCall,
+    RecordSafetyFlag,
     ResolveCheck,
     SessionActor,
     SessionRegistry,
@@ -52,6 +53,43 @@ def _parse_modifier(raw: str) -> Modifier:
         raise ValueError(f"modifier 형식은 '유형:값:출처'여야 한다: {raw!r}")
     mod_type, value, source = parts
     return Modifier(type=mod_type, value=int(value), source=source)
+
+
+async def _submit_narration_chunk(
+    *,
+    actor: SessionActor,
+    chunk,  # NarrationChunk — 순환 import를 피하려 타입만 값으로 쓴다(agents는 이 모듈을 모른다)
+    chunk_index: int,
+    resolve_seq: int,
+    narration_texts: list[str],
+) -> None:
+    """`narrate()`가 낸 `NarrationChunk` 하나를 화면·사건으로 옮긴다(10-01, Task 2 ⑦).
+
+    `web/routes_actions.py`의 같은 이름 도우미와 똑같은 모양이다 — 다른
+    점은 여기서 `print(chunk.text)`도 그대로 한다는 것뿐이다(명령줄은
+    지금도 화면에 직접 찍는다). `disposition != "clean"`이면 이어서
+    `RecordSafetyFlag`를 같은 `caused_by_seq`로 제출하고, `"blocked"`인
+    조각은 `narration_texts`에 넣지 않는다(배경 시계 조건 검사가 이야기
+    텍스트로만 받아야 한다).
+    """
+    print(chunk.text)
+    await actor.submit(
+        AppendNarration(text=chunk.text, chunk_index=chunk_index, caused_by_seq=resolve_seq)
+    )
+    if chunk.disposition != "clean":
+        await actor.submit(
+            RecordSafetyFlag(
+                source="narration",
+                reason=chunk.reason,
+                disposition=chunk.disposition,
+                matched_len=chunk.matched_len,
+                subject_len=chunk.subject_len,
+                chunk_index=chunk_index,
+                caused_by_seq=resolve_seq,
+            )
+        )
+    if chunk.disposition != "blocked":
+        narration_texts.append(chunk.text)
 
 
 def with_progress_dots(
@@ -434,13 +472,13 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         first_sentence = _NO_SENTENCE
 
     if first_sentence is not _NO_SENTENCE:
-        print(first_sentence)
-        await actor.submit(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
-            AppendNarration(
-                text=first_sentence, chunk_index=chunk_index, caused_by_seq=resolve_seq
-            )
+        await _submit_narration_chunk(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
+            actor=actor,
+            chunk=first_sentence,
+            chunk_index=chunk_index,
+            resolve_seq=resolve_seq,
+            narration_texts=narration_texts,
         )
-        narration_texts.append(first_sentence)
         chunk_index += 1
         while True:
             try:
@@ -450,13 +488,13 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             except Exception as exc:  # noqa: BLE001 - 서사 스트림 이어받기 실패만 여기서 잡는다(G-03-3)
                 narration_error = exc
                 break
-            print(sentence)
-            await actor.submit(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
-                AppendNarration(
-                    text=sentence, chunk_index=chunk_index, caused_by_seq=resolve_seq
-                )
+            await _submit_narration_chunk(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
+                actor=actor,
+                chunk=sentence,
+                chunk_index=chunk_index,
+                resolve_seq=resolve_seq,
+                narration_texts=narration_texts,
             )
-            narration_texts.append(sentence)
             chunk_index += 1
 
     # ⑥ 두 번째 AI 호출 기록 — 성공·실패 어느 쪽에서도 항상 제출한다. 실패한

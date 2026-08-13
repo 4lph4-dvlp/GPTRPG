@@ -122,8 +122,8 @@ def _legacy_v1_counts_as_failure(grade: str) -> bool:
 def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameState:
     """사건 하나를 이전 상태에 접어 새 상태를 돌려준다.
 
-    여덟 종류를 전부 다룬다. 모르는 종류가 오면 UnknownEventType을 던진다 —
-    조용히 넘어가지 않는다.
+    아홉 종류를 전부 다룬다(판 6, `safety_flagged` 추가). 모르는 종류가
+    오면 UnknownEventType을 던진다 — 조용히 넘어가지 않는다.
     """
     seq = payload["seq"]
     if event_type == "action_declared":
@@ -243,6 +243,16 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
         occupied_by = dict(state.occupied_by)
         occupied_by[payload["character_id"]] = payload["browser_id"]
         return replace(state, last_seq=seq, occupied_by=occupied_by)
+    if event_type == "safety_flagged":
+        # AI 출력 안전 장치 기록(판 6, Phase 10 SAFE-01/03/07)은 게임 상태를
+        # 하나도 바꾸지 않는다 — 판정·실패 누적·시계 어디에도 닿지 않고
+        # `last_seq`만 따라 올린다(`scene_illustrated` 분기와 같은 최소 모양).
+        # **그래도 분기가 있어야 한다:** 이 분기가 없으면 안전 장치가 한 번이라도
+        # 걸린 세션은 폴링마다 `UnknownEventType`을 맞고(폴링 경로가 사건 전체를
+        # 이 함수로 접는다) 화면이 통째로 죽는다. 이 판 올리기(`EVENT_SCHEMA_VERSION`
+        # 5->6)와 이 분기는 반드시 같은 커밋이다(08-CONTEXT.md D-06, 이미 두 번
+        # 난 사고).
+        return replace(state, last_seq=seq)
     raise UnknownEventType(event_type)
 
 
