@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 10
 current_phase_name: ai
 status: executing
-stopped_at: Completed 10-01-PLAN.md
-last_updated: "2026-08-13T17:24:11.222Z"
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-08-13T17:41:47.286Z"
 last_activity: 2026-08-14
 last_activity_desc: Phase 10 execution started
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 13
-  completed_plans: 9
+  completed_plans: 10
   percent: 18
 ---
 
@@ -31,11 +31,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 10 (ai) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-08-14 — Phase 10 execution started
 
-Progress: [███████░░░] 69%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
@@ -90,6 +90,7 @@ Progress: [███████░░░] 69%
 | Phase 09 P03 | ~12min | 3 tasks | 20 files |
 | Phase 09 P04 | ~15min | 2 tasks | 5 files |
 | Phase 10 P01 | 40min | 2 tasks | 16 files |
+| Phase 10 P02 | ~20min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -167,6 +168,8 @@ Progress: [███████░░░] 69%
 - [Phase ?]: 10-01 Task 1 checkpoint(option-a): safety_flagged 사건 하나로 서사 검사(source=narration)와 분류기 계약 위반(source=classifier) 기록을 함께 담는다
 - [Phase ?]: 10-01: EVENT_SCHEMA_VERSION 5->6, SafetyFlagged 사건 신설. rules_core/reducer.py 분기와 같은 커밋(08-CONTEXT.md D-06). .gptrpg/uat9.db 판 5 실기록은 세션 넷(221건), events.db는 전부 판 2(895건) — CONTEXT/RESEARCH/VALIDATION의 '판 5' 서술 정정
 - [Phase ?]: 10-01: master_gm.narrate()가 NarrationChunk를 내는 1문장 지연 버퍼를 갖는다. 스톨·실패 도중에도 이미 도착한 보류 문장은 판정·방출한 뒤 예외를 다시 던져(안쪽 except), 바깥 재시도 판단(스톨 절대 재시도 금지 등)과 03-04의 '이미 나간 조각 보존' 보장을 둘 다 지킨다
+- [Phase ?]: 10-02: 원문 겹침 대조 소스는 build_gm_prompt의 영구 고정 블록 하나뿐 — 세션 고정 블록(장면 대상·캐릭터 상태)은 정당한 이야기 맥락이라 대조 소스에서 뺐다(RESEARCH.md A1 좁힘)
+- [Phase ?]: 10-02: 캐릭터 이탈 정규식(CHARACTER_BREAK_PATTERNS)은 D-03에 따라 절대 blocked로 승격하지 않는다 — flagged로 통과시키고 기록만 남긴다
 
 ### Pending Todos
 
@@ -222,8 +225,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-13T17:23:59.519Z
-Stopped at: Completed 10-01-PLAN.md
+Last session: 2026-08-13T17:41:47.252Z
+Stopped at: Completed 10-02-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
