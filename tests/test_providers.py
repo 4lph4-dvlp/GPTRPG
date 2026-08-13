@@ -270,3 +270,183 @@ def test_last_result_still_raises_before_note_result_or_any_call():
         instance = factory(_FAKE_KEY)
         with pytest.raises(RuntimeError):
             instance.last_result()
+
+
+# ---------------------------------------------------------------------------
+# QUAL-08 (10-05 Task 3) — "추론형 모델은 생각 블록을 텍스트 스트림에
+# 덧붙인다"는 단일 가정이 지금까지 주석으로만 보장되어 있었다. 실제로는
+# 다섯 어댑터가 노출 방식이 다르고, 그 차이가 SAFE-01(narration_guard의
+# 생각 블록 정규식 방어)의 실제 표적을 정한다. 아래 시험이 그 차이를
+# 코드로 고정한다 — `note_result()`/`last_result()` 위임 계약은 이미
+# 위 250~264줄에서 검증되어 있으므로 다시 만들지 않는다.
+#
+# 어댑터별 노출 형태 표 (RESEARCH.md Pitfall 5의 코드 근거를 그대로 옮김):
+#
+# | 어댑터        | 범주                    | 안전한 이유 |
+# |----------------|-------------------------|-------------|
+# | anthropic      | structural_exclusion    | `_extract_text`가 `.text` 속성이 있는 블록만 모은다 — extended thinking은 `type="thinking"`(별도 속성)이라 구조적으로 배제된다 |
+# | openai         | structural_exclusion    | `stream()`이 `delta.content` 칸만 읽는다 — 네이티브 reasoning 모델은 추론 내용을 별도 필드로 감춘다 |
+# | nim            | delegates_to_openai     | `OpenAIProvider`에 그대로 위임한다 — 같은 구조적 배제를 물려받는다. **이 프로젝트가 실제로 `<think>` 블록을 관찰한 대상이 이 경로다**(NIM 경유 오픈 reasoning 모델, `json_parsing.THINK_BLOCK`의 실제 표적) |
+# | openrouter     | delegates_to_openai     | 위와 같은 이유 — `OpenAIProvider` 위임 |
+# | gemini         | regex_dependent         | `stream()`이 `chunk.text`만 읽지만, 그 `.text`가 추론 파트를 포함하는지는 SDK 내부 동작이라 이 층에서 구조적으로 못박을 수 없다 — 정규식 방어(`THINK_BLOCK`)가 이 어댑터의 실제 방어선이다 |
+# ---------------------------------------------------------------------------
+
+
+class _ThinkingLikeBlock:
+    """Anthropic extended thinking 콘텐츠 블록 모양의 가짜 — `.text` 속성이
+    없다(`type="thinking"`, 실제 속성 이름은 `.thinking`)."""
+
+    def __init__(self, thinking: str) -> None:
+        self.thinking = thinking
+
+
+class _TextLikeBlock:
+    """Anthropic 텍스트 콘텐츠 블록 모양의 가짜 — `.text` 속성이 있다."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+def test_anthropic_extract_text_structurally_excludes_blocks_without_text_attribute():
+    """`.text` 속성이 있는 블록만 이어 붙고, 추론 블록 모양의 객체(`.text`가
+    없음)는 구조적으로 배제된다. SDK가 나중에 추론 블록에도 `.text`를
+    붙이면 이 시험이 빨간불이 된다 — 그것이 이 시험의 목적이다."""
+    from gptrpg.agents.providers.anthropic_provider import _extract_text
+
+    blocks = [
+        _ThinkingLikeBlock("모델이 속으로 생각한 내용"),
+        _TextLikeBlock("실제로 화면에 나갈 서사"),
+    ]
+    assert _extract_text(blocks) == "실제로 화면에 나갈 서사"
+
+
+class _FakeDelta:
+    def __init__(self, *, content: str | None = None, reasoning: str | None = None) -> None:
+        self.content = content
+        self.reasoning = reasoning  # 가짜 추론 전용 칸 — 코드가 이 칸을 읽지 않는다
+
+
+class _FakeChoice:
+    def __init__(self, delta: _FakeDelta) -> None:
+        self.delta = delta
+
+
+class _FakeChatChunk:
+    def __init__(self, choices: list[_FakeChoice], usage: object = None) -> None:
+        self.choices = choices
+        self.usage = usage
+
+
+class _FakeChatCompletions:
+    def __init__(self, chunks: list[_FakeChatChunk]) -> None:
+        self._chunks = chunks
+
+    def create(self, **_kwargs):
+        return iter(self._chunks)
+
+
+class _FakeChat:
+    def __init__(self, chunks: list[_FakeChatChunk]) -> None:
+        self.completions = _FakeChatCompletions(chunks)
+
+
+def test_openai_stream_yields_nothing_when_delta_content_is_empty_and_reasoning_lives_elsewhere():
+    """`delta.content`가 비어 있고 추론용 별도 속성(`.reasoning`)만 있는
+    가짜 청크를 흘리면 `stream()`이 아무것도 내보내지 않는다 — 읽는 칸이
+    `.content` 하나뿐이라는 사실을 이 시험이 고정한다."""
+    provider = OpenAIProvider(_FAKE_KEY)
+    fake_chunks = [
+        _FakeChatChunk(choices=[_FakeChoice(_FakeDelta(content=None, reasoning="내부 사고 1"))]),
+        _FakeChatChunk(choices=[_FakeChoice(_FakeDelta(content=None, reasoning="내부 사고 2"))]),
+    ]
+    provider._client.chat = _FakeChat(fake_chunks)
+    result = list(
+        provider.stream(model="m", system=[], messages=[], max_tokens=10, timeout_s=1.0)
+    )
+    assert result == []
+
+
+def test_nim_and_openrouter_stream_actually_reaches_openai_provider_stream(monkeypatch):
+    """NIM·OpenRouter의 `stream()`이 실제로 `OpenAIProvider`의 것으로 내려간다
+    — `OpenAIProvider.stream`을 표식 제너레이터로 갈아 끼워, 두 위임
+    어댑터의 `stream()` 호출 결과가 그 표식 그대로 나오는지 확인한다.
+    이래야 OpenAI에서 확인한 구조적 성질(위 시험)이 이 둘에 그대로
+    전이된다는 것이 실제로 증명된다 — 단순히 "같은 클래스를 감싼다"는
+    주석만 믿지 않는다."""
+    sentinel_chunks = ["위임됨-1", "위임됨-2"]
+
+    def _fake_stream(self, *, model, system, messages, max_tokens, timeout_s):  # noqa: ARG001
+        yield from sentinel_chunks
+
+    monkeypatch.setattr(OpenAIProvider, "stream", _fake_stream)
+
+    for provider_cls in (NimProvider, OpenRouterProvider):
+        instance = provider_cls(_FAKE_KEY)
+        result = list(
+            instance.stream(model="m", system=[], messages=[], max_tokens=10, timeout_s=1.0)
+        )
+        assert result == sentinel_chunks, (
+            f"{provider_cls.__name__}.stream()이 OpenAIProvider.stream()으로 내려가지 않는다"
+        )
+
+
+class _FakeGenaiChunk:
+    def __init__(self, text: str | None, usage_metadata: object = None) -> None:
+        self.text = text
+        self.usage_metadata = usage_metadata
+
+
+class _FakeGenaiModels:
+    def __init__(self, chunks: list[_FakeGenaiChunk]) -> None:
+        self._chunks = chunks
+
+    def generate_content_stream(self, **_kwargs):
+        return iter(self._chunks)
+
+
+def test_gemini_stream_skips_chunks_with_empty_text():
+    """`chunk.text`가 비어 있는 청크는 그냥 건너뛰어진다.
+
+    **한계(구조적으로 못박을 수 없는 지점):** Gemini의 `.text`가 추론
+    파트를 포함하는지 여부는 SDK 안쪽 동작이라 이 층에서 구조적으로
+    보장할 수 없다 — Anthropic·OpenAI와 달리 "추론 전용 속성이 별도로
+    있어 코드가 안 읽는다"는 구조를 이 어댑터에서는 증명할 수 없다.
+    이 어댑터에 대해서는 `narration_guard`/`json_parsing`의 정규식 방어가
+    실제 방어선이다(QUAL-08이 가리키는 "아직 주석뿐인 전제"의 실체)."""
+    provider = GeminiProvider(_FAKE_KEY)
+    fake_chunks = [
+        _FakeGenaiChunk(text=""),
+        _FakeGenaiChunk(text=None),
+    ]
+    provider._client.models = _FakeGenaiModels(fake_chunks)
+    result = list(
+        provider.stream(model="m", system=[], messages=[], max_tokens=10, timeout_s=1.0)
+    )
+    assert result == []
+
+
+_THINK_EXPOSURE_CATEGORIES = frozenset(
+    {"structural_exclusion", "delegates_to_openai", "regex_dependent"}
+)
+
+_ADAPTER_THINK_EXPOSURE_CATEGORY: dict[str, str] = {
+    "anthropic": "structural_exclusion",
+    "openai": "structural_exclusion",
+    "nim": "delegates_to_openai",
+    "openrouter": "delegates_to_openai",
+    "gemini": "regex_dependent",
+}
+"""위 시험군이 실제로 증명한 것을 요약한 등록소 — 다섯 어댑터 전부가 세
+범주(구조적 배제 / 위임으로 물려받음 / 정규식 의존) 중 하나로 분류돼
+있는지를 아래 시험이 `PROVIDER_FACTORIES`와 대조한다."""
+
+
+def test_all_five_adapters_are_classified_by_think_exposure_category():
+    """다섯 어댑터 전수 그물 — 각 어댑터가 위 세 범주 중 하나로 분류돼
+    있는지 단언한다(기존 60·181줄 순회 시험과 같은 모양). 여섯 번째
+    어댑터가 등록소에 들어오면 이 시험이 자동으로 빨간불이 된다."""
+    assert set(_ADAPTER_THINK_EXPOSURE_CATEGORY) == set(PROVIDER_FACTORIES)
+    for name, category in _ADAPTER_THINK_EXPOSURE_CATEGORY.items():
+        assert category in _THINK_EXPOSURE_CATEGORIES, (
+            f"{name} 어댑터가 알려진 추론 노출 범주에 없다: {category!r}"
+        )
