@@ -4,6 +4,7 @@
 문자열로만 모델 출력을 해석한다.
 """
 
+import sys
 from dataclasses import dataclass
 from typing import Literal
 
@@ -56,6 +57,13 @@ class Proposal:
 
     candidates: tuple[MoveCandidate, ...]
     ai: AgentResult
+    unknown_move: str | None = None
+    """모델이 닫힌 목록 밖 이름을 골라서 이 응답 전체를 무브 없음으로
+    흡수했다는 표시(SAFE-07, D-12, 10-05). 값이 있으면 계약 위반이 있었다는
+    뜻이고, `None`이면 그냥 아무 무브도 안 골랐다는 뜻이다 — 「못 골랐다」와
+    「목록 밖 이름을 냈다」가 이 칸으로 구분된다. 목록 밖 이름이 여러 개
+    왔어도 이 칸에는 처음 만난 것 하나만 담긴다(부분 신뢰 금지, `_parse_candidates`가
+    첫 번째 위반에서 곧바로 예외를 던지므로 이후 이름은 애초에 안 보인다)."""
 
     @property
     def tier(self) -> ProposalTier:
@@ -119,6 +127,18 @@ def classify(
     목록 대조는 `call_with_one_retry` **밖에서** — 껍데기를 돌려받은
     뒤에 — 한다.
 
+    2026-08-12 Phase 9 UAT에서 이 위반이 실제로 관찰됐다(`'track'`)
+    — 그때는 이 예외가 그대로 호출부까지 올라가 명령줄은 exit 1, 웹은
+    HTTP 400으로 턴 전체가 죽었다(SAFE-07). 10-05부터는 `classify()`
+    함수 경계 **안에서** 이 예외를 흡수한다 — `_parse_candidates`
+    자체는 여전히 예외를 던진다(계약 위반을 조용히 통과시키지 않는다는
+    존재 이유는 안 바뀐다). `classify()`가 그 예외를 잡아 표준오류에
+    한 줄을 남기고, 후보가 빈 `Proposal`에 `unknown_move`를 채워 돌려준다
+    — 화면에는 기존 「무브 없음」과 완전히 같은 모양(`tier == "none"`)으로
+    보인다. **이것은 목록 밖 이름을 받아들이는 것이 아니다** — 거부한
+    뒤 이미 있는 부드러운 경로에 태우는 것이다. D-16(닫힌 목록 분류)과
+    RIG-01은 그대로 지켜진다.
+
     `max_tokens=1024`. (03-04 Task 3 라이브 검증 중 한 번 4096으로 올려
     봤다가 근거 없이 되돌렸다 — 실제 문제는 토큰 부족에 의한 잘림이
     아니라 `call_with_one_retry`가 두 시도 다 예외로 실패하는 것이었다는
@@ -146,5 +166,18 @@ def classify(
         return Proposal(candidates=(), ai=result)
 
     known_move_ids = frozenset(move.move_id for move in moves)
-    candidates = _parse_candidates(str(result.value), known_move_ids)[:MAX_CANDIDATES]
+    try:
+        candidates = _parse_candidates(str(result.value), known_move_ids)[:MAX_CANDIDATES]
+    except UnknownMove as exc:
+        # 재시도 층(`call_with_one_retry`) 밖에서 잡는다 — 계약 위반을
+        # 다시 시도해 봐야 같은 위반이 다시 온다(도크스트링 116~127줄).
+        # `exc.move_id`는 모델이 지어낸 짧은 식별자이지 우리 지시문
+        # 원문이 아니므로 그대로 표준오류에 찍어도 SAFE-03의 원문 재유출
+        # 금지와 부딪히지 않는다.
+        print(
+            f"경고: 분류기가 닫힌 목록 밖 이름을 냈다 — {exc.move_id!r}. "
+            "무브 없음으로 흡수한다.",
+            file=sys.stderr,
+        )
+        return Proposal(candidates=(), ai=result, unknown_move=exc.move_id)
     return Proposal(candidates=candidates, ai=result)

@@ -132,22 +132,188 @@ def test_provider_failure_after_retry_yields_none_tier():
 
 
 # ---------------------------------------------------------------------------
-# UnknownMove는 여전히 예외로 던져진다 (tier 계산과 무관 — 애초에 Proposal이
-# 안 만들어진다)
+# UnknownMove(SAFE-07/D-12, 10-05) — 두 층으로 나뉜다:
+# `_parse_candidates`는 여전히 계약 위반을 예외로 던진다(계약 유지 확인).
+# `classify()`는 그 예외를 함수 경계에서 흡수해 「무브 없음」과 같은 모양의
+# `Proposal`로 돌려준다(새 동작 확인) — 2026-08-12 Phase 9 UAT에서 관찰된
+# "플레이어 문장이 안내 없이 사라지는" 결함을 여기서 닫는다.
 # ---------------------------------------------------------------------------
 
 
-def test_unknown_move_still_raises_regardless_of_tier_logic(fake_provider):
+def test_parse_candidates_still_raises_unknown_move_directly(fake_provider):
+    """`_parse_candidates` 자체는 계약 위반을 여전히 예외로 던진다 — 흡수는
+    받는 쪽(`classify`)에서만 일어나고, 위반 자체를 감추지 않는다."""
+    from gptrpg.agents.action_classifier import _parse_candidates
+
+    known_move_ids = frozenset(m.move_id for m in get_moves(DUNGEONWORLD_LIKE_ID))
+    with pytest.raises(UnknownMove) as exc_info:
+        _parse_candidates(json.dumps([{"move": "fireball", "stat": "INT"}]), known_move_ids)
+    assert exc_info.value.move_id == "fireball"
+
+
+def test_classify_absorbs_unknown_move_into_none_tier_proposal(fake_provider):
+    """`classify()`는 목록 밖 이름에 대해 예외 없이 `tier == "none"`인
+    `Proposal`을 돌려주고, `unknown_move`에 그 이름을 남긴다."""
     fake_provider.complete_value = json.dumps([{"move": "fireball", "stat": "INT"}])
-    with pytest.raises(UnknownMove):
-        classify(
-            provider=fake_provider,
-            model="fake-model",
-            ctx=_ctx(),
-            raw_text="불덩이를 던진다",
-            moves=get_moves(DUNGEONWORLD_LIKE_ID),
-            rulebook_display_name="Dungeonworld-like",
-        )
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="불덩이를 던진다",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "none"
+    assert proposal.candidates == ()
+    assert proposal.unknown_move == "fireball"
+
+
+def test_classify_empty_array_leaves_unknown_move_none(fake_provider):
+    """빈 배열 응답은 「못 골랐다」다 — `unknown_move`가 `None`으로 남아
+    「목록 밖 이름을 냈다」와 기록에서 구분된다."""
+    fake_provider.complete_value = "[]"
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "none"
+    assert proposal.unknown_move is None
+
+
+def test_classify_provider_failure_after_retry_also_leaves_unknown_move_none():
+    """제공자 호출 자체가 두 번 다 실패한 경우도 「못 골랐다」다 — 계약
+    위반(모델이 응답은 했지만 목록 밖 이름을 냄)과 혼동되지 않는다."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=_AlwaysFailsProvider(),
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "none"
+    assert proposal.unknown_move is None
+
+
+def test_classify_multiple_unknown_moves_keeps_only_the_first_and_no_candidates_survive(
+    fake_provider,
+):
+    """목록 밖 이름이 여러 개면 처음 만난 것 하나만 `unknown_move`에 담기고,
+    그 응답의 후보는 하나도 살아남지 않는다(부분 신뢰 금지) — 앞선 항목이
+    닫힌 목록 안이어도 마찬가지다."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    fake_provider.complete_value = json.dumps(
+        [
+            {"move": moves[0].move_id, "stat": moves[0].default_stat},
+            {"move": "fireball", "stat": "INT"},
+            {"move": "teleport", "stat": "INT"},
+        ]
+    )
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "none"
+    assert proposal.candidates == ()
+    assert proposal.unknown_move == "fireball"
+
+
+def test_classify_case_variant_move_name_is_treated_as_unknown_move(fake_provider):
+    """대소문자만 다른 이름은 목록 밖으로 판정된다(기존 frozenset 정확 대조
+    보존, SAFE-07 adjacency edge)."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    variant = moves[0].move_id.upper()
+    assert variant != moves[0].move_id  # 실제로 다른 문자열인지 먼저 확인
+    fake_provider.complete_value = json.dumps([{"move": variant, "stat": moves[0].default_stat}])
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "none"
+    assert proposal.unknown_move == variant
+
+
+def test_classify_whitespace_padded_move_name_is_treated_as_unknown_move(fake_provider):
+    """앞뒤 공백이 붙은 이름은 목록 밖으로 판정된다(SAFE-07 adjacency edge)."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    variant = f"  {moves[0].move_id}  "
+    fake_provider.complete_value = json.dumps([{"move": variant, "stat": moves[0].default_stat}])
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "none"
+    assert proposal.unknown_move == variant
+
+
+def test_classify_unicode_normalization_variant_move_name_is_treated_as_unknown_move(
+    fake_provider,
+):
+    """정규화 형태만 다른 이름(코드포인트가 다른 결합 문자 형태)도 목록
+    밖으로 판정된다 — 이름 비교는 파이썬 str 코드포인트 동등성이며 새
+    유니코드 정규화를 도입하지 않는다(SAFE-07 encoding edge)."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    variant = moves[0].move_id + "́"  # 결합 급상승 악센트 하나를 덧붙인다
+    fake_provider.complete_value = json.dumps([{"move": variant, "stat": moves[0].default_stat}])
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "none"
+    assert proposal.unknown_move == variant
+
+
+def test_classify_unknown_move_does_not_increase_provider_call_count(fake_provider):
+    """흡수는 재시도를 유발하지 않는다 — 목록 밖 이름이 와도 제공자 호출
+    횟수는 정상 경로와 똑같이 한 번이다(`_parse_candidates`가
+    `call_with_one_retry` 밖에서 불리기 때문)."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    fake_provider.complete_value = json.dumps(
+        [{"move": moves[0].move_id, "stat": moves[0].default_stat}]
+    )
+    classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    normal_path_calls = len(fake_provider.calls)
+
+    fake_provider.complete_value = json.dumps([{"move": "fireball", "stat": "INT"}])
+    classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    unknown_move_path_calls = len(fake_provider.calls) - normal_path_calls
+
+    assert unknown_move_path_calls == normal_path_calls == 1
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +324,7 @@ def test_unknown_move_still_raises_regardless_of_tier_logic(fake_provider):
 
 def test_proposal_field_names_have_no_confidence_slot():
     field_names = frozenset(f.name for f in fields(Proposal))
-    assert field_names == frozenset({"candidates", "ai"})
+    assert field_names == frozenset({"candidates", "ai", "unknown_move"})
     for name in field_names:
         assert "confidence" not in name
         assert "score" not in name
@@ -226,10 +392,13 @@ def test_prose_before_and_after_json_array_still_parses(fake_provider):
     assert proposal.candidates[0].move == moves[0].move_id
 
 
-def test_unknown_move_inside_think_block_wrapped_response_still_raises(fake_provider):
+def test_unknown_move_inside_think_block_wrapped_response_is_absorbed_not_raised(fake_provider):
+    """<think> 블록을 벗겨낸 뒤 드러난 목록 밖 이름도 10-05부터는 `classify()`
+    경계에서 흡수된다(더 이상 예외로 새 나가지 않는다)."""
     raw = '<think>음...</think>\n[{"move": "fireball", "stat": "INT"}]'
-    with pytest.raises(UnknownMove):
-        _classify_with_raw_completion(fake_provider, raw)
+    proposal = _classify_with_raw_completion(fake_provider, raw)
+    assert proposal.tier == "none"
+    assert proposal.unknown_move == "fireball"
 
 
 def test_completely_unparseable_response_yields_none_tier_not_a_crash(fake_provider):
