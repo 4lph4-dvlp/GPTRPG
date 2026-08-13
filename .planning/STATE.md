@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 09
-current_phase_name: AI 출력 검증과 탈옥 방어
+current_phase: 10
+current_phase_name: ai
 status: executing
-stopped_at: Phase 10 context gathered
-last_updated: "2026-08-12T19:03:06.643Z"
-last_activity: 2026-08-13
-last_activity_desc: Phase 10 논의 완료 — 13개 결정 잠금, SAFE-07 신설
+stopped_at: Completed 10-01-PLAN.md
+last_updated: "2026-08-13T17:24:11.222Z"
+last_activity: 2026-08-14
+last_activity_desc: Phase 10 execution started
 progress:
   total_phases: 11
-  completed_phases: 3
+  completed_phases: 2
   total_plans: 13
-  completed_plans: 8
+  completed_plans: 9
   percent: 18
 ---
 
@@ -24,18 +24,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 09 — 에이전트 구조 재편
+**Current focus:** Phase 10 — ai
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 09 (에이전트 구조 재편) — VERIFYING
-Plan: 4 of 4
+Phase: 10 (ai) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-08-09 — Completed 09-04-PLAN.md (Task 2 체크포인트, 사람이 수용한 미확인 항목과 함께 종료)
+Last activity: 2026-08-14 — Phase 10 execution started
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 69%
 
 ## Performance Metrics
 
@@ -89,6 +89,7 @@ Progress: [██████████] 100%
 | Phase 09 P02 | ~45min | 3 tasks | 19 files |
 | Phase 09 P03 | ~12min | 3 tasks | 20 files |
 | Phase 09 P04 | ~15min | 2 tasks | 5 files |
+| Phase 10 P01 | 40min | 2 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -163,6 +164,9 @@ Progress: [██████████] 100%
 - [Phase ?]: 09-03: DP-08/DP-09 확정대로 구현 — scene_entity_judge가 turn/judgments.gather_turn_judgments의 세 번째 코루틴으로 들어감(각자 독립 호출, 관계 결과는 서술용 사실로만 쓰고 사건·Entity 목록에 안 씀). ARCH-04는 tests/test_parallel_judgment.py의 ast 기반 구문 검사로, ARCH-06은 tests/test_agent_context_caps.py의 세션-길이-무관 증명으로 회귀 방지 그물에 못박음. ARCH-04/05/06 셋 다 REQUIREMENTS.md에서 [x]로 완료
 - [Phase ?]: 09-04: D-68 확정 기록 — CLOCK-01 최소판(위협 시계 조건 검사)은 Phase 9에 남고, 관계 기록(MEM-02)·문맥 압축(MEM-03)은 최소판까지 포함해 전부 Phase 14로 되돌림. ROADMAP Phase 15 Depends-on/성공조건 1을 그 전제로 갱신, Phase 14 절은 무변경. docs/PIPELINE.md·README.md를 실제 다섯 역할 구조와 재동기화
 - [Phase ?]: 09-04 Task 2 체크포인트: 사람이 6개 확인 항목 중 0/1/4①만 통과 확인하고 2(사건 기록 역할별 분해 — replay 도구 한계로 미확인)·3(시계 폭주 5턴 검사 — 미실행)·4②③(브라우저 지시문 유출·시계 표시 — 미확인)·5(D-05 실사용 복원력 — 미실행)는 남겨둔 채 '미확인 항목은 남겨두고 넘어가자'는 명시적 판단으로 통과 처리. 항목 3·5는 향후 UAT 후속 작업으로 남김(단계 완료를 막지 않음)
+- [Phase ?]: 10-01 Task 1 checkpoint(option-a): safety_flagged 사건 하나로 서사 검사(source=narration)와 분류기 계약 위반(source=classifier) 기록을 함께 담는다
+- [Phase ?]: 10-01: EVENT_SCHEMA_VERSION 5->6, SafetyFlagged 사건 신설. rules_core/reducer.py 분기와 같은 커밋(08-CONTEXT.md D-06). .gptrpg/uat9.db 판 5 실기록은 세션 넷(221건), events.db는 전부 판 2(895건) — CONTEXT/RESEARCH/VALIDATION의 '판 5' 서술 정정
+- [Phase ?]: 10-01: master_gm.narrate()가 NarrationChunk를 내는 1문장 지연 버퍼를 갖는다. 스톨·실패 도중에도 이미 도착한 보류 문장은 판정·방출한 뒤 예외를 다시 던져(안쪽 except), 바깥 재시도 판단(스톨 절대 재시도 금지 등)과 03-04의 '이미 나간 조각 보존' 보장을 둘 다 지킨다
 
 ### Pending Todos
 
@@ -218,10 +222,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-12T18:01:17.628Z
-Stopped at: Phase 10 context gathered
+Last session: 2026-08-13T17:23:59.519Z
+Stopped at: Completed 10-01-PLAN.md
 Traceability 갱신 완료
-Resume file: .planning/phases/10-ai/10-CONTEXT.md
+Resume file: None
 
 **다음 행동:** Phase 10(AI 출력 검증과 탈옥 방어) **논의 완료** — `10-CONTEXT.md`에 결정
 13개가 잠겼다. 다음은 `/gsd-plan-phase 10`(조사 → 계획).
