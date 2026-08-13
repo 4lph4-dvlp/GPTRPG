@@ -1,0 +1,218 @@
+"""`narration_guard`의 원문 겹침 대조(10-02, D-02②) 단위 시험.
+
+`tests/test_narration_isolation.py`가 확립한 관례를 따른다 — 소스 문자열을
+이 파일에 다시 적지 않고 `build_gm_prompt`를 실제로 불러 그 결과의 영구
+고정 블록 텍스트를 대조 소스로 쓴다. 지시문이 바뀌면 이 시험도 자동으로
+새 값을 본다.
+"""
+
+from gptrpg.agents import narration_guard, prompt_assembly
+from gptrpg.agents.context import NarrationFacts
+from gptrpg.rulebooks.threat_clocks import THREAT_CAST
+
+_CHECK_SUMMARY = "hack_and_slash 판정 결과 miss (목표 10)"
+
+
+def _narration_facts(**overrides) -> NarrationFacts:
+    base = dict(
+        check_summary=_CHECK_SUMMARY,
+        scene_summary="문이 부서지고 서늘한 바람이 흘러든다.",
+        facts=("경비병이 쓰러졌다",),
+        scene_entities=THREAT_CAST,
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    base.update(overrides)
+    return NarrationFacts(**base)
+
+
+def _permanent_block_text() -> str:
+    """실제 `build_gm_prompt`가 만드는 영구 고정 블록 텍스트."""
+    system, _messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=_narration_facts()
+    )
+    return system[0]["text"]
+
+
+# ---------------------------------------------------------------------------
+# normalize_for_overlap — 정규화 네 단계
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_for_overlap_strips_whitespace_punctuation_and_symbols():
+    assert narration_guard.normalize_for_overlap("안녕, 세상!") == "안녕세상"
+    assert narration_guard.normalize_for_overlap("안녕 세상") == "안녕세상"
+
+
+def test_normalize_for_overlap_makes_punctuation_only_variants_equal():
+    """구두점만 바꿔 쓴 두 문자열은 정규화 결과가 같다 — 조금만 바꿔 쓴
+    유출을 놓치지 않기 위해서다."""
+    plain = narration_guard.normalize_for_overlap("이 문장은 진행자 지시문이다")
+    with_comma = narration_guard.normalize_for_overlap("이 문장은, 진행자 지시문이다.")
+    quoted = narration_guard.normalize_for_overlap('"이 문장은 진행자 지시문이다"')
+    assert plain == with_comma == quoted
+
+
+def test_normalize_for_overlap_casefolds():
+    assert narration_guard.normalize_for_overlap("Hello World") == narration_guard.normalize_for_overlap(
+        "hello world"
+    )
+
+
+def test_normalize_for_overlap_empty_and_whitespace_only_yield_empty_string():
+    assert narration_guard.normalize_for_overlap("") == ""
+    assert narration_guard.normalize_for_overlap("   \n\t  ") == ""
+
+
+# ---------------------------------------------------------------------------
+# find_source_overlap — 문턱값과 경계
+# ---------------------------------------------------------------------------
+
+
+def test_find_source_overlap_empty_sentence_is_always_clean():
+    permanent = _permanent_block_text()
+    matched_len, hit = narration_guard.find_source_overlap("", None, (permanent,))
+    assert hit is False
+    assert matched_len == 0
+
+
+def test_find_source_overlap_whitespace_only_sentence_is_always_clean():
+    permanent = _permanent_block_text()
+    matched_len, hit = narration_guard.find_source_overlap("   \n  ", None, (permanent,))
+    assert hit is False
+    assert matched_len == 0
+
+
+def test_find_source_overlap_no_source_texts_skips_check():
+    matched_len, hit = narration_guard.find_source_overlap(
+        "아무 문장이나 상관없다 이 시험은 소스가 없다는 것만 확인한다", None, ()
+    )
+    assert hit is False
+    assert matched_len == 0
+
+
+def test_find_source_overlap_exactly_twelve_chars_is_blocked():
+    """정규화 후 정확히 12자가 소스와 겹치면 blocked다(경계값 포함)."""
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    assert len(normalized_source) >= 20, "테스트 전제: 영구 블록은 충분히 길다"
+
+    twelve_char_slice = normalized_source[5:17]
+    assert len(twelve_char_slice) == narration_guard.MIN_OVERLAP_CHARS
+
+    matched_len, hit = narration_guard.find_source_overlap(twelve_char_slice, None, (permanent,))
+    assert hit is True
+    assert matched_len == 12
+
+
+def test_find_source_overlap_eleven_chars_is_clean():
+    """11자는 문턱(12) 미만이므로 소스에 그대로 들어 있어도 clean이다."""
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+
+    eleven_char_slice = normalized_source[5:16]
+    assert len(eleven_char_slice) == 11
+
+    matched_len, hit = narration_guard.find_source_overlap(eleven_char_slice, None, (permanent,))
+    assert hit is False
+    assert matched_len == 0
+
+
+def test_find_source_overlap_short_sentence_never_blocks_even_if_verbatim_in_source():
+    """정규화 결과 길이가 12 미만이면, 소스에 통째로 들어 있어도 항상
+    clean이다."""
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    short_slice = normalized_source[:8]
+    assert len(short_slice) < narration_guard.MIN_OVERLAP_CHARS
+
+    matched_len, hit = narration_guard.find_source_overlap(short_slice, None, (permanent,))
+    assert hit is False
+    assert matched_len == 0
+
+
+def test_find_source_overlap_across_sentence_boundary_is_blocked():
+    """앞 문장 끝 몇 자 + 뒷 문장 앞 몇 자가 이어져 소스와 일치하면 걸린다
+    — 문장 경계에 걸친 유출(D-01의 핵심 근거)도 원문 겹침 검사가 잡는다."""
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    window = normalized_source[20:33]
+    assert len(window) >= narration_guard.MIN_OVERLAP_CHARS
+
+    split_at = 7
+    boundary_prefix, boundary_suffix = window[:split_at], window[split_at:]
+
+    sentence = f"평범한 앞부분이다 {boundary_prefix}"
+    next_sentence = f"{boundary_suffix} 평범한 뒷부분이다"
+
+    matched_len, hit = narration_guard.find_source_overlap(sentence, next_sentence, (permanent,))
+    assert hit is True
+    assert matched_len >= narration_guard.MIN_OVERLAP_CHARS
+
+
+def test_find_source_overlap_window_starting_only_in_next_sentence_does_not_block():
+    """겹침 창의 시작 위치가 검사 대상 문장 밖(다음 문장 쪽)에만 있으면
+    이번 문장을 자르지 않는다. 소스와 무관해야 할 문장 쪽에 우연히 걸릴
+    여지를 완전히 없애기 위해 통제된 합성 소스를 쓴다(실제 소스 사용은
+    이 파일의 다른 시험이 이미 담당한다)."""
+    source = ("abcdefghijklmnop",)
+    sentence = "zzzzzzzzzzzzzzzzzzzz"  # 소스에 없는 문자로만 구성 — 절대 안 걸린다
+    next_sentence = "abcdefghijkl"  # 소스의 앞 12자와 정확히 같다
+
+    matched_len, hit = narration_guard.find_source_overlap(sentence, next_sentence, source)
+    assert hit is False
+    assert matched_len == 0
+
+
+def test_find_source_overlap_reports_actual_max_matched_length():
+    """적중한 창은 오른쪽으로 늘려 실제 최대 겹침 길이를 구한다."""
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    longer_slice = normalized_source[5:25]
+    assert len(longer_slice) == 20
+
+    matched_len, hit = narration_guard.find_source_overlap(longer_slice, None, (permanent,))
+    assert hit is True
+    assert matched_len == 20
+
+
+# ---------------------------------------------------------------------------
+# inspect_sentence — 원문 겹침 갈래 통합
+# ---------------------------------------------------------------------------
+
+
+def test_inspect_sentence_blocks_verbatim_instruction_overlap():
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    twelve_char_slice = normalized_source[5:17]
+
+    verdict = narration_guard.inspect_sentence(
+        twelve_char_slice, next_sentence=None, source_texts=(permanent,)
+    )
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "source_overlap"
+    assert verdict.matched_len == 12
+    assert verdict.text == ""
+
+
+def test_inspect_sentence_clean_below_threshold():
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    eleven_char_slice = normalized_source[5:16]
+
+    verdict = narration_guard.inspect_sentence(
+        eleven_char_slice, next_sentence=None, source_texts=(permanent,)
+    )
+    assert verdict.disposition == "clean"
+    assert verdict.text == eleven_char_slice
+
+
+def test_inspect_sentence_normal_narration_stays_clean():
+    permanent = _permanent_block_text()
+    sentence = "부서진 등불이 흔들리며 그림자를 길게 늘어뜨린다."
+    verdict = narration_guard.inspect_sentence(
+        sentence, next_sentence=None, source_texts=(permanent,)
+    )
+    assert verdict.disposition == "clean"
+    assert verdict.text == sentence

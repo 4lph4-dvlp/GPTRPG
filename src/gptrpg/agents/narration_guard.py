@@ -5,17 +5,24 @@
 안 닿는다는 프로젝트 규율(D14/D16)이 이 파일에도 그대로 적용된다 — 여기서
 정하는 것은 "이 문장을 화면에 보낼지"이지 게임 판정 수치가 아니다.
 
-10-01은 검사 갈래를 하나만 채운다 — **추론 모델의 생각 블록**(SAFE-01, D-02①).
-원문 겹침(D-02②, 10-02)·캐릭터 이탈(D-02③, 10-04)은 이 모듈에 뒤이어 붙는다.
-`inspect_sentence()`가 이미 이 세 갈래를 함께 담을 반환 모양(`GuardVerdict`)을
-갖고 있는 이유가 그것이다 — 나중에 갈래가 늘어도 호출부(`master_gm.narrate`)의
-소비 방식은 안 바뀐다.
+10-01은 검사 갈래를 하나만 채웠다 — **추론 모델의 생각 블록**(SAFE-01, D-02①).
+10-02가 **원문 겹침**(D-02②)을 채운다 — 우리가 프롬프트에 실제로 넣은 진행자
+지시문 원문과 겹치는 문장을 결정론적으로 잡아 자동 차단한다. **캐릭터
+이탈**(D-02③, 10-04)은 아직 남아 있다. `inspect_sentence()`가 이미 이 세
+갈래를 함께 담을 반환 모양(`GuardVerdict`)을 갖고 있는 이유가 그것이다 —
+나중에 갈래가 늘어도 호출부(`master_gm.narrate`)의 소비 방식은 안 바뀐다.
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from gptrpg.agents.json_parsing import THINK_BLOCK
+
+MIN_OVERLAP_CHARS = 12
+"""정규화 후 이 글자 수 이상 겹치면 원문 유출로 본다(D-02②, 10-02 계획 판단
+2). 한국어에서 12자는 대략 대여섯 어절이라 우연히 겹칠 일이 거의 없고,
+진행자 지시문 한 구절을 그대로 옮긴 유출은 거의 항상 이보다 길다."""
 
 NOTICE_FILTERED = "이야기 한 부분을 걸렀어요. 이어서 씁니다."
 """걸러낸 자리에 대신 나가는 고정 안내 문구(D-05/SAFE-03). 걸러낸 원문에서
@@ -61,6 +68,69 @@ class GuardVerdict:
     think_open: bool
 
 
+def normalize_for_overlap(text: str) -> str:
+    """원문 겹침 대조용 정규화(D-02② 계획 판단 3) — 이 순서 그대로 수행한다:
+    NFC 정규화 → 유니코드 Cf(폭 없는 문자) 제거 → casefold → 공백·구두점
+    (유니코드 카테고리 `P*`)·기호(`S*`) 제거.
+
+    같은 뜻을 구두점만 바꿔 쓴 두 문자열(쉼표 하나 추가, 따옴표로 감싸기
+    등)은 이 함수를 거치면 결과가 같아진다 — 「조금만 바꿔 쓴 유출」을
+    놓치지 않기 위해서다. 빈 문자열·공백뿐인 문자열은 빈 문자열을 돌려준다.
+    """
+    normalized = unicodedata.normalize("NFC", text)
+    no_format_chars = "".join(ch for ch in normalized if unicodedata.category(ch) != "Cf")
+    folded = no_format_chars.casefold()
+    return "".join(
+        ch for ch in folded if not ch.isspace() and unicodedata.category(ch)[0] not in ("P", "S")
+    )
+
+
+def find_source_overlap(
+    sentence: str, next_sentence: str | None, source_texts: tuple[str, ...]
+) -> tuple[int, bool]:
+    """`sentence`(다음 문장 `next_sentence`까지 이어 붙여)가 `source_texts`
+    중 하나와 `MIN_OVERLAP_CHARS`자 이상 겹치는지 결정론적으로 대조한다.
+
+    `(matched_len, hit)` 짝을 돌려준다 — `hit`이 참이면 `matched_len`은
+    실제로 겹친 최대 길이(코드포인트 개수)다. `source_texts`가 비어 있으면
+    검사를 건너뛴다(`(0, False)`, 10-01 상태와의 호환).
+
+    절차: `h = normalize_for_overlap(sentence)`, `n =
+    normalize_for_overlap(next_sentence or "")`, `j = h + n`. 소스도 각각
+    정규화해 둔다. 시작 위치가 `0`부터 `len(h) - 1`까지인 길이
+    `MIN_OVERLAP_CHARS` 창을 `j` 위에서 밀며, 그 창이 정규화된 소스 중
+    하나의 부분열이면 적중이다 — **시작 위치가 `len(h)` 안에 있어야만**
+    적중으로 치므로, 다음 문장 쪽에만 있는 겹침으로 이번 문장을 자르지
+    않는다. 적중한 창은 오른쪽으로 더 늘려 실제 최대 겹침 길이를 구한다.
+    `h`가 비어 있거나(빈 문장·공백뿐) `MIN_OVERLAP_CHARS`보다 짧으면서
+    `next_sentence`가 없으면(또는 짧으면) 어떤 시작 위치도 12자 창을 채울
+    수 없어 자동으로 clean이 된다 — 별도 분기가 필요 없다.
+    """
+    if not source_texts:
+        return 0, False
+
+    h = normalize_for_overlap(sentence)
+    n = normalize_for_overlap(next_sentence or "")
+    joined = h + n
+    normalized_sources = tuple(normalize_for_overlap(src) for src in source_texts)
+
+    max_matched = 0
+    for start in range(len(h)):
+        end = start + MIN_OVERLAP_CHARS
+        if end > len(joined):
+            continue
+        window = joined[start:end]
+        if not any(window in src for src in normalized_sources):
+            continue
+        while end < len(joined) and any(joined[start : end + 1] in src for src in normalized_sources):
+            end += 1
+        max_matched = max(max_matched, end - start)
+
+    if max_matched > 0:
+        return max_matched, True
+    return 0, False
+
+
 def strip_think_blocks(text: str) -> str:
     """완결된 `<think>...</think>` 쌍을 지운 문자열을 돌려준다.
 
@@ -79,10 +149,11 @@ def inspect_sentence(
     source_texts: tuple[str, ...],
     think_open: bool = False,
 ) -> GuardVerdict:
-    """이 단계(10-01)의 검사 진입점 — 생각 블록 갈래만 채운다.
+    """서사 검사 진입점 — 10-02 기준으로 두 갈래(생각 블록/원문 겹침)를
+    채운다. 캐릭터 이탈(10-04)은 아직 없다.
 
-    `source_texts`(원문 겹침 대조에 쓸 "우리가 프롬프트에 실제로 넣은
-    문자열")는 받아 두기만 한다 — 10-02가 이 칸을 쓴다.
+    `source_texts`는 "우리가 프롬프트에 실제로 넣은 문자열"이다 —
+    `find_source_overlap`이 이 값을 원문 겹침 대조 소스로 그대로 쓴다.
 
     **판정 순서:**
     1. `think_open`이 참이면(이전 문장에서 연 생각 블록이 아직 안 닫혔다)
@@ -94,17 +165,21 @@ def inspect_sentence(
        들어 있었다) `blocked`. ② 지워지지 않았어도 남은 문자열에 여는
        표식이 있으면(이 문장에서 열렸는데 안 닫혔다) `blocked`이고
        `think_open=True`를 다음 호출에 넘긴다.
-    3. 둘 다 아니면 `clean` — 문장 그대로 내보낸다.
+    3. 생각 블록이 없으면 `find_source_overlap(sentence, next_sentence,
+       source_texts)`로 원문 겹침을 대조한다(D-02②) — 적중하면 `blocked`,
+       `reason="source_overlap"`, `matched_len`에 실제 겹친 길이를 담는다.
+       `text`는 빈 문자열이다 — 걸린 원문을 이 칸에 담지 않는다.
+    4. 셋 다 아니면 `clean` — 문장 그대로 내보낸다.
 
-    **`next_sentence`를 직접 들여다보지 않는 이유:** "여는 표식이 문장
-    1에, 닫는 표식이 문장 2에 걸쳐 있어도 잡힌다"(D-01)는 요구는
-    `think_open` 상태를 호출 사이로 실어 나르는 것만으로 이미 성립한다 —
-    문장 1이 `blocked`+`think_open=True`를 돌려주면, 호출부가 문장 2를 검사할
-    때 그 `think_open=True`를 그대로 넘기므로 문장 2도(닫는 표식이 있어도)
-    `blocked`로 잡힌다(위 1번 갈래). `next_sentence`는 그래서 이 갈래의
-    판정에는 안 쓰이지만, 시그니처에는 남겨 둔다 — `narrate()`가 항상 두
-    문장을 함께 들고 있고, 10-02의 원문 겹침 검사는 실제로 `next_sentence`의
-    내용을 볼 수도 있다(경계에 걸친 겹침).
+    **`next_sentence`를 직접 들여다보지 않는 이유(생각 블록 갈래):** "여는
+    표식이 문장 1에, 닫는 표식이 문장 2에 걸쳐 있어도 잡힌다"(D-01)는
+    요구는 `think_open` 상태를 호출 사이로 실어 나르는 것만으로 이미
+    성립한다 — 문장 1이 `blocked`+`think_open=True`를 돌려주면, 호출부가
+    문장 2를 검사할 때 그 `think_open=True`를 그대로 넘기므로 문장 2도
+    (닫는 표식이 있어도) `blocked`로 잡힌다(위 1번 갈래). **원문 겹침
+    갈래는 반대로 `next_sentence`를 실제로 쓴다** — 문장 경계에 걸쳐
+    이어지는 겹침(앞 문장 끝 몇 자 + 뒷 문장 앞 몇 자가 이어져 소스와
+    일치)을 잡으려면 두 문장을 이어 붙여 봐야 하기 때문이다.
     """
     subject_len = len(sentence)
 
@@ -131,6 +206,17 @@ def inspect_sentence(
             matched_len=0,
             subject_len=subject_len,
             think_open=still_has_open,
+        )
+
+    matched_len, overlap_hit = find_source_overlap(sentence, next_sentence, source_texts)
+    if overlap_hit:
+        return GuardVerdict(
+            disposition="blocked",
+            reason="source_overlap",
+            text="",
+            matched_len=matched_len,
+            subject_len=subject_len,
+            think_open=False,
         )
 
     return GuardVerdict(
