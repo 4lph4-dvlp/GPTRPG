@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 10
 current_phase_name: ai
 status: executing
-stopped_at: Completed 10-02-PLAN.md
-last_updated: "2026-08-13T17:41:47.286Z"
+stopped_at: Completed 10-05-PLAN.md
+last_updated: "2026-08-13T17:54:36.976Z"
 last_activity: 2026-08-14
 last_activity_desc: Phase 10 execution started
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 13
-  completed_plans: 10
+  completed_plans: 11
   percent: 18
 ---
 
@@ -31,11 +31,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 10 (ai) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-08-14 — Phase 10 execution started
 
-Progress: [████████░░] 77%
+Progress: [█████████░] 85%
 
 ## Performance Metrics
 
@@ -91,6 +91,7 @@ Progress: [████████░░] 77%
 | Phase 09 P04 | ~15min | 2 tasks | 5 files |
 | Phase 10 P01 | 40min | 2 tasks | 16 files |
 | Phase 10 P02 | ~20min | 3 tasks | 3 files |
+| Phase 10-ai P05 | ~35min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -170,6 +171,9 @@ Progress: [████████░░] 77%
 - [Phase ?]: 10-01: master_gm.narrate()가 NarrationChunk를 내는 1문장 지연 버퍼를 갖는다. 스톨·실패 도중에도 이미 도착한 보류 문장은 판정·방출한 뒤 예외를 다시 던져(안쪽 except), 바깥 재시도 판단(스톨 절대 재시도 금지 등)과 03-04의 '이미 나간 조각 보존' 보장을 둘 다 지킨다
 - [Phase ?]: 10-02: 원문 겹침 대조 소스는 build_gm_prompt의 영구 고정 블록 하나뿐 — 세션 고정 블록(장면 대상·캐릭터 상태)은 정당한 이야기 맥락이라 대조 소스에서 뺐다(RESEARCH.md A1 좁힘)
 - [Phase ?]: 10-02: 캐릭터 이탈 정규식(CHARACTER_BREAK_PATTERNS)은 D-03에 따라 절대 blocked로 승격하지 않는다 — flagged로 통과시키고 기록만 남긴다
+- [Phase ?]: 10-05: classify()가 UnknownMove를 call_with_one_retry 밖 함수 경계에서 흡수해 tier=="none" Proposal(unknown_move 칸)로 돌려준다 — _parse_candidates는 여전히 예외를 던진다(SAFE-07/D-12)
+- [Phase ?]: 10-05: 웹 declare()·명령줄 turn_flow가 RecordAiCall 제출과 같은 자리·조건으로 RecordSafetyFlag(source="classifier", reason="unknown_move")를 제출한다 — 두 경로가 구조적으로 갈라질 수 없다
+- [Phase ?]: 10-05: QUAL-08 남은 대상(추론 노출 형태의 어댑터별 차이)을 test_providers.py에 회귀 시험으로 고정 — anthropic/openai는 구조적 배제, nim/openrouter는 openai에 위임, gemini는 정규식 의존(구조적으로 못박을 수 없다는 한계를 도크스트링에 명시)
 
 ### Pending Todos
 
@@ -225,8 +229,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-13T17:41:47.252Z
-Stopped at: Completed 10-02-PLAN.md
+Last session: 2026-08-13T17:54:36.943Z
+Stopped at: Completed 10-05-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
