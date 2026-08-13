@@ -15,6 +15,7 @@ from httpx import ASGITransport, AsyncClient
 from conftest import FakeProvider
 from conftest import select_character as _select_character_at
 from gptrpg.agents.envelope import AgentResult
+from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.imagery import imagery_config_from_env
 from gptrpg.web.app import create_app
 from gptrpg.web.cookie_auth import verify_cookie
@@ -279,9 +280,12 @@ def _last_turn_text(fake: FakeProvider) -> str:
     캐릭터 이름표가 실제로 찍히는 자리는 `messages`다 — `system`은 캐릭터
     상태·시계 정보만 담는다(`agents/prompt_assembly.py`의 `_session_block_text`
     /`build_classifier_prompt`). `turn.context.build_turn_context`가 줄마다
-    화자를 붙인 뒤(`f"{speaker}: {event.raw_text}"`) 그 줄바꿈이 그대로
-    이 문자열에 남아 있다 — JSON으로 다시 감싸면 줄바꿈이 이스케이프되어
-    줄 단위 대조가 깨지므로 `messages[-1]["content"]`를 직접 쓴다.
+    화자를 붙인 뒤(`f"{speaker}: {fence_player_text(event.raw_text)}"`,
+    10-04부터 원문을 울타리로 감싼다) 그 줄바꿈이 그대로 이 문자열에 남아
+    있다 — JSON으로 다시 감싸면 줄바꿈이 이스케이프되어 대조가 깨지므로
+    `messages[-1]["content"]`를 직접 쓴다. 울타리가 화자 표시 뒤에 내부
+    줄바꿈을 더 만들어 내므로(열림 표식/원문/닫힘 표식 세 줄), 대조는 더
+    이상 단일 줄 동등 비교가 아니라 부분 문자열 포함 비교다.
     """
     _system, messages = fake.calls[-1]
     return messages[-1]["content"]
@@ -315,16 +319,17 @@ def test_multi_character_names_two_characters_get_distinct_labels(
         assert response.status_code == 200
 
     turn_text = _last_turn_text(fake)
-    turn_lines = turn_text.split("\n")
-
-    bram_line = f"브람: {bram_text}"
-    nari_line = f"나리: {nari_text}"
 
     # 캐릭터 식별자(bram/nari)가 아니라 표시 이름(브람/나리)이 찍힌다 — 사람이
-    # 읽는 자리이기 때문이다. 두 줄이 각자 정확히 이 형태로 존재해야
-    # (실질적으로) 서로 다른 이름표라는 것이 증명된다.
-    assert bram_line in turn_lines, f"{bram_line!r}이 프롬프트에 없다: {turn_text!r}"
-    assert nari_line in turn_lines, f"{nari_line!r}이 프롬프트에 없다: {turn_text!r}"
+    # 읽는 자리이기 때문이다. 10-04(SAFE-05/D-10)부터는 원문 자체가 울타리
+    # 안에 있다 — "원문이 들어 있다"가 아니라 "울타리 안에 원문이 들어 있다"로
+    # 단언을 강화한다(fence_player_text가 화자 표시 뒤에 내부 줄바꿈 셋을
+    # 만들어 내므로 더 이상 단일 줄 대조가 아니라 부분 문자열 대조다).
+    bram_line = f"브람: {fence_player_text(bram_text)}"
+    nari_line = f"나리: {fence_player_text(nari_text)}"
+
+    assert bram_line in turn_text, f"{bram_line!r}이 프롬프트에 없다: {turn_text!r}"
+    assert nari_line in turn_text, f"{nari_line!r}이 프롬프트에 없다: {turn_text!r}"
 
 
 def test_multi_character_names_four_characters_all_appear(
@@ -346,11 +351,11 @@ def test_multi_character_names_four_characters_all_appear(
             assert response.status_code == 200
 
     turn_text = _last_turn_text(fake)
-    turn_lines = turn_text.split("\n")
 
+    # 10-04(SAFE-05/D-10) — 원문이 울타리 안에 있다는 것까지 확인한다.
     for _character_id, display_name, raw_text in turns:
-        expected_line = f"{display_name}: {raw_text}"
-        assert expected_line in turn_lines, f"{expected_line!r}이 프롬프트에 없다: {turn_text!r}"
+        expected_line = f"{display_name}: {fence_player_text(raw_text)}"
+        assert expected_line in turn_text, f"{expected_line!r}이 프롬프트에 없다: {turn_text!r}"
 
 
 # ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ import json
 from gptrpg.agents import providers as providers_module
 from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.context import RECENT_TURNS_LIMIT, ClockState, TurnContext
+from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.cli.main import _build_turn_context, main
 from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ActionDeclared, utc_now_iso
 from gptrpg.event_log.store import EventStore
@@ -217,15 +218,19 @@ def test_second_turn_prompt_labels_prior_turn_with_speaker_prefixes(
     _turn2_classifier_system, turn2_classifier_messages = classifier_calls[-1]
     turn2_classifier_turn_text = turn2_classifier_messages[0]["content"]
 
-    assert "플레이어: 문을 두드린다" in turn2_classifier_turn_text
+    # 10-04(SAFE-05/D-10) — 과거 플레이어 발화는 화자 표시 뒤에서 울타리로
+    # 감싸인다("원문이 들어 있다"가 아니라 "울타리 안에 원문이 들어 있다"로
+    # 단언을 강화한다). 진행자 서사("진행자: ")는 울타리로 감싸지 않는다.
+    fenced_first_turn = fence_player_text("문을 두드린다")
+    assert f"플레이어: {fenced_first_turn}" in turn2_classifier_turn_text
     # fake_provider의 스트리밍 서사 텍스트("문이 요란하게 부서진다. ...")가
-    # 진행자 화자 표시와 함께 실려 있어야 한다.
+    # 진행자 화자 표시와 함께 실려 있어야 한다 — 울타리는 안 친다.
     assert "진행자: 문이 요란하게 부서진다." in turn2_classifier_turn_text
 
     gm_calls = _calls_matching(fake_provider, "서술 담당")
     _turn2_gm_system, turn2_gm_messages = gm_calls[-1]
     turn2_gm_turn_text = turn2_gm_messages[0]["content"]
-    assert "플레이어: 문을 두드린다" in turn2_gm_turn_text
+    assert f"플레이어: {fenced_first_turn}" in turn2_gm_turn_text
 
 
 # ---------------------------------------------------------------------------
@@ -289,5 +294,7 @@ def test_turn_context_recent_turns_is_capped_at_ten(tmp_db_path):
 
     assert len(ctx.recent_turns) == RECENT_TURNS_LIMIT
     # "플레이어: " 화자 표시가 붙는다 (03-04 Task 3 deviation — 화자 표시 없는
-    # 원문 뭉치를 모델이 서사 대신 메타 분석 과제로 오인하는 문제의 수정)
-    assert ctx.recent_turns[-1] == "플레이어: turn 29"
+    # 원문 뭉치를 모델이 서사 대신 메타 분석 과제로 오인하는 문제의 수정).
+    # 10-04(SAFE-05/D-10) — 원문 자체는 울타리 안에 있다("원문이 들어 있다"가
+    # 아니라 "울타리 안에 원문이 들어 있다"로 단언을 강화한다).
+    assert ctx.recent_turns[-1] == f"플레이어: {fence_player_text('turn 29')}"

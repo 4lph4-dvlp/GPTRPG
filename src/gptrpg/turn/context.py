@@ -9,6 +9,7 @@
 """
 
 from gptrpg.agents.context import ClockState, RECENT_TURNS_LIMIT, TurnContext
+from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.entities import StatEntry
 from gptrpg.rulebooks.dungeonworld_like import EXAMPLE_SINGLE_STAT_FOE
@@ -58,6 +59,18 @@ def build_turn_context(
     대화록이라는 게 형태로 드러나므로, `build_gm_prompt`가 이어서 붙이는
     "분석하지 말고 서사만 써라" 지시문과 함께 이 오작동을 막는다.
 
+    **플레이어가 친 원문에는 울타리를 친다(SAFE-05, D-10, 10-04).**
+    `action_declared` 사건의 `raw_text`를 `agents.prompt_assembly.
+    fence_player_text`로 감싼 뒤 "화자: " 줄을 만든다 — 이번 턴에만이 아니라
+    **이후 모든 턴에 「최근 대화」로 재주입되는 과거 발화까지** 감싼다. 이번
+    문장만 감싸면 한 번 통과한 적대적 문장이 울타리 밖에서 세션 내내 반복
+    주입돼 방어가 한 턴짜리로 끝난다(D-10). `narration_appended`(「진행자: 」)
+    줄은 **울타리로 감싸지 않는다** — AI가 쓴 서사까지 감싸는 것은 D-10이
+    명시적으로 뺀 범위다(프롬프트 캐싱 순서를 다시 재약해야 하는 비용이
+    얻는 것보다 크다). `gptrpg.turn`이 `gptrpg.agents`를 import하는 것은 층
+    계약상 허용된다(`.importlinter` contract:2, `turn`이 `agents` 위 층) —
+    `turn/judgments.py`가 이미 같은 방향으로 import하고 있다.
+
     **`character_names`가 없으면 전부 "플레이어: "다 — 네 명이 함께 쓰는
     세션에서 실전 발견된 문제(2026-08-04).** CLI 경로처럼 캐릭터 이름
     사전이 없는 호출부는 예전 그대로 "플레이어: "만 쓴다(회귀 없음,
@@ -89,7 +102,7 @@ def build_turn_context(
             speaker = "플레이어"
             if character_names is not None:
                 speaker = character_names.get(event.player_id, event.player_id)
-            texts.append(f"{speaker}: {event.raw_text}")
+            texts.append(f"{speaker}: {fence_player_text(event.raw_text)}")
         elif event.event_type == "narration_appended":
             texts.append(f"진행자: {event.text}")
     recent_turns = tuple(texts[-RECENT_TURNS_LIMIT:])
