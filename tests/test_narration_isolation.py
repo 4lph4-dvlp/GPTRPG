@@ -14,7 +14,7 @@
 import dataclasses
 import inspect
 
-from gptrpg.agents import prompt_assembly
+from gptrpg.agents import narration_guard, prompt_assembly
 from gptrpg.agents.clock_judge import ClockSignal
 from gptrpg.agents.context import ClockState, NarrationFacts
 from gptrpg.agents.envelope import AgentResult
@@ -177,3 +177,96 @@ def test_chunk_sentences_behavior_is_unchanged():
 
     whitespace_only = list(chunk_sentences(["   ", "\n\n"]))
     assert whitespace_only == []
+
+
+# ---------------------------------------------------------------------------
+# SAFE-01 델타·문장 경계 — 생각 블록 방어(10-01 Task 3, TEST-03).
+# `narration_guard.inspect_sentence`를 직접 불러 판정 경계를 못박는다 —
+# `chunk_sentences`(델타 경계 담당)와 지연 버퍼의 `think_open`(문장 경계
+# 담당)이 서로 다른 구역을 지킨다는 것을 이 절이 구분해 보여준다.
+# ---------------------------------------------------------------------------
+
+
+def test_think_open_marker_split_across_two_deltas_still_merges_to_one_sentence():
+    """여는 표식이 델타 두 개에 걸쳐 쪼개져 들어오는 스트림 — `chunk_sentences`의
+    버퍼 합치기가 이 경우를 이미 흡수한다는 것을 실제로 확인한다(SAFE-01 원문).
+    """
+    result = list(
+        chunk_sentences(["문이 열린다. <thi", "nk>몰래 생각한다</think> 다시 이야기로."])
+    )
+    assert result == ["문이 열린다.", "<think>몰래 생각한다</think> 다시 이야기로."]
+
+    verdict = narration_guard.inspect_sentence(result[1], next_sentence=None, source_texts=())
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "think_block"
+
+
+def test_think_open_and_close_markers_in_different_sentences_are_caught_by_delay_buffer():
+    """여는 표식과 닫는 표식이 서로 다른 문장에 있는 스트림 — `chunk_sentences`는
+    못 잡고(각 문장이 그 자체로는 완결돼 보인다) 한 문장 지연 버퍼(`think_open`
+    상태 전달)가 잡는 경우다. 두 방어의 담당 구역이 다르다는 것을 이 시험이
+    구분해 보여준다(D-01의 핵심 근거)."""
+    sentence1 = "문이 열린다."
+    sentence2 = "<think>몰래 생각한다."
+    sentence3 = "다음 문장도 이어서 생각 중이다</think> 다시 이야기로 돌아온다."
+
+    verdict1 = narration_guard.inspect_sentence(sentence1, next_sentence=sentence2, source_texts=())
+    assert verdict1.disposition == "clean"
+
+    verdict2 = narration_guard.inspect_sentence(
+        sentence2, next_sentence=sentence3, source_texts=(), think_open=verdict1.think_open
+    )
+    assert verdict2.disposition == "blocked"
+    assert verdict2.reason == "think_block"
+    assert verdict2.think_open is True  # 이 문장 안에서 안 닫혔다
+
+    verdict3 = narration_guard.inspect_sentence(
+        sentence3, next_sentence=None, source_texts=(), think_open=verdict2.think_open
+    )
+    assert verdict3.disposition == "blocked"
+    assert verdict3.think_open is False  # 이 문장 안에서 닫혔다
+
+
+def test_think_close_marker_never_arrives_keeps_blocking_subsequent_sentences():
+    """닫는 표식이 영영 안 오는 스트림 — `think_open` 상태가 남아 이후 문장이
+    계속 걸린다."""
+    sentence1 = "<think>몰래 생각을 시작한다."
+    verdict1 = narration_guard.inspect_sentence(
+        sentence1, next_sentence="다음 문장.", source_texts=()
+    )
+    assert verdict1.disposition == "blocked"
+    assert verdict1.think_open is True
+
+    sentence2 = "이 문장은 순수한 이야기지만 아직 안 닫혔다."
+    verdict2 = narration_guard.inspect_sentence(
+        sentence2, next_sentence=None, source_texts=(), think_open=verdict1.think_open
+    )
+    assert verdict2.disposition == "blocked"
+    assert verdict2.think_open is True  # 여전히 안 닫혔다
+
+    sentence3 = "세 번째 문장도 마찬가지로 걸려야 한다."
+    verdict3 = narration_guard.inspect_sentence(
+        sentence3, next_sentence=None, source_texts=(), think_open=verdict2.think_open
+    )
+    assert verdict3.disposition == "blocked"
+
+
+def test_think_markers_are_case_insensitive():
+    """표식이 대문자·소문자 섞여 오는 경우 — 기존 정규식의 `IGNORECASE`가
+    그대로 살아 있다."""
+    sentence = "<THINK>몰래 이렇게 생각한다</Think> 그리고 이어진다."
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "think_block"
+
+
+def test_think_markers_absent_never_blocks_a_normal_sentence():
+    """표식이 하나도 없는 정상 서사는 한 문장도 안 걸린다(오탐 방지) — "생각"이라는
+    낱말이나 홑화살괄호가 섞여도 실제 `<think>` 표식이 아니면 통과한다."""
+    for sentence in (
+        "문이 요란하게 부서진다.",
+        "그는 생각에 잠겼다.",
+        "이것은 <생각> 아니다.",
+    ):
+        verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+        assert verdict.disposition == "clean", sentence
