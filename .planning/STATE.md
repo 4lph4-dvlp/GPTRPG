@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 10
-current_phase_name: ai
-status: verifying
+current_phase: 11
+current_phase_name: 룰북 표현 어휘 확장
+status: planning
 stopped_at: Completed 10-07-PLAN.md (WR-01/WR-02/WR-03 code review gap closure)
-last_updated: "2026-08-14T02:17:09.417Z"
+last_updated: "2026-08-14T02:22:48.523Z"
 last_activity: 2026-08-14
-last_activity_desc: Phase 10 execution started
+last_activity_desc: Phase 10 complete (7/7 plans, verified 6/6)
 progress:
   total_phases: 11
   completed_phases: 3
@@ -30,10 +30,14 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 10 (ai) — EXECUTING
-Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-08-14 — Phase 10 execution started
+Phase: 11 — 룰북 표현 어휘 확장
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-14 — Phase 10 complete, transitioned to Phase 11
+
+> 라우팅 정정: `phase.complete`가 12.1을 다음으로 골랐으나 12.1은 ROADMAP상 **Phase 11·12에 의존**한다
+> (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
+> 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
 
 Progress: [██████████] 100%
 
@@ -41,7 +45,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 26 (M0 누적)
+- Total plans completed: 33 (M0 누적)
 - Average duration: -
 - Total execution time: 0.0 hours (v1.1 기준 — 아직 실행 없음)
 
@@ -55,6 +59,7 @@ Progress: [██████████] 100%
 | 04 (M0) | 6 | - | - |
 | 05 (M0) | 4/6, 보류 | - | - |
 | 08 | 4 | - | - |
+| 10 | 7 | - | - |
 
 **Recent Trend:**
 
