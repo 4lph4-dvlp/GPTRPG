@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 10
 current_phase_name: ai
-status: executing
-stopped_at: Completed 10-03-PLAN.md
-last_updated: "2026-08-14T00:27:05.374Z"
+status: verifying
+stopped_at: Completed 10-04-PLAN.md (checkpoint answered, SUMMARY written)
+last_updated: "2026-08-14T01:38:57.349Z"
 last_activity: 2026-08-14
 last_activity_desc: Phase 10 execution started
 progress:
   total_phases: 11
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 13
-  completed_plans: 12
-  percent: 18
+  completed_plans: 13
+  percent: 27
 ---
 
 # Project State
@@ -32,10 +32,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 10 (ai) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-14 — Phase 10 execution started
 
-Progress: [█████████░] 92%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -93,6 +93,7 @@ Progress: [█████████░] 92%
 | Phase 10 P02 | ~20min | 3 tasks | 3 files |
 | Phase 10-ai P05 | ~35min | 3 tasks | 10 files |
 | Phase 10 P03 | ~50min | 2 tasks | 7 files |
+| Phase 10-ai P04 | ~40min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -177,6 +178,10 @@ Progress: [█████████░] 92%
 - [Phase ?]: 10-05: QUAL-08 남은 대상(추론 노출 형태의 어댑터별 차이)을 test_providers.py에 회귀 시험으로 고정 — anthropic/openai는 구조적 배제, nim/openrouter는 openai에 위임, gemini는 정규식 의존(구조적으로 못박을 수 없다는 한계를 도크스트링에 명시)
 - [Phase ?]: 10-03: 재생성은 기존 MAX_ATTEMPTS 재시도 루프 완전히 밖의 독립된 단발 호출이다(내부 재시도 없음, system 재사용) — 한 턴 제공자 스트림 호출 상한 3회(정상 최대 2 + 재생성 1)로 고정, RESEARCH.md Pitfall 2(03-04 22분 먹통 사고) 재발 방지
 - [Phase ?]: 10-03: 재생성 자신의 차단 안내(NOTICE_FILTERED)는 화면에 안 내고 D-08의 NOTICE_GAVE_UP 하나로 합친다 — safety_flagged 사건이 정확히 두 건(첫 차단+최종 차단)으로 유지되며, web/routes_actions.py·cli/turn_flow.py는 무변경으로 기존 narration_failed 경로를 그대로 재사용한다
+- [Phase ?]: 10-04: fence_player_text()가 turn/context.py의 action_declared 자리 한 곳에서 최근 대화 재주입분까지 감싸 D-10을 지킨다 — 표식은 정규화 후 12자 이상으로 잡아 10-02의 원문 겹침 문턱과 맞물린다
+- [Phase ?]: 10-04 Task 3 실측(사람 판정): direct_command/role_swap 2회씩은 분류기 흡수(10-05)로 진행자에 도달 못 함, in_story_hiding/delimiter_escape 각 1회 도달 — 역할 파괴 0건이나 둘 다 제재 없이 통과. 울타리 자체의 실측 근거는 이 2건뿐
+- [Phase ?]: 10-04: 진행자에게 도달한 입력이 제재 없이 서사로 무마되는 문제를 새 요구사항으로 승격 — .planning/todos/pending/2026-08-14-game-breaking-input-sanction.md
+- [Phase ?]: 10-04 실측 중 발견(범위 밖): nvidia/nemotron-3-ultra-550b-a55b가 받침 복잡한 한글 음절을 못 뱉어 U+FFFD로 저장됨 — master_gm을 nemotron-3-super-120b-a12b로 교체(.gptrpg/ 로컬 설정, git 미추적). U+FFFD 감지는 10-06 담당
 
 ### Pending Todos
 
@@ -232,8 +237,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-14T00:27:05.339Z
-Stopped at: Completed 10-03-PLAN.md
+Last session: 2026-08-14T01:38:57.316Z
+Stopped at: Completed 10-04-PLAN.md (checkpoint answered, SUMMARY written)
 Traceability 갱신 완료
 Resume file: None
 

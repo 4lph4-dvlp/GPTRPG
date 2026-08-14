@@ -305,7 +305,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 10-02-PLAN.md — 원문 겹침 대조와 캐릭터 이탈 신호(자동 차단 / 기록만 구분)
-- [ ] 10-04-PLAN.md — 플레이어 문장 구분자 울타리와 계열별 적대적 입력 매트릭스
+- [x] 10-04-PLAN.md — 플레이어 문장 구분자 울타리와 계열별 적대적 입력 매트릭스
 - [x] 10-05-PLAN.md — 목록 밖 무브 흡수와 제공자 어댑터 전제의 코드 강제
 
 **Wave 3** *(blocked on Wave 2 completion)*
