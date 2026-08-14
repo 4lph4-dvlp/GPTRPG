@@ -13,6 +13,17 @@
 남긴다. `inspect_sentence()`가 이 세 갈래를 함께 담는 반환 모양
 (`GuardVerdict`)을 갖고 있는 이유가 그것이다 — 갈래가 늘어도 호출부
 (`master_gm.narrate`)의 소비 방식은 안 바뀐다.
+
+10-06이 네 번째 갈래를 더한다 — **깨진 글자**(SAFE-01, 2026-08-14 10-04
+실측 중 발견). 앞의 셋은 안전 갈래(지시문·시나리오 원문 유출, 캐릭터
+이탈)고, 이것만 **품질 갈래**다 — 지시문도 원문도 새지 않는다. 그래서
+`blocked`가 아니라 `flagged`다: 받침 복잡한 한글 음절을 못 뱉는 모델은
+한 세션 안의 거의 모든 문장에서 U+FFFD를 흘리므로, 차단했다면 10-03의
+재생성·포기 경로를 타고 게임이 통째로 멈췄을 것이다. 실제로 일어난 실패는
+「깨진 글자가 화면에 나온 것」이 아니라 **「아무도 모른 채 사건 기록에
+영구 저장된 것」**이었다 — 이 갈래는 그 침묵만 없앤다. 탐지는 다른 세
+갈래와 마찬가지로 내용 무관이다: `REPLACEMENT_CHAR`가 문장에 있는지만
+본다. 문구 목록도 모델 이름 분기도 없다.
 """
 
 import re
@@ -33,6 +44,16 @@ NOTICE_FILTERED = "이야기 한 부분을 걸렀어요. 이어서 씁니다."
 NOTICE_GAVE_UP = "이야기를 끝까지 쓰지 못했어요."
 """두 번째 시도까지 걸렸을 때 쓸 종료 안내 문구(D-08). 이 계획(10-01)은 상수만
 정의한다 — 재생성 시도(D-06/D-07)를 실제로 잇는 것은 10-03이다."""
+
+REPLACEMENT_CHAR = "�"
+"""U+FFFD(대체문자) — 디코딩이 원래 바이트를 복원하지 못했다는 표식이다.
+2026-08-14 10-04 실측 도중 `nvidia/nemotron-3-ultra-550b-a55b`가 받침 복잡한
+한글 음절(팡·낡·꽉·꺾·찔·녘·섰)을 못 뱉어, 네트워크 원시 바이트에 이미
+`EF BF BD`가 들어온 채로(비스트리밍으로 받아도 같다) 사건 기록에 영구
+저장된 사고가 있었다. **이 갈래는 복구를 시도하지 않는다** — U+FFFD가
+나왔다는 것은 원래 바이트가 이미 사라졌다는 뜻이라 무엇이었는지 알 방법이
+없다. 추측해서 채우면 없는 사실을 지어내는 것이므로, 이 갈래가 하는 일은
+「있었다는 사실을 기록하는 것」뿐이다."""
 
 STDERR_EXCERPT_CHARS = 40
 """운영자 표준오류에 찍을 발췌 길이 상한 — 파이썬 `str` 코드포인트 개수
@@ -175,6 +196,13 @@ def strip_think_blocks(text: str) -> str:
     return THINK_BLOCK.sub("", text)
 
 
+def count_corrupted_glyphs(text: str) -> int:
+    """`text` 안의 `REPLACEMENT_CHAR` 개수를 센다 — 함수로 빼는 이유는
+    시험이 이 성질(내용 무관, 개수만 본다)을 `inspect_sentence` 전체를
+    거치지 않고 직접 겨눌 수 있게 하기 위해서다."""
+    return text.count(REPLACEMENT_CHAR)
+
+
 def inspect_sentence(
     sentence: str,
     *,
@@ -182,8 +210,8 @@ def inspect_sentence(
     source_texts: tuple[str, ...],
     think_open: bool = False,
 ) -> GuardVerdict:
-    """서사 검사 진입점 — 세 갈래(생각 블록/원문 겹침/캐릭터 이탈)를 모두
-    채운다(10-02).
+    """서사 검사 진입점 — 네 갈래(생각 블록/원문 겹침/캐릭터 이탈/깨진 글자)를
+    모두 채운다(10-02·10-06).
 
     `source_texts`는 "우리가 프롬프트에 실제로 넣은 문자열"이다 —
     `find_source_overlap`이 이 값을 원문 겹침 대조 소스로 그대로 쓴다.
@@ -208,7 +236,14 @@ def inspect_sentence(
        걸린 부분의 길이다. **이 갈래는 절대 `blocked`를 돌려주지 않는다**
        (D-03) — 오탐이어도 통과시키는 편의 비용이 멀쩡한 서사를 잘못 자르는
        비용보다 낮다.
-    5. 넷 다 아니면 `clean` — 문장 그대로 내보낸다.
+    5. 캐릭터 이탈도 없으면 `count_corrupted_glyphs(sentence)`를 본다
+       (10-06, SAFE-01) — 하나라도 있으면 `flagged`, `reason="corrupted_glyph"`,
+       `text`는 **원문 그대로**, `matched_len`은 깨진 글자 개수다. 이 갈래도
+       **절대 `blocked`를 돌려주지 않는다** — 깨진 글자는 안전 유출이 아니라
+       품질 결함이다(모듈 도크스트링 참조). 캐릭터 이탈이 앞선 갈래이므로
+       두 사유가 동시에 걸리는 문장은 `character_break`가 이긴다(먼저 온
+       갈래가 이긴다) — 두 사유를 합치는 칸을 새로 만들지 않는다.
+    6. 다섯 다 아니면 `clean` — 문장 그대로 내보낸다.
 
     **`next_sentence`를 직접 들여다보지 않는 이유(생각 블록 갈래):** "여는
     표식이 문장 1에, 닫는 표식이 문장 2에 걸쳐 있어도 잡힌다"(D-01)는
@@ -269,6 +304,17 @@ def inspect_sentence(
                 subject_len=subject_len,
                 think_open=False,
             )
+
+    corrupted_count = count_corrupted_glyphs(sentence)
+    if corrupted_count > 0:
+        return GuardVerdict(
+            disposition="flagged",
+            reason="corrupted_glyph",
+            text=sentence,
+            matched_len=corrupted_count,
+            subject_len=subject_len,
+            think_open=False,
+        )
 
     return GuardVerdict(
         disposition="clean",

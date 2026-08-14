@@ -270,7 +270,16 @@ class SafetyFlagged(EventEnvelope):
 
     event_type: Literal["safety_flagged"]
     source: Literal["narration", "classifier"]
-    reason: Literal["think_block", "source_overlap", "character_break", "unknown_move"]
+    reason: Literal[
+        "think_block", "source_overlap", "character_break", "unknown_move", "corrupted_glyph"
+    ]
+    # `corrupted_glyph`(10-06, SAFE-01)를 더해도 EVENT_SCHEMA_VERSION은 6에서
+    # 안 올린다 — ① `reason`은 쓰기 검증에서만 쓰이고(session_actor/actor.py의
+    # _VALID_SAFETY_FLAG_REASONS, 읽기 경로는 안 봄) ② rules_core.reducer.py의
+    # `safety_flagged` 분기는 `reason`을 아예 안 보고 `last_seq`만 올린다.
+    # 따라서 이미 쓰인 기록의 해석이 한 글자도 안 바뀐다 — 판을 올리면 없는
+    # 비호환을 있다고 알리는 잘못된 신호가 된다(10-06-PLAN.md 설계 판단 3,
+    # tests/test_event_schema_migration.py가 못박는다).
     disposition: Literal["blocked", "flagged"]
     matched_len: int = 0
     subject_len: int = 0

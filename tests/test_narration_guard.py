@@ -429,6 +429,88 @@ class _LeakingProvider:
         self._last_result = result
 
 
+# ---------------------------------------------------------------------------
+# 깨진 글자(U+FFFD) — 통과시키되 기록만 한다(10-06, SAFE-01)
+# ---------------------------------------------------------------------------
+
+
+def test_corrupted_glyph_is_flagged_not_blocked_and_keeps_original_text():
+    sentence = f"담로의 손이 {narration_guard.REPLACEMENT_CHAR * 2} 굳었다"
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "flagged"
+    assert verdict.reason == "corrupted_glyph"
+    assert verdict.text == sentence
+    assert verdict.matched_len == 2
+
+
+def test_count_corrupted_glyphs_counts_replacement_char_only():
+    assert narration_guard.count_corrupted_glyphs("깨끗한 문장") == 0
+    assert narration_guard.count_corrupted_glyphs(narration_guard.REPLACEMENT_CHAR * 3) == 3
+    assert (
+        narration_guard.count_corrupted_glyphs(f"팡{narration_guard.REPLACEMENT_CHAR}낡")
+        == 1
+    )
+
+
+def test_clean_sentence_without_replacement_char_stays_clean():
+    sentence = "부서진 등불이 흔들리며 그림자를 길게 늘어뜨린다."
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "clean"
+    assert verdict.text == sentence
+
+
+def test_already_blocked_think_block_sentence_with_corrupted_glyph_stays_blocked():
+    """생각 블록으로 이미 `blocked`인 문장은 깨진 글자가 섞여 있어도 사유가
+    바뀌지 않는다 — 판정 순서상 생각 블록이 깨진 글자 갈래보다 먼저다."""
+    sentence = f"<think>몰래 생각한다{narration_guard.REPLACEMENT_CHAR}</think> 이어진다."
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "think_block"
+
+
+def test_already_blocked_source_overlap_sentence_with_corrupted_glyph_stays_blocked():
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    twelve_char_slice = normalized_source[5:17]
+    sentence = f"{twelve_char_slice} {narration_guard.REPLACEMENT_CHAR}"
+
+    verdict = narration_guard.inspect_sentence(
+        sentence, next_sentence=None, source_texts=(permanent,)
+    )
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "source_overlap"
+
+
+def test_character_break_wins_over_corrupted_glyph_when_both_match():
+    """판정 순서상 캐릭터 이탈이 깨진 글자보다 먼저다(먼저 온 갈래가 이긴다)
+    — 두 사유를 합치는 칸을 새로 만들지 않는다."""
+    sentence = f"저는 인공지능입니다 {narration_guard.REPLACEMENT_CHAR}"
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "flagged"
+    assert verdict.reason == "character_break"
+
+
+def test_sentence_of_only_corrupted_glyphs_does_not_raise():
+    sentence = narration_guard.REPLACEMENT_CHAR * 3
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "flagged"
+    assert verdict.reason == "corrupted_glyph"
+    assert verdict.matched_len == 3
+
+
+def test_corrupted_glyph_branch_never_produces_blocked():
+    """`character_break`가 `blocked`를 절대 안 만든다는 회귀 시험
+    (`test_character_break_never_produces_blocked_for_any_pattern`)과 짝을
+    이루는 시험 — 깨진 글자 갈래도 어떤 개수·문맥에서도 `blocked`를 돌려주는
+    코드 경로가 존재하지 않는다."""
+    for count in (1, 2, 10, 37):
+        sentence = f"평범한 서사 문장이다 {narration_guard.REPLACEMENT_CHAR * count} 이어진다"
+        verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+        assert verdict.disposition == "flagged", sentence
+        assert verdict.disposition != "blocked"
+        assert verdict.reason == "corrupted_glyph"
+
+
 def test_narrate_blocks_narration_that_quotes_permanent_block_verbatim():
     """영구 고정 블록 구절을 그대로 옮긴 문장은 걸리고, `NarrationChunk`가
     `reason="source_overlap"`과 0보다 큰 `matched_len`을 싣고 나온다 —

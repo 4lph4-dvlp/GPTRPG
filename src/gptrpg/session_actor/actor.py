@@ -212,7 +212,7 @@ Command = (
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
 _VALID_SAFETY_FLAG_SOURCES = frozenset({"narration", "classifier"})
 _VALID_SAFETY_FLAG_REASONS = frozenset(
-    {"think_block", "source_overlap", "character_break", "unknown_move"}
+    {"think_block", "source_overlap", "character_break", "unknown_move", "corrupted_glyph"}
 )
 _VALID_SAFETY_FLAG_DISPOSITIONS = frozenset({"blocked", "flagged"})
 
