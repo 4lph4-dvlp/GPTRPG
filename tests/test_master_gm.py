@@ -93,6 +93,7 @@ class _TwoSentenceStreamProvider:
 
     def __init__(self) -> None:
         self._last_result: AgentResult | None = None
+        self.stream_call_count = 0
 
     def list_models(self) -> list[str]:
         return ["stub-model"]
@@ -101,6 +102,7 @@ class _TwoSentenceStreamProvider:
         raise NotImplementedError("이 이중체는 stream()만 시험한다")
 
     def stream(self, *, model, system, messages, max_tokens, timeout_s) -> Iterator[str]:
+        self.stream_call_count += 1
         yield "문이 요란하게 부서진다. "
         yield "안에서 서늘한 바람이 흘러나온다."
         self._last_result = AgentResult(
@@ -517,3 +519,157 @@ def test_narrate_through_real_delegating_nim_provider_keeps_emitted_chunk_and_ma
 
     assert _texts(sentences) == ["문이 삐걱거리며 열린다."]
     assert provider.last_result().ok is False
+
+
+# ---------------------------------------------------------------------------
+# 10-03: 걸린 문장을 만나면 그 자리에서 재생성을 한 번 시도한다(D-06/D-07,
+# SAFE-04). 재시도(MAX_ATTEMPTS)와는 다른 자리에서 일어나므로, 정상 경로에서는
+# provider.stream() 호출이 여전히 정확히 1회다.
+# ---------------------------------------------------------------------------
+
+
+def test_narrate_clean_stream_calls_provider_stream_exactly_once() -> None:
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = _TwoSentenceStreamProvider()
+    list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+    assert provider.stream_call_count == 1
+
+
+class _BlocksOnceThenCleanProvider:
+    """`narrate()`의 재생성 경로 시험용 — 첫 호출은 걸리는 문장(생각 블록)을
+    내고, 두 번째 호출(재생성)은 깨끗한 문장을 낸다. `messages`(재생성
+    프롬프트)는 안 들여다본다 — `stream_calls`에 `(system, messages)` 짝을
+    그대로 쌓아 뒀다가 시험이 직접 대조한다."""
+
+    name = "blocks-once-then-clean"
+
+    def __init__(self) -> None:
+        self.stream_calls: list[tuple[list[dict], list[dict]]] = []
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        raise NotImplementedError("이 이중체는 stream()만 시험한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s) -> Iterator[str]:
+        self.stream_calls.append((system, messages))
+        if len(self.stream_calls) == 1:
+            yield "문이 열린다. <think>이건 안돼.</think>"
+        else:
+            yield "안전한 다음 문장이다."
+        self._last_result = AgentResult(
+            ok=True, value="", elapsed_ms=5, prompt_tokens=3, completion_tokens=3
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_narrate_regenerates_once_after_a_blocked_sentence_and_calls_stream_twice() -> None:
+    """차단 1회 시나리오 — provider.stream() 호출 횟수가 2다(정상 1 + 재생성 1)."""
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = _BlocksOnceThenCleanProvider()
+    chunks = list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+
+    assert len(provider.stream_calls) == 2
+    assert [chunk.disposition for chunk in chunks] == ["clean", "blocked", "clean"]
+    assert chunks[0].text == "문이 열린다."
+    assert chunks[1].text == "이야기 한 부분을 걸렀어요. 이어서 씁니다."
+    assert chunks[2].text == "안전한 다음 문장이다."
+    assert provider.last_result().ok is True
+
+
+def test_narrate_regeneration_prompt_carries_avoid_text_and_written_so_far() -> None:
+    """재생성 프롬프트의 messages에는 걸린 문장 원문과 지금까지 쓴 문장이
+    실려 있다(D-06/D-07) — 이 원문이 가는 곳은 모델(messages)이지 화면이
+    아니다."""
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = _BlocksOnceThenCleanProvider()
+    list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+
+    _first_system, first_messages = provider.stream_calls[0]
+    _regen_system, regen_messages = provider.stream_calls[1]
+    first_turn_text = first_messages[0]["content"]
+    regen_turn_text = regen_messages[0]["content"]
+
+    assert "이건 안돼" not in first_turn_text
+    assert "이건 안돼" in regen_turn_text
+    assert "문이 열린다." in regen_turn_text
+
+
+def test_narrate_regeneration_reuses_identical_system_object() -> None:
+    """첫 호출과 재생성 호출의 system 인자가 같은 객체다(캐시 유지, D-02②)."""
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = _BlocksOnceThenCleanProvider()
+    list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+
+    first_system, _ = provider.stream_calls[0]
+    regen_system, _ = provider.stream_calls[1]
+    assert first_system is regen_system

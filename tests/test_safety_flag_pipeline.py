@@ -35,6 +35,11 @@ _THINK_SPANS_TWO_SENTENCES = (
 
 _CLEAN_STREAM = "문이 요란하게 부서진다. 안에서 서늘한 바람이 흘러나온다."
 
+_REGEN_CLEAN_TEXT = "고요한 정적 속에서 이야기가 부드럽게 이어진다."
+"""재생성(D-06, 10-03) 호출이 돌려주는 깨끗한 이어쓰기 — 첫 스트림이 걸린
+뒤 `narrate()`가 자동으로 한 번 다시 부르는 자리를 흉내낸다. 걸린 원문
+(`_LEAK_MARKERS`)과 겹치는 조각이 하나도 없다."""
+
 _LEAK_MARKERS = ("<think>", "</think>", "몰래", "생각한다", "생각 중이다")
 """걸린 원문에서만 나오는 조각들 — 화면에 나간 어떤 문구에도 있으면 안 된다."""
 
@@ -83,16 +88,59 @@ def _events_of_type(client: TestClient, event_type: str, session_id: str = SESSI
     return [event for event in _events(client, session_id) if event["event_type"] == event_type]
 
 
-def _run_web_turn(web_client_with_fake_provider, *, stream_text: str):
+class _CallVaryingStreamProvider:
+    """`stream()` 호출 횟수에 따라 다른 텍스트를 내는 대역(10-03) — 첫 호출은
+    `first_text`(걸릴 수 있는 원문), 두 번째 이후는 `regen_text`(깨끗한
+    이어쓰기)를 낸다. `narrate()`가 걸린 문장을 만나면 그 자리에서 재생성을
+    한 번 호출하는 것을 흉내낸다 — `messages`(재생성 지시가 실린 프롬프트)
+    자체는 안 들여다본다, 호출 순서만 본다. `conftest.FakeProvider`와 같은
+    단어 단위 스트리밍·`note_result()` 지원 모양이다."""
+
+    name = "fake-call-varying"
+
+    def __init__(self, *, first_text: str, regen_text: str = _REGEN_CLEAN_TEXT) -> None:
+        self._first_text = first_text
+        self._regen_text = regen_text
+        self._stream_call_count = 0
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        raise NotImplementedError("이 이중체는 stream()만 시험한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        self._stream_call_count += 1
+        text = self._first_text if self._stream_call_count == 1 else self._regen_text
+        for word in text.split(" "):
+            if word:
+                yield word + " "
+        self._last_result = AgentResult(
+            ok=True, value=text, elapsed_ms=5, prompt_tokens=2, completion_tokens=2
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def _run_web_turn(web_client_with_fake_provider, *, stream_text: str | None = None, gm=None):
     """선언 -> 캐릭터 선택 -> 확인까지 실제 경로로 밀어붙여 서사를 만든다.
 
     `web_client_with_fake_provider` 픽스처가 만드는 `TestClient`는 `with`
     문맥이 열려 있는 동안만 유효하다 — 호출자가 그 문맥 안에서 이 함수를
-    부른다.
+    부른다. `gm`을 직접 주면(재생성이 걸리는 시나리오) 그 대역을 그대로
+    쓰고, 아니면 `stream_text`로 고정 응답인 `FakeProvider`를 만든다(깨끗한
+    스트림 시나리오 — 재생성 자체가 안 일어나므로 고정 응답으로 충분하다).
     """
     classifier = FakeProvider(complete_value=_CANDIDATE_JSON)
-    gm = FakeProvider(stream_text=stream_text)
-    client = web_client_with_fake_provider(action_classifier=classifier, master_gm=gm)
+    gm_provider = gm if gm is not None else FakeProvider(stream_text=stream_text)
+    client = web_client_with_fake_provider(action_classifier=classifier, master_gm=gm_provider)
     return client
 
 
@@ -118,7 +166,10 @@ def _declare_and_confirm(client: TestClient) -> dict:
 def test_web_think_block_within_one_sentence_is_filtered_not_leaked(
     web_client_with_fake_provider,
 ) -> None:
-    with _run_web_turn(web_client_with_fake_provider, stream_text=_THINK_IN_ONE_SENTENCE) as client:
+    """10-03부터 걸린 문장은 그 자리에서 재생성을 한 번 시도한다(D-06) — 이
+    대역은 재생성 호출에서 깨끗한 문장을 내므로 턴이 끝까지 이어진다."""
+    gm = _CallVaryingStreamProvider(first_text=_THINK_IN_ONE_SENTENCE)
+    with _run_web_turn(web_client_with_fake_provider, gm=gm) as client:
         body = _declare_and_confirm(client)
         narrations = _events_of_type(client, "narration_appended")
         flags = _events_of_type(client, "safety_flagged")
@@ -128,9 +179,11 @@ def test_web_think_block_within_one_sentence_is_filtered_not_leaked(
     for marker in _LEAK_MARKERS:
         assert marker not in joined, f"'{marker}'가 화면에 나간 서사에 남아 있다"
 
-    assert len(narrations) == 2
+    assert len(narrations) == 3
     assert narrations[0]["text"] == "문이 열린다."
     assert narrations[1]["text"] == NOTICE_FILTERED
+    assert narrations[2]["text"] == _REGEN_CLEAN_TEXT
+    assert gm._stream_call_count == 2
 
     assert len(flags) == 1
     assert flags[0]["source"] == "narration"
@@ -150,9 +203,10 @@ def test_web_think_block_within_one_sentence_is_filtered_not_leaked(
 def test_web_think_block_spanning_two_sentences_is_filtered_not_leaked(
     web_client_with_fake_provider,
 ) -> None:
-    with _run_web_turn(
-        web_client_with_fake_provider, stream_text=_THINK_SPANS_TWO_SENTENCES
-    ) as client:
+    """10-03부터 걸린 문장은 재생성을 한 번 시도한다(D-06) — 이 대역은
+    재생성 호출에서 깨끗한 문장을 내므로 턴이 끝까지 이어진다."""
+    gm = _CallVaryingStreamProvider(first_text=_THINK_SPANS_TWO_SENTENCES)
+    with _run_web_turn(web_client_with_fake_provider, gm=gm) as client:
         body = _declare_and_confirm(client)
         narrations = _events_of_type(client, "narration_appended")
         flags = _events_of_type(client, "safety_flagged")
@@ -174,7 +228,8 @@ def test_web_think_block_spanning_two_sentences_is_filtered_not_leaked(
 def test_web_turn_with_safety_flag_replays_without_unknown_event_type(
     web_client_with_fake_provider,
 ) -> None:
-    with _run_web_turn(web_client_with_fake_provider, stream_text=_THINK_IN_ONE_SENTENCE) as client:
+    gm = _CallVaryingStreamProvider(first_text=_THINK_IN_ONE_SENTENCE)
+    with _run_web_turn(web_client_with_fake_provider, gm=gm) as client:
         _declare_and_confirm(client)
         # `GET /events`가 매번 rebuild_state_from_events로 다시 접는다 — 이미
         # `_events()`가 200으로 성공했다는 사실 자체가 UnknownEventType이
@@ -225,13 +280,18 @@ class _StreamTextProvider:
     `conftest.FakeProvider`와 같은 방식(단어 단위 스트리밍)이지만, CLI는
     `agents.providers.PROVIDER_FACTORIES`에 이름으로 등록해 넣는 방식이라
     이 파일 안에 따로 둔다(`tests/test_turn_flow_failure.py`의 관례와 같음).
-    """
+
+    `regen_text`(10-03)는 두 번째 이후 `stream()` 호출에서 낸다 — `narrate()`가
+    걸린 문장을 만나 재생성을 한 번 시도하는 자리를 흉내낸다. 기본값은
+    `text`와 같다(재생성이 안 일어나는 시나리오는 아무 영향이 없다)."""
 
     name = "fake-think-stream"
 
-    def __init__(self, *, complete_value: str, text: str) -> None:
+    def __init__(self, *, complete_value: str, text: str, regen_text: str | None = None) -> None:
         self._complete_value = complete_value
         self._text = text
+        self._regen_text = regen_text if regen_text is not None else text
+        self._stream_call_count = 0
         self._last_result: AgentResult | None = None
 
     def list_models(self) -> list[str]:
@@ -249,11 +309,13 @@ class _StreamTextProvider:
         return result
 
     def stream(self, *, model, system, messages, max_tokens, timeout_s):
-        for word in self._text.split(" "):
+        self._stream_call_count += 1
+        text = self._text if self._stream_call_count == 1 else self._regen_text
+        for word in text.split(" "):
             if word:
                 yield word + " "
         self._last_result = AgentResult(
-            ok=True, value=self._text, elapsed_ms=5, prompt_tokens=2, completion_tokens=2
+            ok=True, value=text, elapsed_ms=5, prompt_tokens=2, completion_tokens=2
         )
 
     def last_result(self) -> AgentResult:
@@ -304,8 +366,12 @@ def _run_turn(db: str, session: str, text: str, *, monkeypatch) -> int:
 def test_cli_think_block_within_one_sentence_is_filtered_not_leaked(
     tmp_db_path, monkeypatch, capsys
 ) -> None:
+    """10-03부터 걸린 문장은 재생성을 한 번 시도한다(D-06) — `regen_text`가
+    깨끗하므로 턴이 끝까지 이어진다(exit 0)."""
     db = str(tmp_db_path)
-    provider = _StreamTextProvider(complete_value=_CANDIDATE_JSON, text=_THINK_IN_ONE_SENTENCE)
+    provider = _StreamTextProvider(
+        complete_value=_CANDIDATE_JSON, text=_THINK_IN_ONE_SENTENCE, regen_text=_REGEN_CLEAN_TEXT
+    )
     _install_fake_provider(monkeypatch, provider)
 
     exit_code = _run_turn(db, "cli-s1", "문을 두드린다", monkeypatch=monkeypatch)
@@ -319,9 +385,11 @@ def test_cli_think_block_within_one_sentence_is_filtered_not_leaked(
     narration_events = [e for e in events if e.event_type == "narration_appended"]
     flag_events = [e for e in events if e.event_type == "safety_flagged"]
 
-    assert len(narration_events) == 2
+    assert len(narration_events) == 3
     assert narration_events[0].text == "문이 열린다."
     assert narration_events[1].text == NOTICE_FILTERED
+    assert narration_events[2].text == _REGEN_CLEAN_TEXT
+    assert provider._stream_call_count == 2
 
     assert len(flag_events) == 1
     assert flag_events[0].source == "narration"

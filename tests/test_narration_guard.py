@@ -392,7 +392,13 @@ def test_narrate_does_not_block_narration_mentioning_scene_entity_and_character_
 
 class _LeakingProvider:
     """영구 고정 블록의 한 구절을 그대로 옮긴 문장을 낸다(세션1에서 실제로
-    난 "진행자 지시문 전체가 서사로 유출"의 축소판)."""
+    난 "진행자 지시문 전체가 서사로 유출"의 축소판).
+
+    `messages`(재생성 프롬프트)와 무관하게 매번 같은 세 문장을 낸다 — 이
+    이중체가 부르는 쪽에 무엇을 넣든 계속 같은 자리에서 걸린다는 뜻이다
+    (10-03, `narrate()`가 재생성을 한 번 시도했다가 또 걸리는 경로를
+    확인하는 데 쓴다). `note_result()`도 구현한다 — 10-03부터 두 번 다
+    걸린 턴은 `narrate()`가 이 메서드로 실패 껍데기를 남긴다."""
 
     name = "leaking-narration"
 
@@ -419,11 +425,20 @@ class _LeakingProvider:
             raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
         return self._last_result
 
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
 
 def test_narrate_blocks_narration_that_quotes_permanent_block_verbatim():
     """영구 고정 블록 구절을 그대로 옮긴 문장은 걸리고, `NarrationChunk`가
     `reason="source_overlap"`과 0보다 큰 `matched_len`을 싣고 나온다 —
-    호출부가 사건에 담을 값이 실제로 채워진다는 뜻이다."""
+    호출부가 사건에 담을 값이 실제로 채워진다는 뜻이다.
+
+    10-03부터 `narrate()`는 걸린 문장을 만나면 그 자리에서 스트림 소비를
+    멈추고 재생성을 한 번 시도한다(D-06). `_LeakingProvider`는 재생성
+    프롬프트가 와도 매번 같은 세 문장을 내므로, 재생성도 같은 자리에서
+    다시 걸린다 — 그래서 `provider.stream()`이 두 번(원래 스트림 + 재생성)
+    불리고, 두 번 다 첫 문장은 clean, 둘째 문장에서 걸려 멈춘다."""
     system, _messages = prompt_assembly.build_gm_prompt(
         rulebook_display_name=_RULEBOOK_DISPLAY_NAME, facts=_real_narration_facts()
     )
@@ -445,10 +460,11 @@ def test_narrate_blocks_narration_that_quotes_permanent_block_verbatim():
             rulebook_display_name=_RULEBOOK_DISPLAY_NAME,
         )
     )
-    assert len(chunks) == 3
-    assert chunks[0].disposition == "clean"
-    assert chunks[1].disposition == "blocked"
+    assert [chunk.disposition for chunk in chunks] == ["clean", "blocked", "clean", "blocked"]
     assert chunks[1].reason == "source_overlap"
     assert chunks[1].matched_len > 0
     assert chunks[1].text == narration_guard.NOTICE_FILTERED
-    assert chunks[2].disposition == "clean"
+    assert chunks[3].reason == "source_overlap"
+    assert chunks[3].matched_len > 0
+    assert chunks[3].text == narration_guard.NOTICE_FILTERED
+    assert provider.last_result().ok is False

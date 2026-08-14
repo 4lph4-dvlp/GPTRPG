@@ -235,6 +235,8 @@ def build_gm_prompt(
     *,
     rulebook_display_name: str,
     facts: NarrationFacts,
+    avoid_text: str | None = None,
+    written_so_far: tuple[str, ...] = (),
 ) -> tuple[list[dict], list[dict]]:
     """master_gm 프롬프트를 조립한다. `(system, messages)` 짝을 돌려준다.
 
@@ -252,6 +254,24 @@ def build_gm_prompt(
     이 함수의 몫이다(03-04 Task 3 라이브 검증에서 이 지시가 없어 모델이
     "The user seems to be trying multiple actions..." 식 메타 분석·원문
     되풀이를 내놓은 사례가 나왔다).
+
+    **`avoid_text`·`written_so_far`는 재생성(D-06/D-07, 10-03) 전용이고 둘
+    다 `turn`(messages)에만 들어간다.** `written_so_far`가 비어 있지
+    않으면 지금까지 실제로 나간 문장들을 이어 붙이고 그 뒤를 이어서 쓰라는
+    지시를 덧붙인다(처음부터 다시 쓰지 말라는 뜻을 명시한다) — 이것이
+    D-06이다. `avoid_text`가 있으면 방금 걸린 문장 원문을 보여주며 그런
+    표현을 쓰지 말라고 덧붙인다 — 이것이 D-07이다. **`system`(영구·세션
+    두 조각)은 이 둘과 무관하게 한 글자도 안 바뀐다** — 캐싱 순서 규약
+    (영구 고정 → 세션 고정 → 턴마다 변함)을 지키는 것이 이 두 매개변수를
+    `system`이 아니라 `turn`에만 두는 유일한 이유다. 둘 다 기본값이 있으므로
+    기존 호출부는 한 글자도 안 고쳐도 된다.
+
+    **D-07과 SAFE-03은 서로 다른 이야기다.** `avoid_text`(걸린 문장 원문)가
+    이 함수를 거쳐 가는 곳은 **모델**뿐이다 — 플레이어 화면에는 절대 안
+    나간다(그 경로는 `narration_guard.NOTICE_FILTERED`가 이미 막아 뒀다,
+    SAFE-03). 이 둘을 혼동해 "원문을 다시 넣으니 SAFE-03 위반"으로 읽으면
+    안 된다 — SAFE-03이 막는 것은 "걸린 원문이 플레이어 화면에 나가는 것"
+    이지 "모델에게 되돌려 보내는 것"이 아니다.
     """
     permanent = (
         f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 서술 담당이다. 이미 판단이 "
@@ -279,6 +299,14 @@ def build_gm_prompt(
             f"\n\n이번 장면에 새로 등장하는 대상: {', '.join(facts.new_entities)}"
             " — 이 이름들을 자연스럽게 등장시켜라."
         )
+    if written_so_far:
+        turn += (
+            "\n\n지금까지 쓴 이야기:\n"
+            f"{' '.join(written_so_far)}\n\n"
+            "위 이야기를 처음부터 다시 쓰지 말고, 그 바로 뒤를 자연스럽게 이어서 써라."
+        )
+    if avoid_text:
+        turn += f"\n\n방금 이런 문장을 썼는데, 이런 표현은 쓰지 마라: {avoid_text}"
     messages = [{"role": "user", "content": turn}]
     return system, messages
 

@@ -34,6 +34,19 @@ STREAM_STALL_TIMEOUT_S = 90.0
 Discretion(03-CONTEXT.md) 영역이다."""
 
 
+MAX_REGENERATIONS = 1
+"""한 턴에 재생성은 최대 한 번이다(D-06/D-07/D-08, SAFE-04, 10-03). 재생성
+스트림에서 또 걸리면 다시 재생성하지 않고 거기서 끝낸다 — "차단당 한 번"이
+아니라 "한 턴에 한 번"이다. `MAX_ATTEMPTS`(재시도)와는 다른 개념·다른
+상수다: 재시도는 "호출이 실패했다"에 대한 대응이고, 재생성은 "호출은
+성공했는데 내용이 나빴다"에 대한 대응이다. 둘을 같은 루프에 섞으면 실패
+재시도 횟수와 검사-재생성 횟수가 곱해진다(RESEARCH.md Pitfall 2 — 03-04에서
+실제로 22분 먹통이 난 자리가 이 규율이 깨진 지점이다). 그래서 재생성 호출은
+`MAX_ATTEMPTS` 루프를 타지 않는다 — 내부 재시도 없이 딱 한 번만 부른다. 이
+못박음이 한 턴의 제공자 스트림 호출 상한을 3회(정상 경로 최대 2회 + 재생성
+1회)로 고정한다."""
+
+
 class StreamStalled(TimeoutError):
     """스톨 워치독이 발동했을 때 던진다 — 다른 실패와 **반드시** 구분해야 한다.
 
@@ -210,6 +223,66 @@ def _judge_sentence(
     return chunk, verdict.think_open
 
 
+def _consume_narration_stream(
+    bounded_deltas: Iterable[str],
+    *,
+    source_texts: tuple[str, ...],
+) -> Iterator[tuple[NarrationChunk, str | None]]:
+    """조각 스트림 하나를 1문장 지연 버퍼로 판정해 `(chunk, avoid_text)`
+    짝으로 흘려보낸다 — 정상 경로와 재생성 경로가 이 함수 하나를
+    공유한다(10-01/10-03, 로직 중복 금지).
+
+    `avoid_text`는 `chunk.disposition == "blocked"`일 때만 그 문장의
+    **원문**(판정 전 원래 텍스트, D-07이 재생성 프롬프트에 되돌려 보낼
+    값)을 담고, 아니면 `None`이다. `chunk.text` 자체는 걸렸으면 이미
+    `NOTICE_FILTERED`로 바뀌어 있으므로(`_judge_sentence`) 원문이 이 칸을
+    거쳐 나가지 않는다(SAFE-03) — 원문은 오직 `avoid_text`를 통해서만,
+    그리고 호출한 쪽이 그 값을 모델에게만 돌려줄 때만 쓰인다(D-07).
+
+    **차단이 일어나면 그 자리에서 스트림 소비를 멈춘다** — `avoid_text`가
+    `None`이 아닌 짝을 낸 뒤 곧바로 반환한다(더 이상 `next()`를 부르지
+    않는다). 걸린 문장 뒤를 계속 읽어 봤자 어차피 버릴 내용이고, 빨리
+    멈춰야 재생성이 그 자리에서 이어 쓸 수 있다.
+
+    예외(스톨·연결 끊김 등)가 나면 보류 중이던 문장을 판정·방출한 뒤 그대로
+    다시 던진다 — 03-04/10-01의 "이미 나간 조각은 스톨·실패 뒤에도
+    살아남는다" 보장을 여기서 지킨다. 재시도·재생성 여부는 이 함수가 정하지
+    않는다 — 그 판단은 전부 이 함수를 부르는 쪽(`narrate()`)의 몫이다.
+    """
+    held: str | None = None
+    think_open = False
+    sentences = chunk_sentences(bounded_deltas)
+    while True:
+        try:
+            sentence = next(sentences)
+        except StopIteration:
+            break
+        except Exception:  # noqa: BLE001 - 문장 생성 도중 죽은 스트림, 재시도 판단은 호출한 쪽이 한다
+            if held is not None:
+                chunk, _think_open = _judge_sentence(
+                    held, next_sentence=None, think_open=think_open, source_texts=source_texts
+                )
+                yield chunk, (held if chunk.disposition == "blocked" else None)
+                held = None
+            raise
+        if held is not None:
+            chunk, think_open = _judge_sentence(
+                held, next_sentence=sentence, think_open=think_open, source_texts=source_texts
+            )
+            avoid_text = held if chunk.disposition == "blocked" else None
+            held = sentence
+            yield chunk, avoid_text
+            if avoid_text is not None:
+                return
+        else:
+            held = sentence
+    if held is not None:
+        chunk, think_open = _judge_sentence(
+            held, next_sentence=None, think_open=think_open, source_texts=source_texts
+        )
+        yield chunk, (held if chunk.disposition == "blocked" else None)
+
+
 def narrate(
     *,
     provider: Provider,
@@ -282,67 +355,65 @@ def narrate(
     있었다. `stall_timeout_s` 동안 새 조각이 하나도 안 오면 이 자리에서
     `TimeoutError`가 나고, 아래 `except Exception` 절이 다른 실패와
     똑같이 처리한다 — 새 분기 코드를 더하지 않는다.
+
+    **재생성(D-06/D-07, 10-03)은 재시도와 다른 개념이고 다른 자리에서
+    일어난다(`MAX_REGENERATIONS`).** 위 세 갈래 재시도 규칙은 "호출이
+    실패했다"에 대한 대응이고, 재생성은 "호출은 성공했는데 검사에
+    걸렸다"에 대한 대응이다 — 정상 경로(`for _attempt in
+    range(MAX_ATTEMPTS)`)를 한 글자도 안 바꾼다. 문장이 걸리면(disposition
+    `"blocked"`) 안내 조각(`NOTICE_FILTERED`)이 먼저 나가고, 재시도 루프를
+    벗어나 `build_gm_prompt`를 `avoid_text`(걸린 문장 원문)·`written_so_far`
+    (지금까지 실제로 나간 문장들)로 다시 불러 **독립된 단발 호출**을
+    한다 — 이 재생성 호출은 내부 재시도가 없다(딱 한 번 부른다), 스톨이
+    나도 재시도하지 않는다. `system`은 첫 호출 때 만든 것을 그대로
+    재사용한다(다시 만들지 않는다) — 캐시가 유지되고, 원문 겹침 대조
+    소스(`source_texts`)가 두 호출에서 바이트 단위로 같아진다. 재생성
+    스트림도 끝까지 성공하면 그걸로 끝나고, 또 걸리거나 예외·스톨이 나면
+    안내 조각(`NOTICE_GAVE_UP`)을 마지막으로 내보내고 실패 껍데기를 남긴다
+    (D-08 — Task 2가 이 종료 경로를 잇는다). 이 못박음이 한 턴의 제공자
+    스트림 호출 상한을 3회(정상 경로 최대 2회 + 재생성 1회)로 고정한다.
     """
     system, messages = build_gm_prompt(rulebook_display_name=rulebook_display_name, facts=facts)
     source_texts = (system[0]["text"],)
 
     start = time.monotonic()
     emitted_any = False
+    written_so_far: list[str] = []
+
+    def _drive(msgs: list[dict]) -> Iterator[NarrationChunk]:
+        """`provider.stream()`을 한 번 불러 소비한다 — 정상 경로·재생성
+        경로가 이 내부 함수 하나를 공유한다(로직 중복 금지). `yield from
+        _drive(...)`로 부르면 걸린 문장의 원문(`avoid_text`, D-07이 재생성
+        프롬프트로 되돌려 보낼 값)을 돌려받는다(`return`) — 안 걸렸으면
+        `None`이다. 예외(스톨 포함)는 그대로 위로 던진다 — 재시도·재생성
+        여부는 이 함수가 정하지 않는다, 그 판단은 전부 `narrate()` 본문의
+        몫이다.
+        """
+        nonlocal emitted_any
+        deltas = provider.stream(
+            model=model,
+            system=system,
+            messages=msgs,
+            max_tokens=4096,
+            timeout_s=GM_TIMEOUT_S,
+        )
+        bounded_deltas = _drain_with_stall_timeout(deltas, stall_timeout_s=stall_timeout_s)
+        blocked_avoid_text: str | None = None
+        for chunk, avoid_text in _consume_narration_stream(bounded_deltas, source_texts=source_texts):
+            emitted_any = True
+            yield chunk
+            if chunk.disposition != "blocked":
+                written_so_far.append(chunk.text)
+            if avoid_text is not None:
+                blocked_avoid_text = avoid_text
+        return blocked_avoid_text
+
+    # ---- 1) 정상 경로 — 기존 재시도 규칙 세 갈래를 한 글자도 안 바꾼다 ----
+    blocked_avoid_text: str | None = None
 
     for _attempt in range(MAX_ATTEMPTS):
-        held: str | None = None
-        think_open = False
         try:
-            deltas = provider.stream(
-                model=model,
-                system=system,
-                messages=messages,
-                max_tokens=4096,
-                timeout_s=GM_TIMEOUT_S,
-            )
-            bounded_deltas = _drain_with_stall_timeout(deltas, stall_timeout_s=stall_timeout_s)
-            sentences = chunk_sentences(bounded_deltas)
-            while True:
-                try:
-                    sentence = next(sentences)
-                except StopIteration:
-                    break
-                except Exception:  # noqa: BLE001 - 문장 생성 도중 죽은 스트림, 재시도 판단은 아래 두 except가 그대로 한다
-                    # 스트림이 다음 문장을 만드는 도중 죽었다. 이미 모델에서
-                    # 나와 보류 중이던 문장이 있으면 여기서 놓치지 않고
-                    # 판정해 내보낸다 — "이미 나간 조각은 스톨·실패 뒤에도
-                    # 살아남는다"는 03-04의 기존 보장을 지연 버퍼 안에서도
-                    # 지키는 자리다. 재시도할지 말지는 이 갈래가 정하지
-                    # 않는다 — 판정·방출만 하고 그대로 다시 던져서, 아래
-                    # `except StreamStalled`/`except Exception` 두 갈래가
-                    # 지금 모양 그대로 그 결정을 내리게 둔다.
-                    if held is not None:
-                        chunk, _think_open = _judge_sentence(
-                            held,
-                            next_sentence=None,
-                            think_open=think_open,
-                            source_texts=source_texts,
-                        )
-                        emitted_any = True
-                        yield chunk
-                        held = None
-                    raise
-                if held is not None:
-                    chunk, think_open = _judge_sentence(
-                        held,
-                        next_sentence=sentence,
-                        think_open=think_open,
-                        source_texts=source_texts,
-                    )
-                    emitted_any = True
-                    yield chunk
-                held = sentence
-            if held is not None:
-                chunk, think_open = _judge_sentence(
-                    held, next_sentence=None, think_open=think_open, source_texts=source_texts
-                )
-                emitted_any = True
-                yield chunk
+            blocked_avoid_text = yield from _drive(messages)
         except StreamStalled:
             # **스톨은 재시도하지 않는다.** 스톨이 났다는 것은 이 시도의 배경
             # 펌프 스레드가 아직 막힌 네트워크 읽기 안에 살아 있다는 뜻이고,
@@ -365,9 +436,40 @@ def narrate(
             # 잡힌다) 재시도가 스레드를 겹쳐 남기지 않는다.
             continue
         else:
-            # 스트림이 끝까지 성공했다 — provider.last_result()가 이미 올바른 값이다.
-            return
+            if blocked_avoid_text is None:
+                # 스트림이 끝까지 성공했고 걸린 문장이 없었다 —
+                # provider.last_result()가 이미 올바른 값이다.
+                return
+            # 걸린 문장이 있었다 — 재시도 루프를 벗어나 재생성 한 번을
+            # 시도한다(아래 2절). 이 갈래에서만 break한다 — 다음 시도로
+            # 넘어가지 않는다(재생성은 재시도가 아니다).
+            break
 
+    # ---- 2) 재생성 — 걸린 문장이 있을 때만, 딱 한 번, 재시도 없이
+    #         (MAX_REGENERATIONS) ----
+    if blocked_avoid_text is not None:
+        _, regen_messages = build_gm_prompt(
+            rulebook_display_name=rulebook_display_name,
+            facts=facts,
+            avoid_text=blocked_avoid_text,
+            written_so_far=tuple(written_so_far),
+        )
+        try:
+            second_avoid_text = yield from _drive(regen_messages)
+        except Exception:  # noqa: BLE001 - 재생성은 재시도하지 않는다(D-08, Task 2가 종료 경로를 잇는다)
+            pass
+        else:
+            if second_avoid_text is None:
+                # 재생성이 끝까지 성공했다 — 걸린 문장이 더 없었다.
+                return
+        # 재생성 스트림에서도 걸렸거나(second_avoid_text가 있었다) 재생성
+        # 자체가 실패·스톨했다(예외로 여기 떨어졌다) — 아래 3절 실패
+        # 껍데기로 떨어진다. Task 2가 여기에 D-08 종료(NOTICE_GAVE_UP +
+        # 토큰 보존)를 잇는다.
+
+    # ---- 3) 실패 껍데기 — Task 2가 재생성이 있었던 경로에 D-08 종료
+    #         (NOTICE_GAVE_UP + 토큰 보존)를 잇는다. 지금은 재생성 유무와
+    #         무관하게 여기 하나로 떨어진다(10-01 이후 상태와 동일). ----
     elapsed_ms = int((time.monotonic() - start) * 1000)
     provider.note_result(
         AgentResult(
