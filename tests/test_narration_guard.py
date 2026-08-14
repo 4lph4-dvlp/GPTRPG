@@ -511,6 +511,113 @@ def test_corrupted_glyph_branch_never_produces_blocked():
         assert verdict.reason == "corrupted_glyph"
 
 
+# ---------------------------------------------------------------------------
+# 10-07 Task 1 (WR-02): `matched_len <= subject_len`이 모든 갈래에서
+# 예외 없이 성립한다 — 문장 경계를 넘는 겹침에서도.
+# ---------------------------------------------------------------------------
+
+
+def test_source_overlap_crossing_boundary_keeps_matched_len_within_subject_len():
+    """리뷰가 재현한 그 모양을 그대로 고정한다(WR-02) — 40자짜리 원문 중
+    1자만 `sentence`에, 나머지 39자를 `next_sentence`에 두면 겹침이 문장
+    경계를 넘는다. 정정 전에는 `matched_len=40, subject_len=1`로
+    `matched_len > subject_len`이 났다 — 이제는 `subject_len`이 이어 붙인
+    길이(41)를 담아 불변식이 깨지지 않는다."""
+    source = "A" * 40
+    sentence = source[0]
+    next_sentence = source[1:]
+
+    verdict = narration_guard.inspect_sentence(
+        sentence, next_sentence=next_sentence, source_texts=(source,)
+    )
+
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "source_overlap"
+    assert verdict.matched_len == 40
+    assert verdict.subject_len == len(sentence) + len(next_sentence)
+    assert verdict.matched_len <= verdict.subject_len
+
+
+def test_source_overlap_not_crossing_boundary_keeps_subject_len_as_sentence_length():
+    """겹침이 경계를 안 넘으면(문장 하나로 다 채워지면) `subject_len`은
+    지금까지와 같은 `len(sentence)`다 — 이 계획이 이 경우의 동작을 안
+    바꾼다는 것을 못박는다."""
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    twelve_char_slice = normalized_source[5:17]
+
+    verdict = narration_guard.inspect_sentence(
+        twelve_char_slice, next_sentence=None, source_texts=(permanent,)
+    )
+
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "source_overlap"
+    assert verdict.subject_len == len(twelve_char_slice)
+    assert verdict.matched_len <= verdict.subject_len
+
+
+def test_matched_len_never_exceeds_subject_len_across_all_four_branches():
+    """**모든 갈래에 대한 불변식 시험(WR-02)** — 생각 블록/원문 겹침(경계
+    안·밖)/캐릭터 이탈/깨진 글자 각각에 대해 `matched_len <= subject_len`을
+    단언한다. 갈래가 나중에 늘어도 이 시험이 새 갈래를 강제하도록, 여기
+    목록에 새 갈래를 추가하지 않고 넘어가면 `assert len(cases) == ...`가
+    아니라 각 갈래를 개별 함수로 짚어 사람이 놓치지 않게 한다."""
+    permanent = _permanent_block_text()
+    normalized_source = narration_guard.normalize_for_overlap(permanent)
+    twelve_char_slice = normalized_source[5:17]
+    crossing_source = "B" * 40
+
+    cases: dict[str, narration_guard.GuardVerdict] = {
+        "think_block": narration_guard.inspect_sentence(
+            "<think>몰래 생각한다</think> 이어진다.", next_sentence=None, source_texts=()
+        ),
+        "source_overlap_within_sentence": narration_guard.inspect_sentence(
+            twelve_char_slice, next_sentence=None, source_texts=(permanent,)
+        ),
+        "source_overlap_crosses_boundary": narration_guard.inspect_sentence(
+            crossing_source[0], next_sentence=crossing_source[1:], source_texts=(crossing_source,)
+        ),
+        "character_break": narration_guard.inspect_sentence(
+            "저는 사실 인공지능이라서 이야기를 지어내고 있어요.", next_sentence=None, source_texts=()
+        ),
+        "corrupted_glyph": narration_guard.inspect_sentence(
+            f"담로의 손이 {narration_guard.REPLACEMENT_CHAR * 2} 굳었다",
+            next_sentence=None,
+            source_texts=(),
+        ),
+    }
+
+    expected_reasons = {
+        "think_block": "think_block",
+        "source_overlap_within_sentence": "source_overlap",
+        "source_overlap_crosses_boundary": "source_overlap",
+        "character_break": "character_break",
+        "corrupted_glyph": "corrupted_glyph",
+    }
+    for name, verdict in cases.items():
+        assert verdict.reason == expected_reasons[name], name
+        assert verdict.matched_len <= verdict.subject_len, (
+            f"{name}: matched_len={verdict.matched_len} subject_len={verdict.subject_len}"
+        )
+
+
+def test_source_overlap_never_truncates_matched_len_to_subject_len():
+    """`matched_len`을 자르는 방식(리뷰의 (b)안)을 쓰지 않는다는 것을
+    직접 확인한다 — 경계를 넘는 겹침에서 `matched_len`이 원래 `len(sentence)`
+    (1)보다 훨씬 크게(40) 그대로 유지된다. 정직해진 것은 분모
+    (`subject_len`)이지 분자가 아니다."""
+    source = "C" * 40
+    sentence = source[0]
+    next_sentence = source[1:]
+
+    verdict = narration_guard.inspect_sentence(
+        sentence, next_sentence=next_sentence, source_texts=(source,)
+    )
+
+    assert verdict.matched_len == 40
+    assert verdict.matched_len > len(sentence)
+
+
 def test_narrate_blocks_narration_that_quotes_permanent_block_verbatim():
     """영구 고정 블록 구절을 그대로 옮긴 문장은 걸리고, `NarrationChunk`가
     `reason="source_overlap"`과 0보다 큰 `matched_len`을 싣고 나온다 —

@@ -108,8 +108,20 @@ class GuardVerdict:
     담는다 — `"blocked"`면 호출부가 이 칸을 안 쓴다(대신 `NOTICE_FILTERED`를
     쓴다). `matched_len`은 원문 겹침 갈래에서 실제 겹친 길이, 캐릭터 이탈
     갈래에서 걸린 부분의 길이를 담고, 생각 블록 갈래에서는 언제나 0이다.
-    `subject_len`은 검사 대상 문장의 코드포인트 개수(`len(sentence)` —
-    파이썬 `str`은 코드포인트 단위다). `think_open`은 다음 문장을 검사할 때
+
+    `subject_len`은 **이 판정의 `matched_len`을 잰 대상 텍스트의 길이**다
+    (10-07, WR-02 정정 — 예전에는 "검사 대상 문장의 코드포인트 개수"라고
+    적혀 있었는데, 원문 겹침 갈래가 실제로 무엇을 대조하는지와 어긋났다).
+    생각 블록·캐릭터 이탈·깨진 글자 세 갈래는 `sentence` 하나만 대조하므로
+    `subject_len == len(sentence)` 그대로다. **원문 겹침 갈래만 다르다** —
+    겹침이 `sentence`를 넘어 `next_sentence`까지 뻗었으면 대조 대상 자체가
+    두 문장을 이어 붙인 텍스트이므로 `subject_len = len(sentence) +
+    len(next_sentence or "")`다(넘지 않았으면 다른 세 갈래와 똑같이
+    `len(sentence)`). **`matched_len`을 자르지 않는다** — 분모(`subject_len`)를
+    정직하게 넓히는 쪽을 택했다(리뷰의 (b)안 거부). 유출이 실제로 얼마나
+    컸는지가 14단계 심각도 분석이 쓸 정보라, 분자를 깎으면 그 정보가
+    사라진다. 이 선택 때문에 `matched_len <= subject_len`이 네 갈래 모두에서
+    예외 없이 성립한다. `think_open`은 다음 문장을 검사할 때
     `inspect_sentence`에 그대로 다시 넘겨야 하는 상태다 — 생각 블록의 여는
     표식이 이 문장에서 안 닫혔으면 참이다.
     """
@@ -229,7 +241,12 @@ def inspect_sentence(
     3. 생각 블록이 없으면 `find_source_overlap(sentence, next_sentence,
        source_texts)`로 원문 겹침을 대조한다(D-02②) — 적중하면 `blocked`,
        `reason="source_overlap"`, `matched_len`에 실제 겹친 길이를 담는다.
-       `text`는 빈 문자열이다 — 걸린 원문을 이 칸에 담지 않는다.
+       `text`는 빈 문자열이다 — 걸린 원문을 이 칸에 담지 않는다. **`subject_len`도
+       이 갈래에서만 다르게 잡는다**(10-07, WR-02) — 겹침이 `sentence`를 넘어
+       `next_sentence`까지 뻗었으면 `subject_len = len(sentence) +
+       len(next_sentence or "")`(대조 대상이 두 문장을 이어 붙인 텍스트이기
+       때문이다), 안 넘었으면 다른 갈래와 같이 `len(sentence)`다. `matched_len`은
+       절대 자르지 않는다 — `GuardVerdict` 도크스트링 참조.
     4. 원문 겹침도 없으면 `CHARACTER_BREAK_PATTERNS`를 순회한다(D-02③) —
        하나라도 걸리면 `flagged`, `reason="character_break"`, `text`는
        **원문 그대로**(호출부가 이 문장을 그대로 내보낸다), `matched_len`은
@@ -284,12 +301,30 @@ def inspect_sentence(
 
     matched_len, overlap_hit = find_source_overlap(sentence, next_sentence, source_texts)
     if overlap_hit:
+        # `subject_len`을 바로잡는다(10-07, WR-02) — 겹침이 `sentence`를 넘어
+        # `next_sentence`까지 뻗었으면 대조 대상 자체가 두 문장을 이어 붙인
+        # 텍스트이므로 분모도 이어 붙인 길이여야 한다. 넘었는지는 "next_sentence
+        # 없이 `sentence` 혼자 대조했을 때의 최대 겹침 길이"와 비교해 판정한다
+        # — 혼자서는 못 미쳤는데(next_sentence 없이는 이 길이가 안 나오는데)
+        # next_sentence를 더했더니 늘었다면, 그 늘어난 몫은 반드시
+        # `len(sentence)`를 넘어선 자리에서 나온 것이다(순수하게 `sentence`
+        # 안쪽 창만으로는 `find_source_overlap(sentence, None, ...)`가 이미
+        # 그 최대값을 찾아냈을 것이므로). `matched_len`은 자르지 않는다 —
+        # 값을 자르는 대신 분모를 정직하게 넓히는 것이 이 판단의 핵심이다.
+        if next_sentence:
+            matched_len_within_sentence, _ = find_source_overlap(sentence, None, source_texts)
+        else:
+            matched_len_within_sentence = matched_len
+        if matched_len > matched_len_within_sentence:
+            overlap_subject_len = len(sentence) + len(next_sentence or "")
+        else:
+            overlap_subject_len = len(sentence)
         return GuardVerdict(
             disposition="blocked",
             reason="source_overlap",
             text="",
             matched_len=matched_len,
-            subject_len=subject_len,
+            subject_len=overlap_subject_len,
             think_open=False,
         )
 

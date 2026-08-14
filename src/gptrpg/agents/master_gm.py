@@ -203,7 +203,17 @@ def _judge_sentence(
         sentence, next_sentence=next_sentence, source_texts=source_texts, think_open=think_open
     )
     if verdict.disposition == "blocked":
-        excerpt = sentence[:STDERR_EXCERPT_CHARS]
+        # `verdict.subject_len > len(sentence)`는 원문 겹침이 문장 경계를 넘어
+        # `next_sentence`까지 뻗었다는 뜻이다(10-07, WR-02 — narration_guard의
+        # `inspect_sentence`가 이 경우에만 `subject_len`을 이어 붙인 길이로
+        # 잡는다). 그때는 발췌도 `sentence`가 아니라 이어 붙인 텍스트에서 떠야
+        # 실제로 걸린 글자가 보인다 — 발췌는 운영자 자기 터미널에만 가고
+        # 사건 기록에는 안 들어가므로(T-10-03) 다음 문장 내용이 섞여도 안전하다.
+        if verdict.subject_len > len(sentence):
+            excerpt_source = sentence + (next_sentence or "")
+        else:
+            excerpt_source = sentence
+        excerpt = excerpt_source[:STDERR_EXCERPT_CHARS]
         print(
             f"경고: 서사 한 문장을 걸렀다 — 사유={verdict.reason} "
             f"겹친글자수={verdict.matched_len} 문장길이={verdict.subject_len} "
