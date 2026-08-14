@@ -8,7 +8,9 @@
 
 import json
 
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from conftest import FakeProvider
 from conftest import select_character as _select_character
@@ -16,7 +18,9 @@ from gptrpg.agents import providers as providers_module
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.narration_guard import NOTICE_FILTERED, REPLACEMENT_CHAR
 from gptrpg.cli.main import main
+from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, SafetyFlagged, utc_now_iso
 from gptrpg.event_log.store import EventStore
+from gptrpg.session_actor.actor import CommandRejected, RecordSafetyFlag, SessionActor
 from gptrpg.session_actor.projection import rebuild_state_from_events
 
 SESSION_ID = "s1"
@@ -452,3 +456,125 @@ def test_cli_clean_stream_produces_no_safety_flag(tmp_db_path, monkeypatch, caps
         "안에서 서늘한 바람이 흘러나온다.",
     ]
     assert flag_events == []
+
+
+# ---------------------------------------------------------------------------
+# 10-07 Task 2 (WR-03): source × reason 조합을 스키마와 액터 양쪽이 막는다.
+#
+# 실제로 쓰이는 다섯 조합(source="classifier"↔reason="unknown_move",
+# source="narration"↔나머지 넷)은 통과해야 하고, 그 밖의 조합(적어도 둘)은
+# 스키마 층(`SafetyFlagged._require_source_reason_pairing`)과 액터 층
+# (`SessionActor._prepare_safety_flag`) 각각에서 독립적으로 거절돼야 한다 —
+# 한쪽만 있으면 다른 경로로 우회된다(WR-03 Fix).
+# ---------------------------------------------------------------------------
+
+
+class _NoRollNeededRoller:
+    """`RecordSafetyFlag`는 판정 코어를 부르지 않으므로 눈이 실제로는 안
+    쓰인다 — `SessionActor` 생성자가 요구하는 자리만 채우는 자리표시자다."""
+
+    def roll_d6(self) -> int:
+        raise AssertionError("safety_flagged 경로는 굴림을 쓰지 않는다")
+
+
+def _make_safety_actor(tmp_db_path) -> tuple[EventStore, SessionActor]:
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    actor = SessionActor(store, SESSION_ID, _NoRollNeededRoller())
+    actor.start()
+    return store, actor
+
+
+def _safety_flagged_kwargs(*, source: str, reason: str, seq: int = 0) -> dict:
+    return {
+        "session_id": SESSION_ID,
+        "seq": seq,
+        "schema_version": EVENT_SCHEMA_VERSION,
+        "recorded_at": utc_now_iso(),
+        "event_type": "safety_flagged",
+        "source": source,
+        "reason": reason,
+        "disposition": "blocked",
+        "matched_len": 12,
+        "subject_len": 12,
+    }
+
+
+_VALID_SOURCE_REASON_COMBINATIONS = [
+    ("classifier", "unknown_move"),
+    ("narration", "think_block"),
+    ("narration", "source_overlap"),
+    ("narration", "character_break"),
+    ("narration", "corrupted_glyph"),
+]
+"""실제 호출부 둘(action_classifier.py/narration_guard.py 배선)이 실제로
+내는 다섯 조합 그대로다 — 이 표가 실제 배선과 어긋나면 정상 배선도 스키마·
+액터 층에서 거절돼야 하므로, 이 목록이 곧 회귀 방지 대상이다."""
+
+_INVALID_SOURCE_REASON_COMBINATIONS = [
+    ("classifier", "think_block"),
+    ("narration", "unknown_move"),
+]
+"""리뷰가 명시적으로 예시로 든 말 안 되는 조합 둘(WR-03) — 분류기가 서사
+사유를 내거나, 서사 검사가 분류기 사유를 내는 경우는 어느 쪽도 실제로
+일어나지 않는다."""
+
+
+@pytest.mark.parametrize("source,reason", _VALID_SOURCE_REASON_COMBINATIONS)
+def test_schema_accepts_the_five_real_source_reason_combinations(source, reason):
+    event = SafetyFlagged(**_safety_flagged_kwargs(source=source, reason=reason))
+    assert event.source == source
+    assert event.reason == reason
+
+
+@pytest.mark.parametrize("source,reason", _INVALID_SOURCE_REASON_COMBINATIONS)
+def test_schema_rejects_nonsensical_source_reason_combinations(source, reason):
+    """`SafetyFlagged._require_source_reason_pairing`이 스키마 층에서
+    거절한다 — 저장소를 우회해 직접 사건 객체를 만들어도 막힌다."""
+    with pytest.raises(ValidationError) as exc_info:
+        SafetyFlagged(**_safety_flagged_kwargs(source=source, reason=reason))
+    assert "필요충분" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("source,reason", _VALID_SOURCE_REASON_COMBINATIONS)
+async def test_actor_accepts_the_five_real_source_reason_combinations(
+    tmp_db_path, source, reason
+) -> None:
+    store, actor = _make_safety_actor(tmp_db_path)
+    try:
+        seq = await actor.submit(
+            RecordSafetyFlag(
+                source=source, reason=reason, disposition="blocked", matched_len=12, subject_len=12
+            )
+        )
+        events = store.read_events(SESSION_ID)
+        assert len(events) == 1
+        assert events[0].seq == seq
+        assert events[0].source == source
+        assert events[0].reason == reason
+    finally:
+        store.close()
+
+
+@pytest.mark.parametrize("source,reason", _INVALID_SOURCE_REASON_COMBINATIONS)
+async def test_actor_rejects_nonsensical_source_reason_combinations_and_appends_nothing(
+    tmp_db_path, source, reason
+) -> None:
+    """`SessionActor._prepare_safety_flag`가 명령이 저장소에 닿기 전에
+    거절한다 — 반쪽 상태 없이 사건이 하나도 안 남는다."""
+    store, actor = _make_safety_actor(tmp_db_path)
+    try:
+        with pytest.raises(CommandRejected) as exc_info:
+            await actor.submit(
+                RecordSafetyFlag(
+                    source=source,
+                    reason=reason,
+                    disposition="blocked",
+                    matched_len=12,
+                    subject_len=12,
+                )
+            )
+        assert "필요충분" in str(exc_info.value)
+        assert store.read_events(SESSION_ID) == []
+    finally:
+        store.close()

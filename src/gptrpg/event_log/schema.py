@@ -285,6 +285,34 @@ class SafetyFlagged(EventEnvelope):
     subject_len: int = 0
     chunk_index: int | None = None
 
+    @model_validator(mode="after")
+    def _require_source_reason_pairing(self) -> "SafetyFlagged":
+        """`source`와 `reason`의 말 안 되는 조합을 거절한다(10-07, WR-03).
+
+        `reason == "unknown_move"`인 것과 `source == "classifier"`인 것은
+        서로 필요충분이다 — 분류기(`action_classifier`)는 닫힌 목록 밖 응답
+        하나만 신고하고(SAFE-07/D-12), 나머지 넷(`think_block`/`source_overlap`/
+        `character_break`/`corrupted_glyph`)은 전부 서사 검사
+        (`narration_guard.inspect_sentence`)가 내는 사유다. 이 둘을 갈라
+        두는 이유는 "새 사유를 더하는 사람이 어느 쪽에 속하는지 반드시
+        정하게 만드는 것"이다 — `CheckResolved._require_identity_from_schema_5`가
+        이미 쓰는 `model_validator(mode="after")` 모양을 그대로 따른다(새
+        방식을 만들지 않는다).
+
+        **이 검증이 `session_actor/actor.py`의 `_prepare_safety_flag`와
+        중복이 아닌 이유** — 액터 검증은 명령이 저장소에 닿기 전에 막고,
+        이 스키마 검증은 저장소를 우회해(예: 직접 `SafetyFlagged(...)` 생성)
+        만든 객체까지 막는다. 한쪽만 있으면 다른 경로로 우회된다.
+        """
+        is_classifier = self.source == "classifier"
+        is_unknown_move = self.reason == "unknown_move"
+        if is_classifier != is_unknown_move:
+            raise ValueError(
+                "source='classifier'와 reason='unknown_move'는 서로 필요충분이다 — "
+                f"받은 조합: source={self.source!r}, reason={self.reason!r}"
+            )
+        return self
+
 
 GameEvent = Annotated[
     Union[

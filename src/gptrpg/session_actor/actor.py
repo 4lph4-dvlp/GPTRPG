@@ -739,10 +739,13 @@ class SessionActor:
         )
 
     def _prepare_safety_flag(self, command: RecordSafetyFlag) -> tuple[str, int | None, dict]:
-        """닫힌 목록 밖 값·음수 길이를 거절한다(`_prepare_narration`과 같은 검증 모양).
+        """닫힌 목록 밖 값·음수 길이·말 안 되는 source×reason 조합을 거절한다
+        (`_prepare_narration`과 같은 검증 모양).
 
         자유 문자열이 사건에 들어갈 길이 하나 없다 — `source`/`reason`/
-        `disposition` 셋 다 여기서 닫힌 목록으로 강제된다(T-10-03).
+        `disposition` 셋 다 여기서 닫힌 목록으로 강제된다(T-10-03). 개별
+        검증 뒤에는 `source`와 `reason`의 조합 검증을 잇는다(10-07, WR-03) —
+        `event_log.schema.SafetyFlagged`의 같은 이름 검증자와 짝을 이룬다.
         """
         if command.source not in _VALID_SAFETY_FLAG_SOURCES:
             raise CommandRejected(
@@ -756,6 +759,19 @@ class SessionActor:
             raise CommandRejected(
                 f"disposition은 {sorted(_VALID_SAFETY_FLAG_DISPOSITIONS)} 중 하나여야 한다: "
                 f"{command.disposition!r}"
+            )
+        # source×reason 조합 검증(10-07, WR-03) — 개별 검증(위 세 줄) 뒤에
+        # 잇는다(개별 검증이 먼저 걸러야 오류 메시지가 정확하다). 이 검증이
+        # event_log/schema.py의 SafetyFlagged._require_source_reason_pairing과
+        # 중복이 아닌 이유는 그 검증자 도크스트링과 같다 — 이 액터 검증은
+        # 명령이 저장소에 닿기 전에 막고, 스키마 검증은 저장소를 우회해 만든
+        # 객체까지 막는다. `CheckResolved`가 이미 같은 이중 구조다.
+        is_classifier = command.source == "classifier"
+        is_unknown_move = command.reason == "unknown_move"
+        if is_classifier != is_unknown_move:
+            raise CommandRejected(
+                "source='classifier'와 reason='unknown_move'는 서로 필요충분이다 — "
+                f"받은 조합: source={command.source!r}, reason={command.reason!r}"
             )
         if command.matched_len < 0:
             raise CommandRejected("matched_len은 0 이상이어야 한다")
