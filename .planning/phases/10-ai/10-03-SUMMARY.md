@@ -214,10 +214,24 @@ None - no external service configuration required.
 ## Next Phase Readiness
 
 - SAFE-04가 코드·시험으로 닫혔다 — `uv run pytest`(791건) · `uv run lint-imports`(4계약 유지) · `uv run ruff check src` 전부 초록불.
-- 10-03이 Phase 10(AI 출력 검증과 탈옥 방어)의 마지막 계획이다 — SAFE-01~07 전부 이번 phase 안에서 닫혔다(10-01 SAFE-01/03, 10-02 SAFE-02, 10-04 SAFE-05/06, 10-05 SAFE-07, 10-03 SAFE-04).
+- Phase 10의 다섯 계획 중 10-01(SAFE-01/03)·10-02(SAFE-02)·10-05(SAFE-07)·이번 10-03(SAFE-04)이 요구사항까지 완료됐다. 10-04(SAFE-05/06, `fence_player_text`/`NOT_AN_INSTRUCTION_LINE`)는 코드·시험이 이미 커밋되어 이 계획이 그대로 참조했지만, 사람의 라이브 모델 체크포인트 확인만 남아 아직 자체 SUMMARY가 없다 — Phase 10 전체 종결은 그 확인 뒤로 미뤄진다.
 - 정직하게 남는 한계(계획이 명시하지 않았지만 실행 중 확인한 것): 재생성 프롬프트가 "그러지 마라"를 얼마나 잘 지키는지는 결정론적으로 보장되지 않는다 — 모델이 재생성 시도에서도 같은 방향으로 다시 걸릴 수 있고, 이 계획은 그 경우를 D-08(안내 후 종료)로 정직하게 처리하는 것까지만 보장한다("막았다"가 아니라 "멈추지 않는다"가 이 계획의 약속이다).
 - 블로커 없음.
 
 ---
 *Phase: 10-ai*
 *Completed: 2026-08-14*
+
+## Self-Check: PASSED
+
+- FOUND: `src/gptrpg/agents/prompt_assembly.py`
+- FOUND: `src/gptrpg/agents/master_gm.py`
+- FOUND: `tests/test_master_gm.py`
+- FOUND: `tests/test_narration_guard.py`
+- FOUND: `tests/test_safety_flag_pipeline.py`
+- FOUND: `tests/test_web_actions.py`
+- FOUND: `tests/test_turn_flow_failure.py`
+- FOUND: `.planning/phases/10-ai/10-03-SUMMARY.md`
+- FOUND commit: `081396a` (Task 1)
+- FOUND commit: `3009338` (Task 2)
+- FOUND commit: `1a22253` (docs: SUMMARY)
