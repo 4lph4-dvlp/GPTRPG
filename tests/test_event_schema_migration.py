@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from conftest import PROJECT_ROOT
-from gptrpg.event_log.schema import SafetyFlagged, utc_now_iso
+from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, SafetyFlagged, utc_now_iso
 from gptrpg.event_log.store import EventStore
 from gptrpg.session_actor.projection import rebuild_state_from_events
 
@@ -100,6 +100,33 @@ def test_events_db_has_no_safety_flagged_events_yet(tmp_path):
     assert all(event.event_type != "safety_flagged" for event in events)
 
 
+@pytest.mark.skipif(
+    not _REAL_EVENTS_DB.is_file(),
+    reason=".gptrpg/events.db가 이 체크아웃에 없다(gitignore 대상) — 있을 때만 스모크로 돈다",
+)
+def test_events_db_has_no_corrupted_glyph_reason_yet(tmp_path):
+    """10-06이 더한 `corrupted_glyph` 사유값이 이 판 2 실기록에는 없다는 것을
+    명시적으로 단언한다(10-06-PLAN.md 설계 판단 3) — 판 2에는 `safety_flagged`
+    사건 자체가 없으므로(위 시험) 자명하지만, 사유값 하나를 새로 더할 때마다
+    이 자명함을 다시 못박아 두는 것이 회귀를 잡는다."""
+    copy_path = tmp_path / "events-copy.db"
+    shutil.copy(_REAL_EVENTS_DB, copy_path)
+
+    store = EventStore(copy_path)
+    store.initialize()
+    try:
+        events = store.read_events("session1")
+    finally:
+        store.close()
+
+    corrupted_glyph_events = [
+        event
+        for event in events
+        if event.event_type == "safety_flagged" and event.reason == "corrupted_glyph"
+    ]
+    assert corrupted_glyph_events == []
+
+
 # ---------------------------------------------------------------------------
 # ② `.gptrpg/uat9.db` — 판 5 실기록 221건 (세션 넷: 1·pacing5·uat9·uatweb)
 # ---------------------------------------------------------------------------
@@ -158,6 +185,31 @@ def test_uat9_db_has_no_safety_flagged_events_yet(tmp_path):
         store.close()
 
 
+@pytest.mark.skipif(
+    not _REAL_UAT9_DB.is_file(),
+    reason=".gptrpg/uat9.db가 이 체크아웃에 없다(gitignore 대상) — 있을 때만 스모크로 돈다",
+)
+def test_uat9_db_has_no_corrupted_glyph_reason_yet(tmp_path):
+    """10-06이 더한 `corrupted_glyph` 사유값이 이 판 5 실기록 어느 세션에도
+    없다는 것을 명시적으로 단언한다(10-06-PLAN.md 설계 판단 3)."""
+    copy_path = tmp_path / "uat9-copy.db"
+    shutil.copy(_REAL_UAT9_DB, copy_path)
+
+    store = EventStore(copy_path)
+    store.initialize()
+    try:
+        for session_id in _session_ids(copy_path):
+            events = store.read_events(session_id)
+            corrupted_glyph_events = [
+                event
+                for event in events
+                if event.event_type == "safety_flagged" and event.reason == "corrupted_glyph"
+            ]
+            assert corrupted_glyph_events == [], session_id
+    finally:
+        store.close()
+
+
 # ---------------------------------------------------------------------------
 # ③ 양방향 확인 — 판 6으로 새로 쓴 safety_flagged 사건도 같은 접기 경로가 돈다
 # ---------------------------------------------------------------------------
@@ -192,3 +244,50 @@ def test_freshly_written_schema_6_safety_flagged_event_folds_without_exception(t
     assert len(events) == 1
     state = rebuild_state_from_events("fresh-session", events)
     assert state.last_seq == 0
+
+
+def test_freshly_written_corrupted_glyph_safety_flagged_event_folds_without_exception(tmp_path):
+    """새로 쓴 `corrupted_glyph` 사유값(10-06)도 판 6으로 기록되고 예외 없이
+    접힌다 — 위 시험과 같은 모양이지만 `reason`·`disposition`이 다르다
+    (깨진 글자는 `flagged`이지 `blocked`가 아니다, D-03)."""
+    store_path = tmp_path / "fresh-corrupted.db"
+    store = EventStore(store_path)
+    store.initialize()
+    try:
+        event = SafetyFlagged(
+            session_id="fresh-corrupted-session",
+            seq=0,
+            schema_version=6,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="safety_flagged",
+            source="narration",
+            reason="corrupted_glyph",
+            disposition="flagged",
+            matched_len=2,
+            subject_len=12,
+            chunk_index=0,
+        )
+        store.append(event)
+        events = store.read_events("fresh-corrupted-session")
+    finally:
+        store.close()
+
+    assert len(events) == 1
+    assert events[0].reason == "corrupted_glyph"
+    assert events[0].disposition == "flagged"
+    state = rebuild_state_from_events("fresh-corrupted-session", events)
+    assert state.last_seq == 0
+
+
+# ---------------------------------------------------------------------------
+# ④ 판 못박기 — EVENT_SCHEMA_VERSION이 6에서 안 올랐다(10-06-PLAN.md 설계 판단 3)
+# ---------------------------------------------------------------------------
+
+
+def test_event_schema_version_is_still_six():
+    """`corrupted_glyph` 사유값 하나를 더해도 `EVENT_SCHEMA_VERSION`은 6에서
+    안 오른다 — `reason`은 쓰기 검증에서만 쓰이고(`session_actor/actor.py`),
+    `rules_core.reducer.py`의 `safety_flagged` 분기는 `reason`을 아예 안 본다.
+    누가 무심코 올리면 이 시험이 잡는다."""
+    assert EVENT_SCHEMA_VERSION == 6

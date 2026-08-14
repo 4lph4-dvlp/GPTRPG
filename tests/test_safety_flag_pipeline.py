@@ -14,7 +14,7 @@ from conftest import FakeProvider
 from conftest import select_character as _select_character
 from gptrpg.agents import providers as providers_module
 from gptrpg.agents.envelope import AgentResult
-from gptrpg.agents.narration_guard import NOTICE_FILTERED
+from gptrpg.agents.narration_guard import NOTICE_FILTERED, REPLACEMENT_CHAR
 from gptrpg.cli.main import main
 from gptrpg.event_log.store import EventStore
 from gptrpg.session_actor.projection import rebuild_state_from_events
@@ -266,6 +266,40 @@ def test_web_clean_stream_produces_no_safety_flag_and_keeps_chunk_order(
         "안에서 서늘한 바람이 흘러나온다.",
     ]
     assert flags == []
+
+
+# ---------------------------------------------------------------------------
+# 5. 깨진 글자(U+FFFD) — flagged로 기록되면서 문장도 그대로 화면에 나간다
+#    (10-06, SAFE-01). 이 두 단언이 한 시험 안에 같이 있어야 「기록은
+#    남았는데 화면엔 안 나갔다」는 회귀를 잡는다.
+# ---------------------------------------------------------------------------
+
+_CORRUPTED_STREAM = f"담로의 손이 {REPLACEMENT_CHAR}{REPLACEMENT_CHAR} 굳었다. 서늘한 바람이 흘러든다."
+
+
+def test_web_corrupted_glyph_is_recorded_and_still_reaches_the_screen(
+    web_client_with_fake_provider,
+) -> None:
+    with _run_web_turn(web_client_with_fake_provider, stream_text=_CORRUPTED_STREAM) as client:
+        body = _declare_and_confirm(client)
+        narrations = sorted(
+            _events_of_type(client, "narration_appended"), key=lambda e: e["chunk_index"]
+        )
+        flags = _events_of_type(client, "safety_flagged")
+
+    # 함께 단언 ① — 문장이 걸러지지 않고 원문 그대로(깨진 글자 포함) 화면에 나간다.
+    assert body["narration_failed"] is not True
+    assert [n["text"] for n in narrations] == [
+        f"담로의 손이 {REPLACEMENT_CHAR}{REPLACEMENT_CHAR} 굳었다.",
+        "서늘한 바람이 흘러든다.",
+    ]
+
+    # 함께 단언 ② — 같은 턴에서 운영자 기록이 실제로 남는다.
+    assert len(flags) == 1
+    assert flags[0]["source"] == "narration"
+    assert flags[0]["reason"] == "corrupted_glyph"
+    assert flags[0]["disposition"] == "flagged"
+    assert flags[0]["matched_len"] == 2
 
 
 # ---------------------------------------------------------------------------
