@@ -784,3 +784,133 @@ def test_narrate_give_up_failure_envelope_preserves_tokens_from_last_successful_
     # 아니라 마지막으로 성공한 스트림의 값(102/52)을 살린다.
     assert result.prompt_tokens == 102
     assert result.completion_tokens == 52
+
+
+# ---------------------------------------------------------------------------
+# 10-07 Task 3 (WR-01): 한 턴의 제공자 stream() 호출 상한 3회를 **실제로
+# 호출을 세는 시험**이 진다 — 이름만 그런 상수(`MAX_REGENERATIONS`, 이
+# 계획에서 지웠다)가 아니다.
+# ---------------------------------------------------------------------------
+
+
+class _FailsOnceThenBlocksThenCleanProvider:
+    """3회 상한 시나리오용 — 첫 호출(정상 경로 1차 시도)은 조각을 하나도
+    못 내고 죽는다(재시도 유발), 둘째 호출(정상 경로 2차 시도, 재시도)은
+    걸리는 문장을 낸다(재생성 유발), 셋째 호출(재생성)은 깨끗한 문장을
+    낸다. `MAX_ATTEMPTS`(2, 재시도)와 재생성(1)이 같은 턴에서 겹치는
+    **가장 나쁜 경우**를 재현한다 — 이 경로가 정확히 3회에서 멈추는지가
+    이 파일의 핵심 회귀 방지 대상이다."""
+
+    name = "fails-once-then-blocks-then-clean"
+
+    def __init__(self) -> None:
+        self.stream_call_count = 0
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        raise NotImplementedError("이 이중체는 stream()만 시험한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s) -> Iterator[str]:
+        self.stream_call_count += 1
+        if self.stream_call_count == 1:
+            raise RuntimeError("연결이 거절됐다 — 조각이 하나도 안 나간 채 죽는다")
+        if self.stream_call_count == 2:
+            yield "<think>걸리는 생각</think>"
+        else:
+            yield "재생성이 낸 깨끗한 문장이다."
+        self._last_result = AgentResult(
+            ok=True, value="", elapsed_ms=5, prompt_tokens=3, completion_tokens=3
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_narrate_never_exceeds_three_provider_stream_calls_in_a_single_turn() -> None:
+    """**이 시험이 존재하는 이유:** 03-04 Task 3 라이브 검증에서 재시도와
+    재생성이 같은 루프에 섞여 실제로 ~22분 동안 터미널이 먹통이 된 사고가
+    났다(`STREAM_STALL_TIMEOUT_S` 도크스트링·RESEARCH.md Pitfall 2 참조) —
+    재시도 횟수와 검사-재생성 횟수가 곱해지면서 호출이 무한히 늘어난 것이
+    그 사고의 곱셈이었다. 이 시험은 그 사고가 나던 자리와 정확히 같은
+    조건(정상 경로 재시도 `MAX_ATTEMPTS`=2회 + 재생성 1회가 한 턴에서
+    겹치는 가장 나쁜 경우)을 재현해, 제공자 `stream()` 호출이 **정확히
+    3회에서 멈추고 더 늘어나지 않는지**를 실제로 센다.
+
+    호출 횟수 보증을 지키던 것은 예전에 `MAX_REGENERATIONS`라는 이름의
+    상수였는데, 그 상수는 실제로는 아무 데서도 안 읽혔다(WR-01, 10-07) —
+    이름만 지키고 있었다. 이제 그 보증은 이 시험이 진다: 나중에 누가
+    재생성 블록을 반복문으로 바꾸면(리뷰의 (a)안, 이 계획이 명시적으로
+    거부한 방향) 호출 횟수가 3을 넘고 이 시험이 빨간불로 막는다."""
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = _FailsOnceThenBlocksThenCleanProvider()
+    chunks = list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+
+    assert provider.stream_call_count == 3
+    assert provider.stream_call_count <= 3
+    assert [chunk.disposition for chunk in chunks] == ["blocked", "clean"]
+    assert provider.last_result().ok is True
+
+
+@pytest.mark.parametrize(
+    "provider_factory",
+    [
+        lambda: _TwoSentenceStreamProvider(),  # 깨끗한 서사 — 정확히 1회
+        lambda: _BlocksOnceThenCleanProvider(),  # 한 번 걸리고 재생성 성공 — 정확히 2회
+        lambda: _AlwaysBlocksSingleSentenceProvider(),  # 두 번 걸려 포기 — 정확히 2회
+        lambda: _FailsOnceThenBlocksThenCleanProvider(),  # 재시도+재생성 겹침(최악) — 정확히 3회
+    ],
+)
+def test_narrate_stream_call_count_stays_within_the_three_call_ceiling_across_all_paths(
+    provider_factory,
+) -> None:
+    """네 경로(깨끗함/재생성 성공/재생성도 걸림/재시도+재생성 겹침) 전부를
+    한자리에서 훑어 `stream_call_count`가 하나도 예외 없이 3 이하임을
+    단언한다 — 어떤 경로에서도 상한을 넘지 않는다는 것이 각 경로별 개별
+    시험이 아니라 이 표 하나로도 확인된다."""
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = provider_factory()
+    list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+    # `_BlocksOnceThenCleanProvider`는 `stream_call_count` 대신 `stream_calls`
+    # 목록(호출별 (system, messages) 짝)을 쌓는다 — 두 이중체 스타일 다 지원한다.
+    call_count = getattr(provider, "stream_call_count", None)
+    if call_count is None:
+        call_count = len(provider.stream_calls)
+    assert call_count <= 3
