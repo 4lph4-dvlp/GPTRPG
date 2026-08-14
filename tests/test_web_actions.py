@@ -592,6 +592,108 @@ def test_narration_failure_returns_roll_result_and_records_master_gm_ai_call(
     assert illustrated == []
 
 
+class _AlwaysBlocksSingleSentenceProvider:
+    """10-03(D-08) — 매 호출마다 문장부호가 하나도 없는 완결된 생각 블록
+    하나만 낸다. `messages`(재생성 지시)는 안 들여다본다 — 첫 호출도
+    재생성 호출도 둘 다 걸려서, `narrate()`가 두 번 다 걸린 뒤 종료(D-08)로
+    가는 것을 확인하는 자리다. `_TwoSentenceStreamProvider`
+    (`tests/test_master_gm.py`)와 같은 이유로 문장 끝에만 마침표를 둬서
+    스트림이 끝까지 드레인돼야 `_last_result`가 실제 토큰 값으로 채워진다
+    — 두 번 다 걸린 턴도 토큰이 0으로 지워지지 않는다는 것(T-10-10)을
+    이 대역으로 확인한다."""
+
+    name = "always-blocks-single-sentence"
+
+    def __init__(self) -> None:
+        self.stream_call_count = 0
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        raise NotImplementedError("이 이중체는 stream()만 시험한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        self.stream_call_count += 1
+        yield "<think>계속 안 되는 생각</think>"
+        self._last_result = AgentResult(
+            ok=True,
+            value="",
+            elapsed_ms=7,
+            prompt_tokens=100 + self.stream_call_count,
+            completion_tokens=50 + self.stream_call_count,
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_narration_blocked_twice_gives_up_with_notice_and_keeps_roll_result(
+    web_client_with_fake_provider,
+) -> None:
+    """10-03(D-08) — 두 번 다 걸리면(첫 스트림 + 재생성) 이야기를 거기까지로
+    끝내고 안내하며, 이미 굴린 판정 결과는 그대로 남는다(TRUST-06). 이
+    시나리오는 `narration_failed`를 재사용한다 — 새 실패 상태를 만들지
+    않는다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = _AlwaysBlocksSingleSentenceProvider()
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert response.status_code == 200
+        body = response.json()
+
+        narrations = sorted(
+            _events_of_type(client, "narration_appended"), key=lambda e: e["chunk_index"]
+        )
+        flags = _events_of_type(client, "safety_flagged")
+        ai_calls = [
+            event
+            for event in _events_of_type(client, "ai_invoked")
+            if event["agent_role"] == "master_gm"
+        ]
+        resolved = _events_of_type(client, "check_resolved")
+        illustrated = _events_of_type(client, "scene_illustrated")
+
+    # 판정 결과는 그대로 남는다(TRUST-06, D-08) — narration_failed 재사용.
+    assert response.status_code == 200
+    assert body["narration_failed"] is True
+    assert body["rolls"] is not None
+    assert body["grade"] is not None
+    assert body["target"] is not None
+    assert body["rolls"] == list(resolved[0]["rolls"])
+
+    # 종료 안내가 narration_appended로 화면에 나가는 유일한 통로다.
+    assert narrations[-1]["text"] == "이야기를 끝까지 쓰지 못했어요."
+
+    # 첫 차단 + 최종 차단, 두 건이 남고 모델이 쓴 글자는 어디에도 없다
+    # (T-10-03 — 사건 payload는 닫힌 목록 + 숫자뿐이다).
+    assert len(flags) == 2
+    for flag in flags:
+        assert flag["source"] == "narration"
+        assert flag["reason"] == "think_block"
+        assert flag["disposition"] == "blocked"
+
+    # 재생성까지 간 턴도 토큰이 0으로 지워지지 않는다(T-10-10).
+    assert len(ai_calls) == 1
+    assert ai_calls[0]["prompt_tokens"] > 0
+    assert ai_calls[0]["completion_tokens"] > 0
+
+    # 제공자 스트림 호출이 정확히 2회다 — 재생성이 재시도되지 않는다.
+    assert gm.stream_call_count == 2
+
+    # 서사가 실패한 턴에는 삽화가 만들어지지 않는다(기존 성질 유지).
+    assert illustrated == []
+
+
 def test_narration_retry_reuses_roll_and_only_narration_appended_grows(
     web_client_with_fake_provider,
 ) -> None:

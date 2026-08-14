@@ -438,7 +438,9 @@ def test_narrate_blocks_narration_that_quotes_permanent_block_verbatim():
     멈추고 재생성을 한 번 시도한다(D-06). `_LeakingProvider`는 재생성
     프롬프트가 와도 매번 같은 세 문장을 내므로, 재생성도 같은 자리에서
     다시 걸린다 — 그래서 `provider.stream()`이 두 번(원래 스트림 + 재생성)
-    불리고, 두 번 다 첫 문장은 clean, 둘째 문장에서 걸려 멈춘다."""
+    불리고, 두 번 다 첫 문장은 clean, 둘째 문장에서 걸려 멈춘다. 재생성
+    자신의 "걸렀어요" 안내는 억눌러지고(D-08 종료 안내 하나로 합친다) 두
+    번 다 걸렸다는 안내(`NOTICE_GAVE_UP`)가 마지막으로 나온다."""
     system, _messages = prompt_assembly.build_gm_prompt(
         rulebook_display_name=_RULEBOOK_DISPLAY_NAME, facts=_real_narration_facts()
     )
@@ -460,11 +462,15 @@ def test_narrate_blocks_narration_that_quotes_permanent_block_verbatim():
             rulebook_display_name=_RULEBOOK_DISPLAY_NAME,
         )
     )
-    assert [chunk.disposition for chunk in chunks] == ["clean", "blocked", "clean", "blocked"]
+    assert [chunk.disposition for chunk in chunks] == [
+        "clean",
+        "blocked",
+        "clean",
+        "blocked",
+    ]
     assert chunks[1].reason == "source_overlap"
     assert chunks[1].matched_len > 0
     assert chunks[1].text == narration_guard.NOTICE_FILTERED
+    assert chunks[3].text == narration_guard.NOTICE_GAVE_UP
     assert chunks[3].reason == "source_overlap"
-    assert chunks[3].matched_len > 0
-    assert chunks[3].text == narration_guard.NOTICE_FILTERED
     assert provider.last_result().ok is False

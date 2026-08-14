@@ -25,6 +25,7 @@ from gptrpg.agents.master_gm import (
     chunk_sentences,
     narrate,
 )
+from gptrpg.agents.narration_guard import NOTICE_GAVE_UP
 from gptrpg.agents.providers.nim_provider import NimProvider
 
 _FAKE_KEY = "fake-key-does-not-touch-network"
@@ -673,3 +674,113 @@ def test_narrate_regeneration_reuses_identical_system_object() -> None:
     first_system, _ = provider.stream_calls[0]
     regen_system, _ = provider.stream_calls[1]
     assert first_system is regen_system
+
+
+# ---------------------------------------------------------------------------
+# 10-03 Task 2: 재생성 스트림에서도 걸리면 D-08 종료 — NOTICE_GAVE_UP을 마지막
+# 으로 내보내고, 실패 껍데기가 성공한 스트림의 토큰 값을 살린다(T-10-10).
+# ---------------------------------------------------------------------------
+
+
+class _AlwaysBlocksSingleSentenceProvider:
+    """매 호출마다 문장부호가 하나도 없는 완결된 생각 블록 하나만 낸다 —
+    `messages`(재생성 지시)는 안 들여다본다. 문장 경계가 스트림 맨 끝에만
+    있으므로 `chunk_sentences`가 그 문장을 내보내려면 델타 소스를 끝까지
+    드레인해야 하고, 그 과정에서 `provider.stream()`의 뒷정리 코드
+    (`self._last_result = ...`)가 먼저 실행된다 — 그래서 걸린 문장이
+    판정되는 시점에는 이미 실제 토큰 값이 `_last_result`에 들어 있다."""
+
+    name = "always-blocks-single-sentence"
+
+    def __init__(self) -> None:
+        self.stream_call_count = 0
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        raise NotImplementedError("이 이중체는 stream()만 시험한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s) -> Iterator[str]:
+        self.stream_call_count += 1
+        yield "<think>계속 안 되는 생각</think>"
+        self._last_result = AgentResult(
+            ok=True,
+            value="",
+            elapsed_ms=7,
+            prompt_tokens=100 + self.stream_call_count,
+            completion_tokens=50 + self.stream_call_count,
+            cached_prompt_tokens=10,
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_narrate_gives_up_with_notice_after_regeneration_also_blocks() -> None:
+    """재생성 스트림도 걸리면 NOTICE_GAVE_UP이 마지막 조각으로 나오고,
+    provider.stream() 호출이 정확히 2회(정상 1 + 재생성 1)로 끝난다 —
+    재생성이 재시도되지 않는다(D-08). 재생성 자신의 "걸렀어요" 안내는
+    억눌러지고(D-08 종료 안내 하나로 합쳐진다) 첫 차단의 안내만 남는다 —
+    두 안내 조각이 연달아 나가지 않는다."""
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = _AlwaysBlocksSingleSentenceProvider()
+    chunks = list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+
+    assert provider.stream_call_count == 2
+    assert [chunk.disposition for chunk in chunks] == ["blocked", "blocked"]
+    assert chunks[-1].text == NOTICE_GAVE_UP
+    assert chunks[-1].reason == "think_block"
+
+
+def test_narrate_give_up_failure_envelope_preserves_tokens_from_last_successful_stream() -> None:
+    """두 번 다 걸린 턴도 실제로 쓴 토큰이 살아 있다(T-10-10) — 실패
+    껍데기가 토큰을 0으로 지우지 않는다."""
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        character_state=(),
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = _AlwaysBlocksSingleSentenceProvider()
+    list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+
+    result = provider.last_result()
+    assert result.ok is False
+    assert result.prompt_tokens > 0
+    assert result.completion_tokens > 0
+    # 재생성 호출(두 번째 stream())이 낸 토큰 값이다 — 첫 호출 값(101/51)이
+    # 아니라 마지막으로 성공한 스트림의 값(102/52)을 살린다.
+    assert result.prompt_tokens == 102
+    assert result.completion_tokens == 52

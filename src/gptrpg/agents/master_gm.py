@@ -15,7 +15,12 @@ from dataclasses import dataclass
 from gptrpg.agents.context import NarrationFacts
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.invoke import GM_TIMEOUT_S, MAX_ATTEMPTS
-from gptrpg.agents.narration_guard import NOTICE_FILTERED, STDERR_EXCERPT_CHARS, inspect_sentence
+from gptrpg.agents.narration_guard import (
+    NOTICE_FILTERED,
+    NOTICE_GAVE_UP,
+    STDERR_EXCERPT_CHARS,
+    inspect_sentence,
+)
 from gptrpg.agents.prompt_assembly import build_gm_prompt
 from gptrpg.agents.providers.base import Provider
 
@@ -283,6 +288,40 @@ def _consume_narration_stream(
         yield chunk, (held if chunk.disposition == "blocked" else None)
 
 
+def _failure_envelope_preserving_tokens(provider: Provider, *, elapsed_ms: int) -> AgentResult:
+    """재생성까지 간 턴의 D-08 종료용 실패 껍데기(10-03, Task 2) —
+    `provider.last_result()`가 갖고 있는 토큰 값을 살려서 `ok=False`로
+    되돌린다.
+
+    재생성까지 간 턴은 실제로 토큰을 썼다 — 그 값을 0으로 지우면 원가
+    계산의 입력이 조용히 틀어진다(T-10-10). `last_result()`가 예외를
+    던지면(제공자가 `note_result`/`last_result` 규약을 어겼거나, 원래
+    스트림이 조각을 하나도 못 얻은 채 소비를 멈춘 경우) 0으로 채운
+    껍데기로 대신한다 — `web/routes_actions.py`/`cli/turn_flow.py`의
+    `_last_result_or_failure_envelope`와 같은 방어 이유다: 다섯 어댑터
+    모두가 이 규약을 지킨다고 가정하지 않는다.
+    """
+    try:
+        prior = provider.last_result()
+    except Exception:  # noqa: BLE001 - 제공자가 규약을 어겨도 narrate()는 죽지 않는다
+        return AgentResult(
+            ok=False,
+            value=None,
+            elapsed_ms=elapsed_ms,
+            prompt_tokens=0,
+            completion_tokens=0,
+            cached_prompt_tokens=0,
+        )
+    return AgentResult(
+        ok=False,
+        value=None,
+        elapsed_ms=elapsed_ms,
+        prompt_tokens=prior.prompt_tokens,
+        completion_tokens=prior.completion_tokens,
+        cached_prompt_tokens=prior.cached_prompt_tokens,
+    )
+
+
 def narrate(
     *,
     provider: Provider,
@@ -369,9 +408,14 @@ def narrate(
     재사용한다(다시 만들지 않는다) — 캐시가 유지되고, 원문 겹침 대조
     소스(`source_texts`)가 두 호출에서 바이트 단위로 같아진다. 재생성
     스트림도 끝까지 성공하면 그걸로 끝나고, 또 걸리거나 예외·스톨이 나면
-    안내 조각(`NOTICE_GAVE_UP`)을 마지막으로 내보내고 실패 껍데기를 남긴다
-    (D-08 — Task 2가 이 종료 경로를 잇는다). 이 못박음이 한 턴의 제공자
-    스트림 호출 상한을 3회(정상 경로 최대 2회 + 재생성 1회)로 고정한다.
+    안내 조각(`NOTICE_GAVE_UP`)을 마지막으로 내보내고 실패 껍데기를
+    남긴다(D-08) — 이 실패 껍데기는 성공한 스트림이 남긴 토큰 값을 살려서
+    `ok=False`로 되돌린다(`_failure_envelope_preserving_tokens`, T-10-10).
+    재생성 자체가 시도된 적이 없는(내용 차단이 아니라 순수 호출 실패로 끝난)
+    턴은 이 안내 조각 없이 기존 실패 껍데기(토큰 0) 그대로다 — D-06/D-07/
+    D-08은 "호출은 성공했는데 내용이 나빴다"에만 적용된다. 이 못박음이
+    한 턴의 제공자 스트림 호출 상한을 3회(정상 경로 최대 2회 + 재생성
+    1회)로 고정한다.
     """
     system, messages = build_gm_prompt(rulebook_display_name=rulebook_display_name, facts=facts)
     source_texts = (system[0]["text"],)
@@ -380,14 +424,27 @@ def narrate(
     emitted_any = False
     written_so_far: list[str] = []
 
-    def _drive(msgs: list[dict]) -> Iterator[NarrationChunk]:
+    def _drive(msgs: list[dict], *, emit_block_notice: bool = True) -> Iterator[NarrationChunk]:
         """`provider.stream()`을 한 번 불러 소비한다 — 정상 경로·재생성
         경로가 이 내부 함수 하나를 공유한다(로직 중복 금지). `yield from
-        _drive(...)`로 부르면 걸린 문장의 원문(`avoid_text`, D-07이 재생성
-        프롬프트로 되돌려 보낼 값)을 돌려받는다(`return`) — 안 걸렸으면
-        `None`이다. 예외(스톨 포함)는 그대로 위로 던진다 — 재시도·재생성
-        여부는 이 함수가 정하지 않는다, 그 판단은 전부 `narrate()` 본문의
-        몫이다.
+        _drive(...)`로 부르면 `(avoid_text, reason, matched_len,
+        subject_len)`을 돌려받는다(`return`) — `avoid_text`는 걸린 문장의
+        원문(D-07이 재생성 프롬프트로 되돌려 보낼 값), 나머지 셋은 D-08
+        종료 안내(`NOTICE_GAVE_UP`)가 실을 값이다. 안 걸렸으면
+        `(None, "", 0, 0)`이다. 예외(스톨 포함)는 그대로 위로 던진다 —
+        재시도·재생성 여부는 이 함수가 정하지 않는다, 그 판단은 전부
+        `narrate()` 본문의 몫이다.
+
+        `emit_block_notice=False`(재생성 호출 전용)이면 이 호출 **자신이**
+        걸렸을 때 그 자리의 `NOTICE_FILTERED` 조각을 내보내지 않는다 —
+        걸린 사실(`avoid_text`·`reason`·...)은 그대로 반환값에 담아 두고,
+        화면에 내보내는 안내는 3절의 `NOTICE_GAVE_UP` 하나로 합친다. 이게
+        없으면 재생성이 또 걸렸을 때 "걸렀어요" 안내와 "끝까지 못 썼어요"
+        안내가 연달아 두 번 나가고, `safety_flagged` 사건도 세 건(첫 차단 +
+        재생성 차단 + 종료 안내)으로 늘어난다 — D-08의 "두 건(첫 차단 + 최종
+        차단)" 약속을 어긴다. 걸리지 않은 문장(clean/flagged)은 이 값과
+        무관하게 항상 그대로 나간다 — 재생성이 실제로 쓴 이야기까지 숨기지
+        않는다.
         """
         nonlocal emitted_any
         deltas = provider.stream(
@@ -399,21 +456,35 @@ def narrate(
         )
         bounded_deltas = _drain_with_stall_timeout(deltas, stall_timeout_s=stall_timeout_s)
         blocked_avoid_text: str | None = None
+        blocked_reason = ""
+        blocked_matched_len = 0
+        blocked_subject_len = 0
         for chunk, avoid_text in _consume_narration_stream(bounded_deltas, source_texts=source_texts):
-            emitted_any = True
-            yield chunk
+            if avoid_text is not None and not emit_block_notice:
+                pass  # 이 호출 자신의 차단 안내는 억누른다(위 도크스트링) — 사실은 아래에서 그대로 기록한다.
+            else:
+                emitted_any = True
+                yield chunk
             if chunk.disposition != "blocked":
                 written_so_far.append(chunk.text)
             if avoid_text is not None:
                 blocked_avoid_text = avoid_text
-        return blocked_avoid_text
+                blocked_reason = chunk.reason
+                blocked_matched_len = chunk.matched_len
+                blocked_subject_len = chunk.subject_len
+        return blocked_avoid_text, blocked_reason, blocked_matched_len, blocked_subject_len
 
     # ---- 1) 정상 경로 — 기존 재시도 규칙 세 갈래를 한 글자도 안 바꾼다 ----
     blocked_avoid_text: str | None = None
+    last_reason = ""
+    last_matched_len = 0
+    last_subject_len = 0
 
     for _attempt in range(MAX_ATTEMPTS):
         try:
-            blocked_avoid_text = yield from _drive(messages)
+            blocked_avoid_text, last_reason, last_matched_len, last_subject_len = (
+                yield from _drive(messages)
+            )
         except StreamStalled:
             # **스톨은 재시도하지 않는다.** 스톨이 났다는 것은 이 시도의 배경
             # 펌프 스레드가 아직 막힌 네트워크 읽기 안에 살아 있다는 뜻이고,
@@ -455,21 +526,45 @@ def narrate(
             written_so_far=tuple(written_so_far),
         )
         try:
-            second_avoid_text = yield from _drive(regen_messages)
-        except Exception:  # noqa: BLE001 - 재생성은 재시도하지 않는다(D-08, Task 2가 종료 경로를 잇는다)
+            second_avoid_text, second_reason, second_matched_len, second_subject_len = (
+                yield from _drive(regen_messages, emit_block_notice=False)
+            )
+        except Exception:  # noqa: BLE001 - 재생성은 재시도하지 않는다(D-08)
+            # 재생성 자체가 실패·스톨했다 — 새 판정이 없었으므로 `last_*`는
+            # 재생성을 촉발한 첫 차단의 값을 그대로 들고 아래 D-08 종료로
+            # 간다("마지막 사유"가 없을 때의 자연스러운 대체값이다).
             pass
         else:
             if second_avoid_text is None:
                 # 재생성이 끝까지 성공했다 — 걸린 문장이 더 없었다.
                 return
-        # 재생성 스트림에서도 걸렸거나(second_avoid_text가 있었다) 재생성
-        # 자체가 실패·스톨했다(예외로 여기 떨어졌다) — 아래 3절 실패
-        # 껍데기로 떨어진다. Task 2가 여기에 D-08 종료(NOTICE_GAVE_UP +
-        # 토큰 보존)를 잇는다.
+            # 재생성 스트림에서도 걸렸다 — 이 판정이 "마지막 사유"가 된다.
+            last_reason = second_reason
+            last_matched_len = second_matched_len
+            last_subject_len = second_subject_len
 
-    # ---- 3) 실패 껍데기 — Task 2가 재생성이 있었던 경로에 D-08 종료
-    #         (NOTICE_GAVE_UP + 토큰 보존)를 잇는다. 지금은 재생성 유무와
-    #         무관하게 여기 하나로 떨어진다(10-01 이후 상태와 동일). ----
+        # ---- 3) D-08 종료 — 두 번 다 걸렸거나 재생성 자체가 실패·스톨했다.
+        #         안내 조각을 마지막으로 내보내고, 성공한 스트림의 토큰
+        #         값을 살린 실패 껍데기를 남긴다(T-10-10). 이 조각이 두
+        #         호출부(`_submit_narration_chunk`)에서 `AppendNarration`으로
+        #         제출되는 것이 D-08의 "안내한다"다 — 새 화면 요소를 만들지
+        #         않는다. ----
+        yield NarrationChunk(
+            text=NOTICE_GAVE_UP,
+            disposition="blocked",
+            reason=last_reason,
+            matched_len=last_matched_len,
+            subject_len=last_subject_len,
+        )
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        provider.note_result(_failure_envelope_preserving_tokens(provider, elapsed_ms=elapsed_ms))
+        return
+
+    # ---- 4) 재생성 없이 그냥 실패했다 — 정상 경로가 MAX_ATTEMPTS를 다 써도
+    #         조각 하나 못 얻었거나 조각이 나간 뒤 스톨·실패했다. 이건
+    #         내용 차단(D-06/D-07/D-08)이 아니라 순수 호출 실패이므로
+    #         재생성·안내 조각 없이 기존 실패 껍데기 그대로다(10-01 이후
+    #         상태와 동일 — 이 갈래는 이 계획으로 안 바뀐다). ----
     elapsed_ms = int((time.monotonic() - start) * 1000)
     provider.note_result(
         AgentResult(

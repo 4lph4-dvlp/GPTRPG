@@ -544,6 +544,103 @@ def test_scene_entity_judge_both_attempts_fail_narration_still_completes_and_tur
     assert entity_ai_events[0].completion_tokens == 0
 
 
+# ---------------------------------------------------------------------------
+# 시험 9 (10-03, D-08): 두 번 다 걸리는 서사 — 웹(tests/test_web_actions.py
+# ::test_narration_blocked_twice_gives_up_with_notice_and_keeps_roll_result)과
+# 같은 시나리오를 명령줄 경로에서 돈다. 웹만 고치고 명령줄을 놓치는 회귀가
+# 이 프로젝트에서 반복해서 났으므로(Pitfall 1), 두 경로 시험을 반드시
+# 짝으로 둔다.
+# ---------------------------------------------------------------------------
+
+
+class _AlwaysBlocksSingleSentenceProvider:
+    """매 호출마다 문장부호가 하나도 없는 완결된 생각 블록 하나만 낸다 —
+    `messages`(재생성 지시)는 안 들여다본다. 첫 스트림도 재생성 스트림도
+    둘 다 걸려서 D-08 종료 경로(`NOTICE_GAVE_UP`)를 탄다.
+    `tests/test_web_actions.py`의 같은 이름 대역과 같은 모양이다."""
+
+    name = "always-blocks-single-sentence"
+
+    def __init__(self) -> None:
+        self.stream_call_count = 0
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        result = AgentResult(ok=True, value=_CANDIDATE_JSON, elapsed_ms=1, prompt_tokens=5, completion_tokens=3)
+        self._last_result = result
+        return result
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        self.stream_call_count += 1
+        yield "<think>계속 안 되는 생각</think>"
+        self._last_result = AgentResult(
+            ok=True,
+            value="",
+            elapsed_ms=7,
+            prompt_tokens=100 + self.stream_call_count,
+            completion_tokens=50 + self.stream_call_count,
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("complete() 또는 stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_narration_blocked_twice_exits_zero_with_gave_up_notice_and_keeps_roll_result(
+    tmp_db_path, monkeypatch, capsys
+):
+    """두 번 다 걸린 턴도 명령줄 경로에서 기존 서사 실패 종료 코드를 그대로
+    쓴다(새 종료 코드를 만들지 않았다) — 표준출력에 안내 문구가 있고, 표준
+    오류에 운영자 한 줄이 사유와 함께 찍히며, 판정 결과 사건은 그대로
+    남는다."""
+    db = str(tmp_db_path)
+    provider = _AlwaysBlocksSingleSentenceProvider()
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    # 명령줄의 기존 서사 실패 종료 코드를 그대로 재사용한다 — 새 종료
+    # 코드를 만들지 않았다(시험 1의 순수 스트림 실패와 같은 exit_code 값).
+    assert exit_code != 0
+
+    captured = capsys.readouterr()
+    assert "이야기를 끝까지 쓰지 못했어요." in captured.out
+    assert "<think>" not in captured.out
+
+    stderr = captured.err
+    assert "오류:" in stderr
+
+    events = _read_events(db, "s1")
+    types = [event.event_type for event in events]
+    # 판정 결과 사건은 그대로 남는다(TRUST-06, D-08).
+    assert "check_resolved" in types
+
+    narration_events = [event for event in events if event.event_type == "narration_appended"]
+    assert narration_events[-1].text == "이야기를 끝까지 쓰지 못했어요."
+
+    flag_events = [event for event in events if event.event_type == "safety_flagged"]
+    assert len(flag_events) == 2
+    for flag in flag_events:
+        assert flag.source == "narration"
+        assert flag.reason == "think_block"
+        assert flag.disposition == "blocked"
+
+    ai_events = [event for event in events if event.event_type == "ai_invoked"]
+    gm_ai_events = [event for event in ai_events if event.agent_role == "master_gm"]
+    assert len(gm_ai_events) == 1
+    # 재생성까지 간 턴도 토큰이 0으로 지워지지 않는다(T-10-10).
+    assert gm_ai_events[0].prompt_tokens > 0
+    assert gm_ai_events[0].completion_tokens > 0
+
+    assert provider.stream_call_count == 2
+
+
 def test_turn_records_exactly_one_ai_invoked_per_parallel_judgment_role(
     tmp_db_path, monkeypatch
 ):
