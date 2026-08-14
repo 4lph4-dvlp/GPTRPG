@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 10
 current_phase_name: ai
 status: verifying
-stopped_at: Completed 10-04-PLAN.md (checkpoint answered, SUMMARY written)
-last_updated: "2026-08-14T01:38:57.349Z"
+stopped_at: Completed 10-06-PLAN.md (corrupted-glyph detection branch, SAFE-01)
+last_updated: "2026-08-14T01:46:38.731Z"
 last_activity: 2026-08-14
 last_activity_desc: Phase 10 execution started
 progress:
   total_phases: 11
   completed_phases: 3
-  total_plans: 13
-  completed_plans: 13
+  total_plans: 14
+  completed_plans: 14
   percent: 27
 ---
 
@@ -94,6 +94,7 @@ Progress: [██████████] 100%
 | Phase 10-ai P05 | ~35min | 3 tasks | 10 files |
 | Phase 10 P03 | ~50min | 2 tasks | 7 files |
 | Phase 10-ai P04 | ~40min | 3 tasks | 6 files |
+| Phase 10-ai P06 | ~25min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,7 @@ Progress: [██████████] 100%
 - [Phase ?]: 10-04 Task 3 실측(사람 판정): direct_command/role_swap 2회씩은 분류기 흡수(10-05)로 진행자에 도달 못 함, in_story_hiding/delimiter_escape 각 1회 도달 — 역할 파괴 0건이나 둘 다 제재 없이 통과. 울타리 자체의 실측 근거는 이 2건뿐
 - [Phase ?]: 10-04: 진행자에게 도달한 입력이 제재 없이 서사로 무마되는 문제를 새 요구사항으로 승격 — .planning/todos/pending/2026-08-14-game-breaking-input-sanction.md
 - [Phase ?]: 10-04 실측 중 발견(범위 밖): nvidia/nemotron-3-ultra-550b-a55b가 받침 복잡한 한글 음절을 못 뱉어 U+FFFD로 저장됨 — master_gm을 nemotron-3-super-120b-a12b로 교체(.gptrpg/ 로컬 설정, git 미추적). U+FFFD 감지는 10-06 담당
+- [Phase ?]: 10-06: 깨진 글자(U+FFFD)는 flagged이지 blocked가 아니다 — inspect_sentence 4번째 갈래, EVENT_SCHEMA_VERSION 6 유지(reason은 쓰기 검증에서만 쓰이고 reducer가 안 봄), 옛 실기록 1116건 예외 없이 접힘 확인
 
 ### Pending Todos
 
@@ -237,8 +239,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-14T01:38:57.316Z
-Stopped at: Completed 10-04-PLAN.md (checkpoint answered, SUMMARY written)
+Last session: 2026-08-14T01:46:38.698Z
+Stopped at: Completed 10-06-PLAN.md (corrupted-glyph detection branch, SAFE-01)
 Traceability 갱신 완료
 Resume file: None
 
