@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 11
 current_phase_name: rulebook-vocabulary
 status: executing
-stopped_at: Completed 11-01-PLAN.md
-last_updated: "2026-08-15T08:54:54.169Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-08-15T09:16:20.805Z"
 last_activity: 2026-08-15
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 22
-  completed_plans: 16
+  completed_plans: 17
   percent: 27
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 11 (rulebook-vocabulary) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-08-15 — Phase 11 execution started
 
@@ -39,7 +39,7 @@ Last activity: 2026-08-15 — Phase 11 execution started
 > (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
 > 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
 
-Progress: [███████░░░] 73%
+Progress: [████████░░] 77%
 
 ## Performance Metrics
 
@@ -102,6 +102,7 @@ Progress: [███████░░░] 73%
 | Phase 10-ai P06 | ~25min | 2 tasks | 6 files |
 | Phase 10 P07 | ~20min | 3 tasks | 7 files |
 | Phase 11 P01 | ~45min | 2 tasks | 15 files |
+| Phase 11 P02 | ~35min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -195,6 +196,9 @@ Progress: [███████░░░] 73%
 - [Phase ?]: 11-01 Task 0(D-03, widen-now): StatEntry를 네 칸에서 여덟 칸으로 넓힌다 — D-20/D-65를 뒤집는 게 아니라 그 그릇이 담는 범위를 자원 축 전체로 다시 그리는 것(D-64/D-65/D-66과 같은 패턴)
 - [Phase ?]: 11-01: numeric 형태 하나가 룰북 선언(Rulebook.resource_axes) → Entity → GET 시트 응답 → StatusPane 화면까지 관통 — 나머지 다섯 형태는 11-03이 데이터·화면을 붙인다
 - [Phase ?]: 11-01 [deviation, Rule 3+Rule 2]: Task 1의 <verify>가 요구했으나 <files> 목록엔 없던 test_entities.py/test_web_characters.py를 Task1에서 앞당겨 고침(고정 시험 8칸 재고정 포함); must_haves.truths가 요구한 ResourceAxisDecl/Rulebook 경계 시험을 위해 계획서에 없던 tests/test_rulebook.py를 신설(12건) — 둘 다 사용자/오케스트레이터 사전 승인
+- [Phase ?]: 11-02: validate_grade_bands()가 is_doubles 두 세계 x 원자 구간 스윕으로 가려짐/구멍을 등록 시점에 잡는다(QUAL-03/D-15) - grade_for_margin과 _band_matches 헬퍼를 공유해 두 판정 규칙이 구조적으로 갈라질 수 없다. 단순 겹침(DW strong_hit/weak_hit, OQ critical/success)은 정상 통과 회귀 확인
+- [Phase ?]: 11-02: validate_entity_axes/validate_move_stats + validate_registered_rulebooks가 rulebooks 패키지 임포트 시점에 개체 축/무브 축 정합성까지 함께 검사(D-01/T-11-07). _GAPPED_RULEBOOK류 런타임 RULEBOOKS 패치 시험은 이 게이트를 안 지나가 별개 방어선으로 유효
+- [Phase ?]: 11-02 [deviation, Rule 3, 사람 확인 필요]: validate_move_stats를 실제 등록에 연결하자 OpenQuest 무브 열 개의 default_stat(기술 이름)이 애초에 축으로 선언돼 있지 않았고(이미 있던 이름 그대로 축 10개 추가로 해소), 던전월드류 defy_danger/aid_or_interfere의 default_stat='상황에 맞는 능력치'(원문상 의도적 서술)가 DEX/CHA 근사치로 교체됨 - 게임 메커니즘은 안 바뀌지만(ConfirmRequest.stat이 확인 시점에 자유 선택) 룰북 설계 뉘앙스를 좁힌 판단이라 사람 확인 필요
 
 ### Pending Todos
 
@@ -250,8 +254,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-15T08:54:54.132Z
-Stopped at: Completed 11-01-PLAN.md
+Last session: 2026-08-15T09:16:20.767Z
+Stopped at: Completed 11-02-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
