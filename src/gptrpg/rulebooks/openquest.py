@@ -32,6 +32,22 @@ OPENQUEST_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
     ResourceAxisDecl(name="Hit Points", form="numeric"),
     ResourceAxisDecl(name="Magic Points", form="numeric"),
     ResourceAxisDecl(name="Armour Points", form="numeric"),
+    # 아래 열 축은 `rulebooks/moves.py`의 `OPENQUEST_MOVES`가 이미 쓰고
+    # 있던 기술 이름을 그대로 옮긴 것이다(11-02) — 새로 지어내지 않았다.
+    # 지금 등록된 크리처(고블린·스켈레톤)는 이 축들의 `StatEntry`를 갖지
+    # 않는데, 그것은 위반이 아니다(D-04) — 개체가 룰북 선언 축을 전부 가질
+    # 필요는 없다. 이 선언이 없으면 `validate_move_stats`가 무브의
+    # `default_stat`을 대조할 축 자체가 없어 등록이 통째로 막힌다(T-11-07).
+    ResourceAxisDecl(name="근접 무기 기술", form="numeric"),
+    ResourceAxisDecl(name="회피 기술", form="numeric"),
+    ResourceAxisDecl(name="은신 기술", form="numeric"),
+    ResourceAxisDecl(name="지각 기술", form="numeric"),
+    ResourceAxisDecl(name="일반 지식 기술", form="numeric"),
+    ResourceAxisDecl(name="설득 기술", form="numeric"),
+    ResourceAxisDecl(name="장치 기술", form="numeric"),
+    ResourceAxisDecl(name="운동 기술", form="numeric"),
+    ResourceAxisDecl(name="의지 기술", form="numeric"),
+    ResourceAxisDecl(name="원거리 무기 기술", form="numeric"),
 )
 
 OPENQUEST = Rulebook(

@@ -25,7 +25,7 @@ from gptrpg.rules_core.rulebook import (
     validate_grade_bands,
     validate_move_stats,
 )
-from gptrpg.rulebooks import get_rulebook
+from gptrpg.rulebooks import RULEBOOKS, get_rulebook, validate_registered_rulebooks
 from gptrpg.rulebooks.dungeonworld_like import (
     DUNGEONWORLD_GRADE_BANDS,
     DUNGEONWORLD_LIKE,
@@ -152,7 +152,10 @@ def test_dungeonworld_resource_axes_are_all_numeric_form():
 
 
 def test_openquest_resource_axes_are_all_numeric_form():
-    assert len(OPENQUEST_RESOURCE_AXES) == 10
+    """11-01 당시 열 축(능력치+HP/MP/AP)이었던 것이, 11-02에서
+    `validate_move_stats`가 `OPENQUEST_MOVES`의 기술 이름 열 개를 대조할
+    축이 필요해지면서 스무 축으로 늘었다(주석 참조, T-11-07)."""
+    assert len(OPENQUEST_RESOURCE_AXES) == 20
     assert all(axis.form == "numeric" for axis in OPENQUEST_RESOURCE_AXES)
     assert OPENQUEST.resource_axes == OPENQUEST_RESOURCE_AXES
 
@@ -316,3 +319,55 @@ def test_move_default_stat_must_be_a_declared_axis():
     validate_move_stats(("체력", "STR"), DUNGEONWORLD_LIKE)  # 예외 없이 통과한다
     with pytest.raises(EntityAxisMismatch):
         validate_move_stats(("존재하지 않는 능력치",), DUNGEONWORLD_LIKE)
+
+
+# ---------------------------------------------------------------------------
+# 등록소 임포트 시점 검증 (D-15/D-01/T-11-07) — 11-02
+# ---------------------------------------------------------------------------
+
+
+def test_importing_rulebooks_package_runs_registration_validation():
+    """`gptrpg.rulebooks`는 이미 임포트됐다(이 모듈 상단 import에서) — 그때
+    죽지 않았다는 것 자체가 첫 증거이고, 재호출도 예외 없이 끝난다."""
+    validate_registered_rulebooks()
+
+
+def test_registration_rejects_a_shadowed_rulebook():
+    """가려짐이 있는 룰북을 `RULEBOOKS`에 임시로 넣으면
+    `validate_registered_rulebooks()`가 `ShadowedGradeBand`로 거부한다."""
+    shadowed_rulebook = Rulebook(
+        rulebook_id="test-shadowed-registration-only",
+        display_name="가려짐 시험 전용",
+        resolution_method=TWO_D6,
+        grade_bands=(
+            GradeBand(name="catch_all", counts_as_failure=True),
+            GradeBand(name="strong", counts_as_failure=False, margin_at_least=0),
+        ),
+        resource_axes=(),
+    )
+    RULEBOOKS["test-shadowed-registration-only"] = shadowed_rulebook
+    try:
+        with pytest.raises(ShadowedGradeBand):
+            validate_registered_rulebooks()
+    finally:
+        del RULEBOOKS["test-shadowed-registration-only"]
+    validate_registered_rulebooks()  # 지운 뒤에는 다시 예외 없이 통과한다
+
+
+def test_registration_rejects_a_rulebook_with_a_hole():
+    """구멍이 있는 룰북을 `RULEBOOKS`에 임시로 넣으면
+    `validate_registered_rulebooks()`가 `UncoveredOutcomeGap`으로 거부한다."""
+    gapped_rulebook = Rulebook(
+        rulebook_id="test-gapped-registration-only",
+        display_name="구멍 시험 전용",
+        resolution_method=TWO_D6,
+        grade_bands=(GradeBand(name="success", counts_as_failure=False, margin_at_least=0),),
+        resource_axes=(),
+    )
+    RULEBOOKS["test-gapped-registration-only"] = gapped_rulebook
+    try:
+        with pytest.raises(UncoveredOutcomeGap):
+            validate_registered_rulebooks()
+    finally:
+        del RULEBOOKS["test-gapped-registration-only"]
+    validate_registered_rulebooks()  # 지운 뒤에는 다시 예외 없이 통과한다

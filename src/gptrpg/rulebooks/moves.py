@@ -37,9 +37,19 @@ DUNGEONWORLD_LIKE_MOVES: tuple[MoveDecl, ...] = (
         trigger="거리를 두고 활·투척 무기로 공격할 때",
     ),
     MoveDecl(
+        # 원문(Dungeon World "Defy Danger")은 접근 방식에 따라 어느
+        # 능력치든 쓸 수 있다고 정한다 — 고정된 기본값이 없다. 그런데
+        # 11-02가 `default_stat`을 룰북이 선언한 축 이름과 등록 시점에
+        # 대조하기 시작하면서(D-01/T-11-07), 이 필드는 더 이상 "설명
+        # 문구를 아무거나 적어도 되는 칸"일 수 없어졌다 — 여기 적힌
+        # 값은 분류기 프롬프트에 그대로 들어가는 힌트일 뿐 실제 판정
+        # 능력치를 강제하지 않는다(`ConfirmRequest.stat`이 확인 시점에
+        # 자유롭게 다시 정해진다). 「피하다」라는 트리거 어휘에 가장
+        # 가까운 단일 능력치로 DEX를 골랐다 — 원문의 유연성을 완전히
+        # 대체하지는 못하는 근사치다(11-02-SUMMARY.md 편차 기록 참조).
         move_id="defy_danger",
         display_name="위험을 무릅쓰다",
-        default_stat="상황에 맞는 능력치",
+        default_stat="DEX",
         trigger="위험한 상황에서 다치거나 나쁜 일을 피하려 할 때",
     ),
     MoveDecl(
@@ -55,9 +65,11 @@ DUNGEONWORLD_LIKE_MOVES: tuple[MoveDecl, ...] = (
         trigger="레버리지를 걸고 NPC에게 요구할 때",
     ),
     MoveDecl(
+        # defy_danger와 같은 이유(위 주석 참조) — 사회적 개입(돕다/방해)에
+        # 가장 가까운 단일 능력치로 CHA를 골랐다.
         move_id="aid_or_interfere",
         display_name="돕거나 훼방 놓다",
-        default_stat="상황에 맞는 능력치",
+        default_stat="CHA",
         trigger="다른 플레이어의 판정을 돕거나 방해할 때",
     ),
     MoveDecl(
