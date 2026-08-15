@@ -34,6 +34,9 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from gptrpg.event_log.store import SequenceConflict
+from gptrpg.rules_core.entities import Entity, StatEntry
+from gptrpg.rules_core.rulebook import Rulebook
+from gptrpg.rulebooks import get_rulebook
 from gptrpg.session_actor.actor import AlreadyOccupied, CommandRejected, OccupyCharacter
 from gptrpg.web.characters_data import get_character, list_characters
 from gptrpg.web.cookie_auth import (
@@ -55,7 +58,12 @@ COOKIE_MAX_AGE_S = 60 * 60 * 24 * 14
 
 
 class StatEntryView(BaseModel):
-    """`StatEntry`의 여덟 칸 그대로 — 칸 이름을 한 글자도 다르게 짓지 않는다."""
+    """`StatEntry`의 여덟 칸 그대로 — 칸 이름을 한 글자도 다르게 짓지 않는다.
+
+    `form == "none"`인 축은 이 모델 자체가 아니라 **응답 조립 단계**
+    (`_visible_stats`)에서 걸러진다 — 프론트엔드가 조건부로 숨기는 방식이면
+    응답 JSON 문자열에 축 이름이 그대로 실려 나가 「완전히 사라진다」가
+    문자 그대로 깨진다(RULE-12 성공 기준 2, 11-RESEARCH.md Pitfall 2)."""
 
     name: str
     form: str
@@ -68,12 +76,45 @@ class StatEntryView(BaseModel):
 
 
 class CharacterSheetView(BaseModel):
-    """`Entity`의 네 칸 그대로 — 칸 이름을 한 글자도 다르게 짓지 않는다."""
+    """`Entity`의 네 칸 그대로 — 칸 이름을 한 글자도 다르게 짓지 않는다.
+
+    `stats`는 `entity.stats` 전체가 아니라 `_visible_stats`가 「안 쓴다」로
+    선언된 축을 제외한 결과다 — 그 제외는 이 뷰가 만들어지기 **전**에
+    서버 쪽에서 끝난다."""
 
     entity_id: str
     display_name: str
     rulebook_id: str
     stats: list[StatEntryView]
+
+
+def _visible_stats(entity: Entity, rulebook: Rulebook) -> tuple[StatEntry, ...]:
+    """`entity.stats`에서 「안 쓴다」로 선언된 축을 제외하고 선언 순서
+    그대로 돌려준다(RULE-12 성공 기준 2).
+
+    두 신호를 둘 다 확인한다 — 룰북이 그 이름의 축을 `form="none"`으로
+    선언했는지, 그리고 개체 자신의 `StatEntry.form`이 `"none"`인지.
+    (등록 시점의 `validate_entity_axes`가 이미 둘이 어긋나면 등록 자체를
+    거부하므로 정상 등록된 개체라면 두 신호는 항상 일치하지만, 이 함수는
+    그 전제에 기대지 않고 독립적으로 둘 다 본다.) `entity.stats`를 훑는
+    순서를 그대로 유지한다 — `list_characters()`가 세운 "선언 순서를
+    다시 정렬하지 않는다" 관례와 같은 이유다.
+
+    **이 제외는 서버 쪽 책임이다.** 프론트엔드가 조건부 렌더링으로 같은
+    축을 숨기는 방식으로 구현하면, 이 함수를 거치지 않은 원본 데이터가
+    이미 응답 JSON 문자열에 축 이름을 실어 보낸 뒤라 「완전히 사라진다」가
+    깨진다(11-RESEARCH.md Pitfall 2).
+    """
+    axes_by_name = {axis.name: axis for axis in rulebook.resource_axes}
+    visible: list[StatEntry] = []
+    for stat in entity.stats:
+        if stat.form == "none":
+            continue
+        axis = axes_by_name.get(stat.name)
+        if axis is not None and axis.form == "none":
+            continue
+        visible.append(stat)
+    return tuple(visible)
 
 
 class CharacterSummaryView(BaseModel):
@@ -152,7 +193,13 @@ async def get_character_sheet(session_id: str, character_id: str) -> CharacterSh
     entity = get_character(character_id)
     if entity is None:
         raise HTTPException(status_code=404, detail="그런 캐릭터가 없다")
-    return CharacterSheetView(**asdict(entity))
+    rulebook = get_rulebook(entity.rulebook_id)
+    return CharacterSheetView(
+        entity_id=entity.entity_id,
+        display_name=entity.display_name,
+        rulebook_id=entity.rulebook_id,
+        stats=[StatEntryView(**asdict(stat)) for stat in _visible_stats(entity, rulebook)],
+    )
 
 
 @router.post(

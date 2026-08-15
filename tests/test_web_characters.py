@@ -15,6 +15,9 @@ from httpx import ASGITransport, AsyncClient
 
 from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ActionDeclared, utc_now_iso
 from gptrpg.event_log.store import EventStore
+from gptrpg.rulebooks import RULEBOOKS
+from gptrpg.rules_core.entities import Entity, StatEntry
+from gptrpg.rules_core.rulebook import GradeBand, ResourceAxisDecl, Rulebook, TWO_D6
 from gptrpg.web.characters_data import (
     CHARACTER_ARCHETYPES,
     NEW_CHARACTER_HP_BASE,
@@ -47,6 +50,93 @@ def test_known_character_sheet_matches_characters_data(web_client: TestClient) -
         assert stat_view["current"] == stat.current
         assert stat_view["max"] == stat.max
         assert stat_view["depleted_effect_ref"] == stat.depleted_effect_ref
+
+
+def test_none_axis_excluded_from_sheet_response(web_client: TestClient) -> None:
+    """`form == "none"`으로 선언된 축은 시트 응답의 `stats`에 없고, 그 축
+    이름이 응답 본문 문자열 어디에도 등장하지 않는다(RULE-12 성공 기준 2) —
+    화면이 숨기는 것이 아니라 서버가 안 보낸다는 것을 문자열 단언으로
+    고정한다. 이름은 이 시험 안에서만 쓰는 값으로 짓고 특정 룰북 어휘를
+    쓰지 않는다."""
+    test_rulebook_id = "test-only-none-axis-rulebook"
+    hidden_axis_name = "시험전용안쓰는축"
+    visible_axis_name = "시험전용쓰는축"
+    test_rulebook = Rulebook(
+        rulebook_id=test_rulebook_id,
+        display_name="시험 전용",
+        resolution_method=TWO_D6,
+        grade_bands=(GradeBand(name="success", counts_as_failure=False),),
+        resource_axes=(
+            ResourceAxisDecl(name=hidden_axis_name, form="none", none_kind="absent"),
+            ResourceAxisDecl(name=visible_axis_name, form="numeric"),
+        ),
+    )
+    test_character_id = "test-only-none-axis-character"
+    test_entity = Entity(
+        entity_id="test.none_axis_character",
+        display_name="시험용",
+        rulebook_id=test_rulebook_id,
+        stats=(
+            StatEntry(name=hidden_axis_name, form="none", none_kind="absent"),
+            StatEntry(name=visible_axis_name, form="numeric", current=3),
+        ),
+    )
+    RULEBOOKS[test_rulebook_id] = test_rulebook
+    PLAYER_CHARACTERS[test_character_id] = test_entity
+    try:
+        response = web_client.get(f"/api/sessions/s1/characters/{test_character_id}")
+    finally:
+        del RULEBOOKS[test_rulebook_id]
+        del PLAYER_CHARACTERS[test_character_id]
+
+    assert response.status_code == 200
+    body = response.json()
+    stat_names = {stat["name"] for stat in body["stats"]}
+    assert hidden_axis_name not in stat_names
+    assert visible_axis_name in stat_names
+    assert hidden_axis_name not in response.text
+
+
+def test_rulebook_with_zero_axes_returns_empty_stats(web_client: TestClient) -> None:
+    """`resource_axes=()`인 룰북을 쓰는 개체의 시트 응답은 `stats: []`이고
+    HTTP 200이다."""
+    test_rulebook_id = "test-only-zero-axes-rulebook"
+    test_rulebook = Rulebook(
+        rulebook_id=test_rulebook_id,
+        display_name="시험 전용",
+        resolution_method=TWO_D6,
+        grade_bands=(GradeBand(name="success", counts_as_failure=False),),
+        resource_axes=(),
+    )
+    test_character_id = "test-only-zero-axes-character"
+    test_entity = Entity(
+        entity_id="test.zero_axes_character",
+        display_name="시험용",
+        rulebook_id=test_rulebook_id,
+        stats=(),
+    )
+    RULEBOOKS[test_rulebook_id] = test_rulebook
+    PLAYER_CHARACTERS[test_character_id] = test_entity
+    try:
+        response = web_client.get(f"/api/sessions/s1/characters/{test_character_id}")
+    finally:
+        del RULEBOOKS[test_rulebook_id]
+        del PLAYER_CHARACTERS[test_character_id]
+
+    assert response.status_code == 200
+    assert response.json()["stats"] == []
+
+
+def test_sheet_stats_preserve_declaration_order(web_client: TestClient) -> None:
+    """브람 시트 응답의 `stats` 이름 순서가 `Entity.stats` 선언 순서와
+    완전히 같다(RULE-11 ordering) — 응답 조립 단계가 어디서도 다시
+    정렬하지 않는다는 증거다."""
+    response = web_client.get("/api/sessions/s1/characters/bram")
+
+    assert response.status_code == 200
+    response_names = [stat["name"] for stat in response.json()["stats"]]
+    declared_names = [stat.name for stat in PLAYER_CHARACTERS["bram"].stats]
+    assert response_names == declared_names
 
 
 def test_unknown_character_sheet_returns_404(web_client: TestClient) -> None:
