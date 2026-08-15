@@ -25,42 +25,119 @@ interface StatusPaneProps {
   onChangeCharacter: () => void;
 }
 
+/** `named_slots` 형태 — 고정 길이 격자. 칸 개수는 `slot_values`의 배열
+ * 길이를 그대로 쓴다(상한 상수를 코드에 두지 않는다). 빈 칸은
+ * `COPY.emptySlot`, 채워진 칸은 그 문자열을 보인다. */
+function SlotGrid({ name, slotValues }: { name: string; slotValues: (string | null)[] }) {
+  return (
+    <div className="stat-slots">
+      <span className="stat-row__name">{statLabel(name)}</span>
+      <div className="stat-slots__grid">
+        {slotValues.map((value, index) => (
+          <span key={index} className={value === null ? "slot slot--empty" : "slot slot--filled"}>
+            {value ?? COPY.emptySlot}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** `tag_list` 형태 — 칩 목록. 빈 배열도 회색 비활성 패널이 아니라 축
+ * 이름 + 「없음」 중립 표시로 그린다. */
+function TagList({ name, tags }: { name: string; tags: string[] }) {
+  return (
+    <div className="stat-tags">
+      <span className="stat-row__name">{statLabel(name)}</span>
+      {tags.length === 0 ? (
+        <span className="t-label">없음</span>
+      ) : (
+        <div className="stat-tags__chips">
+          {tags.map((tag) => (
+            <span className="chip" key={tag}>
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** `usage_die` 형태 — 남은 주사위 면수를 「d{면수}」로, `0`이면
+ * `COPY.usageDieSpent`로 소진 상태를 보인다. */
+function UsageDie({ name, current }: { name: string; current: number }) {
+  return (
+    <div className="stat-usage-die">
+      <span className="stat-row__name">{statLabel(name)}</span>
+      <span className="stat-row__value">{current === 0 ? COPY.usageDieSpent : `d${current}`}</span>
+    </div>
+  );
+}
+
 function StatRows({ sheet }: { sheet: CharacterSheet }) {
-  // 이번 계획(11-01)은 여섯 표현 형태 중 numeric 하나만 화면까지 관통시킨다
-  // — 나머지 다섯(clock/named_slots/tag_list/usage_die/none)은 11-03이
-  // 붙인다. 지금은 어떤 룰북도 그 다섯을 선언하지 않으므로 이 필터는
-  // 아직 아무것도 걸러내지 않지만, 명시적 판별을 구조로 남겨 둔다.
-  const numericStats = sheet.stats.filter((stat) => stat.form === "numeric");
+  if (sheet.stats.length === 0) {
+    // 자원 축이 하나도 없는 룰북 — 회색 빈 패널이 아니라 의도된 한 줄을
+    // 보인다(CONTEXT.md Claude's Discretion).
+    return <p className="t-label">{COPY.noResourceAxes}</p>;
+  }
   return (
     <>
-      {numericStats.map((stat) => {
-        const current = stat.current ?? 0;
-        return stat.max === null ? (
-          <div className="stat-row" key={stat.name}>
-            <span className="stat-row__name">{statLabel(stat.name)}</span>
-            <span className="stat-row__value">{current > 0 ? `+${current}` : current}</span>
-          </div>
-        ) : (
-          <div className="stat-gauge" key={stat.name}>
-            <div className="stat-gauge__head">
+      {sheet.stats.map((stat) => {
+        if (stat.form === "numeric") {
+          const current = stat.current ?? 0;
+          return stat.max === null ? (
+            <div className="stat-row" key={stat.name}>
               <span className="stat-row__name">{statLabel(stat.name)}</span>
-              <span className="stat-row__value">
-                {current}/{stat.max}
-              </span>
+              <span className="stat-row__value">{current > 0 ? `+${current}` : current}</span>
             </div>
-            <div className="gauge">
-              <div
-                className="gauge__fill"
-                style={{
-                  width:
-                    stat.max === 0
-                      ? "0%"
-                      : `${Math.max(0, Math.min(100, (current / stat.max) * 100))}%`,
-                }}
-              />
+          ) : (
+            <div className="stat-gauge" key={stat.name}>
+              <div className="stat-gauge__head">
+                <span className="stat-row__name">{statLabel(stat.name)}</span>
+                <span className="stat-row__value">
+                  {current}/{stat.max}
+                </span>
+              </div>
+              <div className="gauge">
+                <div
+                  className="gauge__fill"
+                  style={{
+                    width:
+                      stat.max === 0
+                        ? "0%"
+                        : `${Math.max(0, Math.min(100, (current / stat.max) * 100))}%`,
+                  }}
+                />
+              </div>
             </div>
-          </div>
-        );
+          );
+        }
+        if (stat.form === "clock") {
+          // 세그먼트 원 — 위협 시계용 ThreatClock을 그대로 재사용한다.
+          // pulsing은 넘기지 않는다(자원 축은 재촉하는 장치가 아니다).
+          return (
+            <div className="stat-clock" key={stat.name}>
+              <span className="stat-row__name">{statLabel(stat.name)}</span>
+              <ThreatClock segment={stat.current ?? 0} segmentCount={stat.max ?? 0} size={40} />
+            </div>
+          );
+        }
+        if (stat.form === "named_slots") {
+          return <SlotGrid key={stat.name} name={stat.name} slotValues={stat.slot_values ?? []} />;
+        }
+        if (stat.form === "tag_list") {
+          return <TagList key={stat.name} name={stat.name} tags={stat.tags ?? []} />;
+        }
+        if (stat.form === "usage_die") {
+          return <UsageDie key={stat.name} name={stat.name} current={stat.current ?? 0} />;
+        }
+        // stat.form === "none": 서버가 이 축을 응답에서 이미 뺐으므로
+        // 화면은 이 갈래에 도달하지 않는다(RULE-12 성공 기준 2,
+        // routes_characters.py의 _visible_stats). 도달 불가 갈래를
+        // 명시적으로 null로 남기고, 「회색으로 보여주기」에 해당하는 어떤
+        // 표시도 넣지 않는다.
+        return null;
       })}
     </>
   );

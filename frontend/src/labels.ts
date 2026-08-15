@@ -105,4 +105,7 @@ export const COPY = {
   characterListError: "캐릭터 목록을 불러오지 못했어요. 새로고침해 주세요",
   characterSheetError: "캐릭터 시트를 불러오지 못했어요",
   loading: "불러오는 중…",
+  noResourceAxes: "이 룰북은 세는 수치를 쓰지 않아요",
+  emptySlot: "빈 칸",
+  usageDieSpent: "다 씀",
 } as const;

@@ -338,6 +338,73 @@ input {
   justify-content: space-between;
 }
 
+/* --- 자원 축 — clock/named_slots/tag_list/usage_die 형태 ----------------- */
+
+.stat-clock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.stat-slots {
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.stat-slots__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.slot {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line-soft);
+  background: var(--ink-500);
+  color: var(--text-dim);
+}
+
+.slot--filled {
+  color: var(--text);
+  border-color: var(--brass-dim);
+}
+
+.stat-tags {
+  padding: var(--space-sm) 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.stat-tags__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-soft);
+  background: var(--ink-500);
+  color: var(--text-dim);
+}
+
+.stat-usage-die {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+
 /* --- 위협 시계 ----------------------------------------------------------- */
 
 .clock {
