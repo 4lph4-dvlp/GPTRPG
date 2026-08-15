@@ -5,8 +5,8 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 11
 current_phase_name: 룰북 표현 어휘 확장
 status: planning
-stopped_at: Completed 10-07-PLAN.md (WR-01/WR-02/WR-03 code review gap closure)
-last_updated: "2026-08-14T02:22:48.523Z"
+stopped_at: Phase 11 context gathered
+last_updated: "2026-08-15T06:59:53.596Z"
 last_activity: 2026-08-14
 last_activity_desc: Phase 10 complete (7/7 plans, verified 6/6)
 progress:
@@ -246,10 +246,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-14T02:17:09.383Z
-Stopped at: Completed 10-07-PLAN.md (WR-01/WR-02/WR-03 code review gap closure)
+Last session: 2026-08-15T06:59:53.553Z
+Stopped at: Phase 11 context gathered
 Traceability 갱신 완료
-Resume file: None
+Resume file: .planning/phases/11-rulebook-vocabulary/11-CONTEXT.md
 
 **다음 행동:** Phase 10(AI 출력 검증과 탈옥 방어) **논의 완료** — `10-CONTEXT.md`에 결정
 13개가 잠겼다. 다음은 `/gsd-plan-phase 10`(조사 → 계획).
