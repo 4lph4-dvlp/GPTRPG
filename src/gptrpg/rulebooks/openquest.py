@@ -8,7 +8,7 @@
 
 from gptrpg.rules_core.resolution import Modifier
 from gptrpg.rules_core.resolution_d100 import TARGET_SHIFT
-from gptrpg.rules_core.rulebook import D100_ROLL_UNDER, GradeBand, Rulebook
+from gptrpg.rules_core.rulebook import D100_ROLL_UNDER, GradeBand, ResourceAxisDecl, Rulebook
 
 OPENQUEST_ID = "openquest"
 
@@ -19,11 +19,27 @@ OPENQUEST_GRADE_BANDS: tuple[GradeBand, ...] = (
     GradeBand(name="failure", counts_as_failure=True),
 )
 
+OPENQUEST_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
+    # 크리처가 실제로 갖고 있는 열 축 — 이 단계는 numeric 형태 하나만
+    # 관통시킨다(11-01).
+    ResourceAxisDecl(name="STR", form="numeric"),
+    ResourceAxisDecl(name="CON", form="numeric"),
+    ResourceAxisDecl(name="DEX", form="numeric"),
+    ResourceAxisDecl(name="SIZ", form="numeric"),
+    ResourceAxisDecl(name="INT", form="numeric"),
+    ResourceAxisDecl(name="POW", form="numeric"),
+    ResourceAxisDecl(name="CHA", form="numeric"),
+    ResourceAxisDecl(name="Hit Points", form="numeric"),
+    ResourceAxisDecl(name="Magic Points", form="numeric"),
+    ResourceAxisDecl(name="Armour Points", form="numeric"),
+)
+
 OPENQUEST = Rulebook(
     rulebook_id=OPENQUEST_ID,
     display_name="OpenQuest",
     resolution_method=D100_ROLL_UNDER,
     grade_bands=OPENQUEST_GRADE_BANDS,
+    resource_axes=OPENQUEST_RESOURCE_AXES,
 )
 
 OPENQUEST_DIFFICULTY: dict[str, int] = {

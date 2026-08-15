@@ -22,10 +22,20 @@ from gptrpg.rulebooks.openquest_creatures import (
 )
 
 
-def test_stat_entry_field_names_are_exactly_four():
-    """체력·피해·태그 같은 칸이 하나도 없다는 구조적 증거 — 완전 일치, 부분집합이 아니다."""
+def test_stat_entry_field_names_are_exactly_eight():
+    """이 시험의 목적은 칸 개수 자체가 아니라 「누가 몰래 칸을 늘리면 즉시
+    드러난다」는 것이다(D-03) — 완전 일치, 부분집합이 아니다."""
     names = {f.name for f in dataclasses.fields(StatEntry)}
-    assert names == {"name", "current", "max", "depleted_effect_ref"}
+    assert names == {
+        "name",
+        "form",
+        "current",
+        "max",
+        "depleted_effect_ref",
+        "slot_values",
+        "tags",
+        "none_kind",
+    }
 
 
 def test_entity_field_names_are_exactly_four():
@@ -39,13 +49,13 @@ def test_entity_with_one_stat_and_entity_with_ten_stats_use_same_class():
         entity_id="e1",
         display_name="한 칸짜리",
         rulebook_id="dungeonworld_like",
-        stats=(StatEntry(name="체력", current=5, max=5),),
+        stats=(StatEntry(name="체력", form="numeric", current=5, max=5),),
     )
     ten_stats = Entity(
         entity_id="e2",
         display_name="열 칸짜리",
         rulebook_id="openquest",
-        stats=tuple(StatEntry(name=f"stat{i}", current=i) for i in range(10)),
+        stats=tuple(StatEntry(name=f"stat{i}", form="numeric", current=i) for i in range(10)),
     )
     assert type(one_stat) is type(ten_stats)
     assert len(one_stat.stats) == 1
@@ -60,44 +70,44 @@ def test_entity_with_empty_stats_tuple_is_valid():
 
 def test_stat_entry_with_none_max_is_valid():
     """max가 None인 상태값(상한이 없는 값)이 정상이다."""
-    entry = StatEntry(name="사기", current=3, max=None)
+    entry = StatEntry(name="사기", form="numeric", current=3, max=None)
     assert entry.max is None
 
 
 def test_stat_entry_with_zero_current_is_valid():
     """값이 0인 상태값(예: 마법점 0)은 정상이며 거부되지 않는다."""
-    entry = StatEntry(name="마법점", current=0, max=10)
+    entry = StatEntry(name="마법점", form="numeric", current=0, max=10)
     assert entry.current == 0
 
 
 def test_stat_entry_with_negative_current_is_valid():
     """current가 음수여도 거부되지 않는다 — 0 아래로 깎인 값의 뜻은 룰북이 정한다."""
-    entry = StatEntry(name="체력", current=-3, max=10)
+    entry = StatEntry(name="체력", form="numeric", current=-3, max=10)
     assert entry.current == -3
 
 
 def test_stat_entry_with_negative_max_raises():
     with pytest.raises(InvalidStatEntry):
-        StatEntry(name="체력", current=5, max=-1)
+        StatEntry(name="체력", form="numeric", current=5, max=-1)
 
 
 def test_stat_entry_with_empty_name_raises():
     with pytest.raises(InvalidStatEntry):
-        StatEntry(name="", current=5)
+        StatEntry(name="", form="numeric", current=5)
 
 
 def test_stat_entry_with_whitespace_only_name_raises():
     with pytest.raises(InvalidStatEntry):
-        StatEntry(name="   ", current=5)
+        StatEntry(name="   ", form="numeric", current=5)
 
 
 def test_stat_entry_with_empty_depleted_effect_ref_raises():
     with pytest.raises(InvalidStatEntry):
-        StatEntry(name="체력", current=5, depleted_effect_ref="")
+        StatEntry(name="체력", form="numeric", current=5, depleted_effect_ref="")
 
 
 def test_stat_entry_with_none_depleted_effect_ref_is_valid():
-    entry = StatEntry(name="체력", current=5, depleted_effect_ref=None)
+    entry = StatEntry(name="체력", form="numeric", current=5, depleted_effect_ref=None)
     assert entry.depleted_effect_ref is None
 
 
@@ -108,8 +118,8 @@ def test_entity_with_duplicate_stat_names_raises():
             display_name="중복 적",
             rulebook_id="dungeonworld_like",
             stats=(
-                StatEntry(name="체력", current=5),
-                StatEntry(name="체력", current=3),
+                StatEntry(name="체력", form="numeric", current=5),
+                StatEntry(name="체력", form="numeric", current=3),
             ),
         )
 
@@ -130,7 +140,7 @@ def test_entity_with_empty_rulebook_id_raises():
 
 
 def test_stat_entry_is_frozen():
-    entry = StatEntry(name="체력", current=5)
+    entry = StatEntry(name="체력", form="numeric", current=5)
     with pytest.raises(Exception):  # noqa: B017 - dataclasses.FrozenInstanceError
         entry.current = 999
 

@@ -12,7 +12,7 @@
 
 from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.grading import WEAK_HIT_BAND
-from gptrpg.rules_core.rulebook import TWO_D6, GradeBand, Rulebook
+from gptrpg.rules_core.rulebook import TWO_D6, GradeBand, ResourceAxisDecl, Rulebook
 
 DUNGEONWORLD_LIKE_ID = "dungeonworld_like"
 
@@ -22,11 +22,25 @@ DUNGEONWORLD_GRADE_BANDS: tuple[GradeBand, ...] = (
     GradeBand(name="miss", counts_as_failure=True),
 )
 
+DUNGEONWORLD_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
+    # 캐릭터·적이 실제로 갖고 있는 여덟 축 그대로 — 이 단계는 numeric 형태
+    # 하나만 관통시킨다(11-01). 여섯 형태 전부는 11-03이 붙인다.
+    ResourceAxisDecl(name="체력", form="numeric"),
+    ResourceAxisDecl(name="STR", form="numeric"),
+    ResourceAxisDecl(name="DEX", form="numeric"),
+    ResourceAxisDecl(name="CON", form="numeric"),
+    ResourceAxisDecl(name="INT", form="numeric"),
+    ResourceAxisDecl(name="WIS", form="numeric"),
+    ResourceAxisDecl(name="CHA", form="numeric"),
+    ResourceAxisDecl(name="방어구", form="numeric"),
+)
+
 DUNGEONWORLD_LIKE = Rulebook(
     rulebook_id=DUNGEONWORLD_LIKE_ID,
     display_name="Dungeonworld-like",
     resolution_method=TWO_D6,
     grade_bands=DUNGEONWORLD_GRADE_BANDS,
+    resource_axes=DUNGEONWORLD_RESOURCE_AXES,
 )
 
 # 자체 작성 예시 — 어떤 룰북 원문에서도 오지 않았다(D-18이 배제한 자체 창작
@@ -40,6 +54,7 @@ EXAMPLE_SINGLE_STAT_FOE = Entity(
     stats=(
         StatEntry(
             name="체력",
+            form="numeric",
             current=5,
             max=5,
             depleted_effect_ref="dungeonworld_like.hp_depleted",

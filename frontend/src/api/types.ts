@@ -144,9 +144,13 @@ export interface CharacterSummary {
 
 export interface StatEntry {
   name: string;
-  current: number;
+  form: "numeric" | "clock" | "named_slots" | "tag_list" | "usage_die" | "none";
+  current: number | null;
   max: number | null;
   depleted_effect_ref: string | null;
+  slot_values: (string | null)[] | null;
+  tags: string[] | null;
+  none_kind: "discretionary" | "absent" | null;
 }
 
 export interface CharacterSheet {

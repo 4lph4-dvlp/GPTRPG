@@ -282,6 +282,9 @@ _GAPPED_RULEBOOK = Rulebook(
     display_name="갭 테스트 전용 (margin>=0만 선언, 실패 구간 없음)",
     resolution_method=D100_ROLL_UNDER,
     grade_bands=(GradeBand(name="success", counts_as_failure=False, margin_at_least=0),),
+    # 이 시험 전용 룰북은 축이 없는 것이 맞다 — 「없다」를 명시하는 것이
+    # D-02가 요구하는 모양이다(resource_axes는 기본값 없는 필수 필드).
+    resource_axes=(),
 )
 
 

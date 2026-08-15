@@ -55,12 +55,16 @@ COOKIE_MAX_AGE_S = 60 * 60 * 24 * 14
 
 
 class StatEntryView(BaseModel):
-    """`StatEntry`의 네 칸 그대로 — 칸 이름을 한 글자도 다르게 짓지 않는다."""
+    """`StatEntry`의 여덟 칸 그대로 — 칸 이름을 한 글자도 다르게 짓지 않는다."""
 
     name: str
-    current: int
+    form: str
+    current: int | None = None
     max: int | None = None
     depleted_effect_ref: str | None = None
+    slot_values: list[str | None] | None = None
+    tags: list[str] | None = None
+    none_kind: str | None = None
 
 
 class CharacterSheetView(BaseModel):

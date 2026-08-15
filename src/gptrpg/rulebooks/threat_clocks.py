@@ -115,11 +115,12 @@ THREAT_CAST: tuple[Entity, ...] = (
         stats=(
             StatEntry(
                 name="체력",
+                form="numeric",
                 current=12,
                 max=12,
                 depleted_effect_ref="dungeonworld_like.hp_depleted",
             ),
-            StatEntry(name="방어구", current=1),
+            StatEntry(name="방어구", form="numeric", current=1),
         ),
     ),
     Entity(

@@ -43,6 +43,7 @@ def test_known_character_sheet_matches_characters_data(web_client: TestClient) -
     assert len(body["stats"]) == len(entity.stats)
     for stat_view, stat in zip(body["stats"], entity.stats, strict=True):
         assert stat_view["name"] == stat.name
+        assert stat_view["form"] == stat.form
         assert stat_view["current"] == stat.current
         assert stat_view["max"] == stat.max
         assert stat_view["depleted_effect_ref"] == stat.depleted_effect_ref
@@ -70,7 +71,16 @@ def test_different_stat_counts_produce_same_shaped_response(web_client: TestClie
     assert top_level_keys == set(nari_response.json().keys())
     for stats_list in (bram_response.json()["stats"], nari_response.json()["stats"]):
         for stat_view in stats_list:
-            assert set(stat_view.keys()) == {"name", "current", "max", "depleted_effect_ref"}
+            assert set(stat_view.keys()) == {
+                "name",
+                "form",
+                "current",
+                "max",
+                "depleted_effect_ref",
+                "slot_values",
+                "tags",
+                "none_kind",
+            }
 
 
 def test_character_sheet_route_rejects_all_write_methods(web_client: TestClient) -> None:

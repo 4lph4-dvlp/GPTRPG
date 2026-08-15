@@ -338,7 +338,7 @@ def _real_narration_facts() -> NarrationFacts:
         scene_summary="문이 부서지고 서늘한 바람이 흘러든다.",
         facts=("경비병이 쓰러졌다",),
         scene_entities=THREAT_CAST,
-        character_state=(StatEntry(name="체력", current=5, max=10),),
+        character_state=(StatEntry(name="체력", form="numeric", current=5, max=10),),
         recent_turns=(),
         new_entities=(),
     )

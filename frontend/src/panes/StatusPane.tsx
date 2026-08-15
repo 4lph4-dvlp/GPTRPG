@@ -26,35 +26,42 @@ interface StatusPaneProps {
 }
 
 function StatRows({ sheet }: { sheet: CharacterSheet }) {
+  // 이번 계획(11-01)은 여섯 표현 형태 중 numeric 하나만 화면까지 관통시킨다
+  // — 나머지 다섯(clock/named_slots/tag_list/usage_die/none)은 11-03이
+  // 붙인다. 지금은 어떤 룰북도 그 다섯을 선언하지 않으므로 이 필터는
+  // 아직 아무것도 걸러내지 않지만, 명시적 판별을 구조로 남겨 둔다.
+  const numericStats = sheet.stats.filter((stat) => stat.form === "numeric");
   return (
     <>
-      {sheet.stats.map((stat) =>
-        stat.max === null ? (
+      {numericStats.map((stat) => {
+        const current = stat.current ?? 0;
+        return stat.max === null ? (
           <div className="stat-row" key={stat.name}>
             <span className="stat-row__name">{statLabel(stat.name)}</span>
-            <span className="stat-row__value">
-              {stat.current > 0 ? `+${stat.current}` : stat.current}
-            </span>
+            <span className="stat-row__value">{current > 0 ? `+${current}` : current}</span>
           </div>
         ) : (
           <div className="stat-gauge" key={stat.name}>
             <div className="stat-gauge__head">
               <span className="stat-row__name">{statLabel(stat.name)}</span>
               <span className="stat-row__value">
-                {stat.current}/{stat.max}
+                {current}/{stat.max}
               </span>
             </div>
             <div className="gauge">
               <div
                 className="gauge__fill"
                 style={{
-                  width: `${Math.max(0, Math.min(100, (stat.current / stat.max) * 100))}%`,
+                  width:
+                    stat.max === 0
+                      ? "0%"
+                      : `${Math.max(0, Math.min(100, (current / stat.max) * 100))}%`,
                 }}
               />
             </div>
           </div>
-        ),
-      )}
+        );
+      })}
     </>
   );
 }

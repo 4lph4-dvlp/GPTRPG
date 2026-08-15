@@ -3,7 +3,9 @@
 **브람·나리는 D-49에 따라 확정된 캐릭터다**(경험자 2명이 쓸 캐릭터) — 두
 캐릭터의 `StatEntry` 값은 이 파일이 처음 지어낸 그대로 유지되며, 이 계획이
 바꾸는 것은 `CHARACTER_ARCHETYPES`의 한 줄 소개뿐이다. 수치를 다시 계산하거나
-재배치하지 않는다.
+재배치하지 않는다. (이 규율은 11-01이 `StatEntry`에 `form="numeric"`을
+채워 넣기 전부터, 즉 이번 변경 이전에도 이미 적용되고 있었다 — 이번
+변경도 그 규율을 어기지 않는다.)
 
 **선·호두는 세션 당일 비경험자 2명이 구두 안내로 새로 만드는 자리를 채울
 자리표시자다.** 아래 신규 캐릭터 규격(`NEW_CHARACTER_STAT_ARRAY` 등)을
@@ -53,20 +55,21 @@ PLAYER_CHARACTERS: dict[str, Entity] = {
         stats=(
             StatEntry(
                 name="체력",
+                form="numeric",
                 current=20,
                 max=20,
                 depleted_effect_ref="dungeonworld_like.hp_depleted",
             ),
-            StatEntry(name="STR", current=2),
-            StatEntry(name="DEX", current=0),
-            StatEntry(name="CON", current=1),
-            StatEntry(name="INT", current=-1),
-            StatEntry(name="WIS", current=0),
-            StatEntry(name="CHA", current=0),
+            StatEntry(name="STR", form="numeric", current=2),
+            StatEntry(name="DEX", form="numeric", current=0),
+            StatEntry(name="CON", form="numeric", current=1),
+            StatEntry(name="INT", form="numeric", current=-1),
+            StatEntry(name="WIS", form="numeric", current=0),
+            StatEntry(name="CHA", form="numeric", current=0),
             # bram만 갖는 일곱 번째 상태값 — 넷 중 상태값 개수가 서로 다른
             # 쌍을 최소 하나 만들어, 개수가 달라도 같은 화면으로 그려짐을
             # 시험이 확인할 수 있게 한다.
-            StatEntry(name="방어구", current=2),
+            StatEntry(name="방어구", form="numeric", current=2),
         ),
     ),
     "nari": Entity(
@@ -76,16 +79,17 @@ PLAYER_CHARACTERS: dict[str, Entity] = {
         stats=(
             StatEntry(
                 name="체력",
+                form="numeric",
                 current=16,
                 max=16,
                 depleted_effect_ref="dungeonworld_like.hp_depleted",
             ),
-            StatEntry(name="STR", current=0),
-            StatEntry(name="DEX", current=2),
-            StatEntry(name="CON", current=0),
-            StatEntry(name="INT", current=1),
-            StatEntry(name="WIS", current=1),
-            StatEntry(name="CHA", current=-1),
+            StatEntry(name="STR", form="numeric", current=0),
+            StatEntry(name="DEX", form="numeric", current=2),
+            StatEntry(name="CON", form="numeric", current=0),
+            StatEntry(name="INT", form="numeric", current=1),
+            StatEntry(name="WIS", form="numeric", current=1),
+            StatEntry(name="CHA", form="numeric", current=-1),
         ),
     ),
     "seon": Entity(
@@ -96,16 +100,17 @@ PLAYER_CHARACTERS: dict[str, Entity] = {
             # 신규 캐릭터 규격에 맞춘 자리표시자 — 세션 당일 통째로 교체된다(D-49).
             StatEntry(
                 name="체력",
+                form="numeric",
                 current=16,
                 max=16,
                 depleted_effect_ref="dungeonworld_like.hp_depleted",
             ),
-            StatEntry(name="STR", current=2),
-            StatEntry(name="DEX", current=1),
-            StatEntry(name="CON", current=0),
-            StatEntry(name="INT", current=1),
-            StatEntry(name="WIS", current=0),
-            StatEntry(name="CHA", current=-1),
+            StatEntry(name="STR", form="numeric", current=2),
+            StatEntry(name="DEX", form="numeric", current=1),
+            StatEntry(name="CON", form="numeric", current=0),
+            StatEntry(name="INT", form="numeric", current=1),
+            StatEntry(name="WIS", form="numeric", current=0),
+            StatEntry(name="CHA", form="numeric", current=-1),
         ),
     ),
     "hodu": Entity(
@@ -116,16 +121,17 @@ PLAYER_CHARACTERS: dict[str, Entity] = {
             # 신규 캐릭터 규격에 맞춘 자리표시자 — 세션 당일 통째로 교체된다(D-49).
             StatEntry(
                 name="체력",
+                form="numeric",
                 current=18,
                 max=18,
                 depleted_effect_ref="dungeonworld_like.hp_depleted",
             ),
-            StatEntry(name="STR", current=0),
-            StatEntry(name="DEX", current=1),
-            StatEntry(name="CON", current=1),
-            StatEntry(name="INT", current=-1),
-            StatEntry(name="WIS", current=2),
-            StatEntry(name="CHA", current=0),
+            StatEntry(name="STR", form="numeric", current=0),
+            StatEntry(name="DEX", form="numeric", current=1),
+            StatEntry(name="CON", form="numeric", current=1),
+            StatEntry(name="INT", form="numeric", current=-1),
+            StatEntry(name="WIS", form="numeric", current=2),
+            StatEntry(name="CHA", form="numeric", current=0),
         ),
     ),
 }
