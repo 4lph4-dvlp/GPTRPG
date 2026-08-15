@@ -138,6 +138,55 @@ class UnknownGradeName(Exception):
         self.grade_name = grade_name
 
 
+class ShadowedGradeBand(Exception):
+    """어떤 `(margin, is_doubles)` 조합에서도 한 번도 승자가 되지 못하는
+    등급 밴드가 있을 때 던진다 — 앞선 밴드들에 완전히 가려져 선언 순서상
+    영영 선택될 수 없는 밴드다(D-15 ①).
+
+    조용히 등록되면 그 등급 이름은 게임이 끝날 때까지 판정 결과로 단 한 번도
+    나오지 않는데도, 룰북 작성자는 그 사실을 등록 시점에 알 방법이 없다 —
+    `NoMatchingGradeBand`가 "구멍"을 런타임에 잡는 것과 대칭으로, 이 예외는
+    "가려짐"을 등록 시점에 잡는다.
+    """
+
+    def __init__(self, band_name: str) -> None:
+        super().__init__(f"등급 밴드 {band_name!r}가 앞선 밴드들에 완전히 가려져 있다")
+        self.band_name = band_name
+
+
+class UncoveredOutcomeGap(Exception):
+    """어떤 `(margin, is_doubles)` 조합도 어느 밴드에도 안 맞는 구멍이
+    있을 때 던진다(D-15 ②).
+
+    조용히 등록되면 그 조합이 실제 판정에서 나올 때 `grade_for_margin`이
+    `NoMatchingGradeBand`를 던져 진행 중이던 턴을 죽인다 — 이 예외는 그
+    실패를 게임 도중이 아니라 룰북 등록 시점으로 앞당긴다.
+    """
+
+    def __init__(self, margin: int, is_doubles: bool) -> None:
+        super().__init__(
+            f"margin={margin}, is_doubles={is_doubles} 조합에 맞는 등급 밴드가 없다"
+        )
+        self.margin = margin
+        self.is_doubles = is_doubles
+
+
+def _band_matches(band: GradeBand, margin: int, is_doubles: bool) -> bool:
+    """밴드 하나가 이 `(margin, is_doubles)` 조합의 제약을 전부 만족하는가.
+
+    `grade_for_margin`과 `validate_grade_bands`가 이 헬퍼 하나를 공유한다 —
+    두 곳이 서로 다른 판정 규칙을 쓰면 등록에서 통과한 룰북이 런타임에
+    `NoMatchingGradeBand`를 던지는 어긋남이 생긴다.
+    """
+    if band.margin_at_least is not None and margin < band.margin_at_least:
+        return False
+    if band.margin_at_most is not None and margin > band.margin_at_most:
+        return False
+    if band.requires_doubles is not None and is_doubles != band.requires_doubles:
+        return False
+    return True
+
+
 def grade_for_margin(margin: int, is_doubles: bool, bands: tuple[GradeBand, ...]) -> GradeBand:
     """선언 순서대로 훑어 제약을 전부 만족하는 첫 밴드를 돌려준다.
 
@@ -146,14 +195,69 @@ def grade_for_margin(margin: int, is_doubles: bool, bands: tuple[GradeBand, ...]
     던진다 — 조용히 `None`을 돌려주지 않는다.
     """
     for band in bands:
-        if band.margin_at_least is not None and margin < band.margin_at_least:
-            continue
-        if band.margin_at_most is not None and margin > band.margin_at_most:
-            continue
-        if band.requires_doubles is not None and is_doubles != band.requires_doubles:
-            continue
-        return band
+        if _band_matches(band, margin, is_doubles):
+            return band
     raise NoMatchingGradeBand(margin, is_doubles)
+
+
+def validate_grade_bands(bands: tuple[GradeBand, ...]) -> None:
+    """등급 밴드 선언에 「가려짐」이나 「구멍」이 있으면 등록 시점에
+    거부한다(D-15, QUAL-03).
+
+    **단순 겹침은 판정 대상이 아니다.** 두 밴드의 구간이 겹치는지 자체는
+    아무 데서도 묻지 않는다 — `grade_for_margin`이 선언 순서대로 첫 매치를
+    돌려주는 방식으로 겹침을 정상적으로 해소하기 때문이다. 이 저장소의 두
+    룰북(던전월드류의 `strong_hit`/`weak_hit`, OpenQuest의 `critical`/`success`)이
+    실제로 겹치게 선언돼 있다 — "겹치면 거부"를 글자 그대로 구현하면 이
+    저장소 자신의 룰북 둘을 등록 거부하게 된다. 그래서 이 함수가 묻는 것은
+    "겹치는가"가 아니라 "선언 순서대로 훑었을 때 한 번이라도 승자가 되어
+    본 적이 있는가"뿐이다.
+
+    **알고리즘.** `is_doubles`가 참/거짓인 두 세계로 나눈다. 각 세계 안에서,
+    그 세계에 참여하는(`requires_doubles`가 `None`이거나 그 세계와 같은)
+    밴드들의 경계(`margin_at_least`, `margin_at_most + 1`)로 정수선을 유한
+    개의 원자 구간으로 쪼갠다. 각 원자 구간의 대표 margin 값 하나마다
+    `grade_for_margin`과 정확히 같은 「선언 순서 첫 매치」 규칙(`_band_matches`)
+    으로 승자를 가린다. 두 세계 × 모든 구간을 통틀어 한 번도 승자가 아닌
+    밴드가 있으면 `ShadowedGradeBand`, 승자가 하나도 없는 구간이 있으면
+    `UncoveredOutcomeGap`.
+    """
+    matched_indices: set[int] = set()
+    for is_doubles in (True, False):
+        participating = [
+            band
+            for band in bands
+            if band.requires_doubles is None or band.requires_doubles == is_doubles
+        ]
+        breakpoints: set[int] = set()
+        for band in participating:
+            if band.margin_at_least is not None:
+                breakpoints.add(band.margin_at_least)
+            if band.margin_at_most is not None:
+                breakpoints.add(band.margin_at_most + 1)
+        if breakpoints:
+            representative_margins: set[int] = set()
+            for point in breakpoints:
+                representative_margins.add(point)
+                representative_margins.add(point - 1)
+        else:
+            # 참여 밴드 전부가 margin에 아무 제약이 없다(정수선 전체를
+            # 덮거나, 참여 밴드가 아예 없다) — 대표점 하나면 충분하다.
+            representative_margins = {0}
+
+        for margin in sorted(representative_margins):
+            winner_index: int | None = None
+            for index, band in enumerate(bands):
+                if _band_matches(band, margin, is_doubles):
+                    winner_index = index
+                    break
+            if winner_index is None:
+                raise UncoveredOutcomeGap(margin=margin, is_doubles=is_doubles)
+            matched_indices.add(winner_index)
+
+    for index, band in enumerate(bands):
+        if index not in matched_indices:
+            raise ShadowedGradeBand(band_name=band.name)
 
 
 def require_band(bands: tuple[GradeBand, ...], grade_name: str) -> GradeBand:
