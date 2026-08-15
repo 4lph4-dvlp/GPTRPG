@@ -11,26 +11,35 @@
 
 import pytest
 
+from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.rulebook import (
     TWO_D6,
+    EntityAxisMismatch,
     GradeBand,
     InvalidResourceAxis,
     ResourceAxisDecl,
     Rulebook,
     ShadowedGradeBand,
     UncoveredOutcomeGap,
+    validate_entity_axes,
     validate_grade_bands,
+    validate_move_stats,
 )
+from gptrpg.rulebooks import get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import (
     DUNGEONWORLD_GRADE_BANDS,
     DUNGEONWORLD_LIKE,
+    DUNGEONWORLD_LIKE_ID,
     DUNGEONWORLD_RESOURCE_AXES,
+    EXAMPLE_SINGLE_STAT_FOE,
 )
 from gptrpg.rulebooks.openquest import (
     OPENQUEST,
     OPENQUEST_GRADE_BANDS,
     OPENQUEST_RESOURCE_AXES,
 )
+from gptrpg.rulebooks.openquest_creatures import OPENQUEST_CREATURES
+from gptrpg.web.characters_data import PLAYER_CHARACTERS
 
 _EMPTY_BANDS: tuple[GradeBand, ...] = ()
 
@@ -227,3 +236,83 @@ def test_declaration_order_decides_shadowing():
         GradeBand(name="catch_all", counts_as_failure=True),
     )
     validate_grade_bands(catch_all_last)  # 예외 없이 통과한다 — 순서를 바꾸면 결과가 바뀐다
+
+
+# ---------------------------------------------------------------------------
+# 개체-룰북 축 정합성 검증 (D-01) — 11-02
+# ---------------------------------------------------------------------------
+
+
+def test_all_player_characters_match_their_rulebook_axes():
+    """브람·나리·선·호두 넷 전부 던전월드류 축 선언을 통과한다."""
+    for entity in PLAYER_CHARACTERS.values():
+        validate_entity_axes(entity, get_rulebook(entity.rulebook_id))
+
+
+def test_all_openquest_creatures_match_their_rulebook_axes():
+    """OpenQuest 고블린·스켈레톤 둘 다 OpenQuest 축 선언을 통과한다."""
+    for entity in OPENQUEST_CREATURES:
+        validate_entity_axes(entity, get_rulebook(entity.rulebook_id))
+
+
+def test_example_single_stat_foe_matches_its_rulebook_axes():
+    """`EXAMPLE_SINGLE_STAT_FOE`가 통과한다."""
+    validate_entity_axes(EXAMPLE_SINGLE_STAT_FOE, DUNGEONWORLD_LIKE)
+
+
+def test_undeclared_axis_name_on_entity_is_rejected():
+    """룰북이 선언하지 않은 이름의 `StatEntry`를 가진 개체는
+    `EntityAxisMismatch`다."""
+    entity = Entity(
+        entity_id="test.undeclared_axis",
+        display_name="시험용",
+        rulebook_id=DUNGEONWORLD_LIKE_ID,
+        stats=(StatEntry(name="존재하지 않는 축", form="numeric", current=1),),
+    )
+    with pytest.raises(EntityAxisMismatch):
+        validate_entity_axes(entity, DUNGEONWORLD_LIKE)
+
+
+def test_entity_form_must_match_declared_axis_form():
+    """축은 `form="numeric"`으로 선언됐는데 개체의 `StatEntry.form`이
+    다르면 `EntityAxisMismatch`다."""
+    entity = Entity(
+        entity_id="test.form_mismatch",
+        display_name="시험용",
+        rulebook_id=DUNGEONWORLD_LIKE_ID,
+        stats=(StatEntry(name="체력", form="clock", current=1, max=1),),
+    )
+    with pytest.raises(EntityAxisMismatch):
+        validate_entity_axes(entity, DUNGEONWORLD_LIKE)
+
+
+def test_axis_name_comparison_is_exact_no_normalization():
+    """이름 비교는 완전 일치다 — `"체력 "`(뒤 공백)은 `"체력"` 축으로
+    인정되지 않는다."""
+    entity = Entity(
+        entity_id="test.trailing_space",
+        display_name="시험용",
+        rulebook_id=DUNGEONWORLD_LIKE_ID,
+        stats=(StatEntry(name="체력 ", form="numeric", current=1),),
+    )
+    with pytest.raises(EntityAxisMismatch):
+        validate_entity_axes(entity, DUNGEONWORLD_LIKE)
+
+
+def test_declared_axis_not_present_on_entity_is_legal():
+    """룰북이 선언한 축 중 개체가 안 가진 것은 위반이 아니다(D-04) —
+    방향은 개체 → 룰북 한쪽뿐이다."""
+    entity = Entity(
+        entity_id="test.partial_axes",
+        display_name="시험용",
+        rulebook_id=DUNGEONWORLD_LIKE_ID,
+        stats=(StatEntry(name="체력", form="numeric", current=10, max=10),),
+    )
+    validate_entity_axes(entity, DUNGEONWORLD_LIKE)  # 예외 없이 통과한다
+
+
+def test_move_default_stat_must_be_a_declared_axis():
+    """`MoveDecl.default_stat`이 축 목록에 없는 이름이면 `EntityAxisMismatch`다."""
+    validate_move_stats(("체력", "STR"), DUNGEONWORLD_LIKE)  # 예외 없이 통과한다
+    with pytest.raises(EntityAxisMismatch):
+        validate_move_stats(("존재하지 않는 능력치",), DUNGEONWORLD_LIKE)

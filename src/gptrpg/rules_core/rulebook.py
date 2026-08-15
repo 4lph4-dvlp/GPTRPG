@@ -7,9 +7,10 @@
 몰라도 같은 수치 구간 어휘로 등급을 선언할 수 있다.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
-from gptrpg.rules_core.entities import NoneKind, ResourceAxisForm
+from gptrpg.rules_core.entities import Entity, NoneKind, ResourceAxisForm
 
 TWO_D6 = "2d6"
 """판정 **방식** 이름 — 플랫폼이 제공하는 계산 능력의 이름이지 룰북 어휘가 아니다."""
@@ -266,3 +267,80 @@ def require_band(bands: tuple[GradeBand, ...], grade_name: str) -> GradeBand:
         if band.name == grade_name:
             return band
     raise UnknownGradeName(grade_name)
+
+
+class EntityAxisMismatch(Exception):
+    """개체가 가진 상태값 이름·형태, 또는 무브가 가리키는 능력치 이름이
+    그 룰북이 선언한 자원 축과 어긋날 때 던진다(D-01).
+
+    조용히 통과하면 룰북이 모르는 이름의 상태값이나 존재하지 않는 축을
+    가리키는 무브가 등록되고, 그 어긋남은 화면·분류기 프롬프트에 닿기
+    전까지 어디서도 드러나지 않는다.
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        entity_id: str | None = None,
+        axis_name: str | None = None,
+    ) -> None:
+        super().__init__(
+            f"자원 축이 룰북 선언과 어긋난다: {reason}"
+            f" (entity_id={entity_id!r}, axis_name={axis_name!r})"
+        )
+        self.reason = reason
+        self.entity_id = entity_id
+        self.axis_name = axis_name
+
+
+def validate_entity_axes(entity: Entity, rulebook: Rulebook) -> None:
+    """개체가 가진 각 상태값이 그 개체 룰북이 선언한 자원 축 안에 있는지
+    검사한다(D-01) — 「이 세계에 존재하는 축」(룰북)과 「이 개체가 가진
+    축」(개체)의 분리를 검사로 성립시킨다.
+
+    이름 비교는 파이썬 `==` 완전 일치다 — 유니코드 정규화·대소문자 접기·
+    앞뒤 공백 제거를 하지 않는다. 일치하는 축을 찾으면 `StatEntry.form`이
+    그 `ResourceAxisDecl.form`과 같은지도 검사한다. 룰북이 선언한 축 중
+    개체가 안 가진 것은 위반이 아니다(D-04) — 방향은 개체 → 룰북 한쪽뿐이다.
+
+    **강제 범위(D-06):** 이 함수는 「개체가 든 이름이 룰북이 적은 이름
+    목록 안에 있는가」만 묻는다. 「체력」·「소지품」·「스트레스」·「진행
+    원」 같은 룰북 어휘 이름을 이 함수의 상수나 조건문으로 쓰지 않는다 —
+    그것이 이 저장소가 금지하는 특정 룰북 편향이다.
+    """
+    axes_by_name = {axis.name: axis for axis in rulebook.resource_axes}
+    for stat in entity.stats:
+        axis = axes_by_name.get(stat.name)
+        if axis is None:
+            raise EntityAxisMismatch(
+                f"룰북 {rulebook.rulebook_id!r}에 선언되지 않은 축 이름 {stat.name!r}",
+                entity_id=entity.entity_id,
+                axis_name=stat.name,
+            )
+        if stat.form != axis.form:
+            raise EntityAxisMismatch(
+                f"축 {stat.name!r}의 선언된 form({axis.form!r})과 엔티티의"
+                f" form({stat.form!r})이 다르다",
+                entity_id=entity.entity_id,
+                axis_name=stat.name,
+            )
+
+
+def validate_move_stats(default_stats: Iterable[str], rulebook: Rulebook) -> None:
+    """룰북 무브의 `default_stat` 문자열들이 그 룰북의 `resource_axes`
+    이름 목록 안에 있는지 검사한다.
+
+    `MoveDecl`은 `gptrpg.rulebooks.moves`에 있어 `rules_core`가 그 타입을
+    import할 수 없다(`.importlinter` contract 2, `rulebooks`는
+    `rules_core`보다 아래 층이다) — 그래서 이 함수는 `MoveDecl` 타입이
+    아니라 문자열 이터러블만 받는다. 층 경계를 넘지 않기 위한 의도적
+    선택이다.
+    """
+    axis_names = {axis.name for axis in rulebook.resource_axes}
+    for default_stat in default_stats:
+        if default_stat not in axis_names:
+            raise EntityAxisMismatch(
+                f"MoveDecl.default_stat {default_stat!r}가 룰북"
+                f" {rulebook.rulebook_id!r}의 자원 축 목록에 없다",
+                axis_name=default_stat,
+            )
