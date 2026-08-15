@@ -43,6 +43,88 @@ def test_entity_field_names_are_exactly_four():
     assert names == {"entity_id", "display_name", "rulebook_id", "stats"}
 
 
+# ---------------------------------------------------------------------------
+# 11-01 Task 2 — 여섯 형태 정합성 + 「값 0 / 개념 없음 / 규칙으로 안 셈」 구분
+# (D-13, D-05, RULE-11, RULE-12)
+# ---------------------------------------------------------------------------
+
+_FORM_PAYLOAD_CASES: tuple[tuple[str, dict, dict], ...] = (
+    # (form, 그 형태의 올바른 페이로드, 다른 형태의 페이로드를 섞은 잘못된 조합)
+    ("numeric", {"current": 5}, {"current": 5, "tags": ("젖음",)}),
+    ("clock", {"current": 2, "max": 4}, {"current": 2}),  # max 누락
+    ("named_slots", {"slot_values": ("검", None, "물약")}, {"current": 1}),
+    ("tag_list", {"tags": ()}, {"current": 1}),
+    ("usage_die", {"current": 3, "max": 6}, {"tags": ()}),  # current 누락
+    ("none", {"none_kind": "absent"}, {"current": 0}),  # none_kind 누락
+)
+
+
+@pytest.mark.parametrize("form,valid_kwargs,invalid_kwargs", _FORM_PAYLOAD_CASES)
+def test_axis_form_payload_mismatch_is_rejected(form, valid_kwargs, invalid_kwargs):
+    """여섯 형태 각각 — 자기 페이로드 칸만 채우면 통과하고, 다른 형태의
+    페이로드를 섞으면 `InvalidStatEntry`다(Pitfall 1, T-11-01). 두 형태가
+    동시에 채워진 값이 화면·판정 코드에서 `None` 역참조를 일으키는 경로를
+    생성자 단계에서 막는다."""
+    entry = StatEntry(name="시험축", form=form, **valid_kwargs)
+    assert entry.form == form
+
+    with pytest.raises(InvalidStatEntry):
+        StatEntry(name="시험축", form=form, **invalid_kwargs)
+
+
+def test_zero_value_and_absent_concept_are_different_entries():
+    """`form="numeric", current=0`과 `form="none", none_kind="absent"`이
+    서로 같지 않다 — 값이 0인 것과 개념 자체가 없는 것은 다른 사실이다
+    (RULE-12 성공 기준 3)."""
+    zero_value = StatEntry(name="마법점", form="numeric", current=0)
+    absent_concept = StatEntry(name="마법점", form="none", none_kind="absent")
+
+    assert zero_value != absent_concept
+    assert zero_value.current == 0
+    assert absent_concept.current is None
+
+
+def test_discretionary_and_absent_are_different_none_kinds():
+    """D-05의 두 갈래(`discretionary`="규칙으로 안 센다" /
+    `absent`="개념 자체가 없다")가 한 값으로 뭉개지지 않는다."""
+    discretionary = StatEntry(name="소지품", form="none", none_kind="discretionary")
+    absent = StatEntry(name="소지품", form="none", none_kind="absent")
+
+    assert discretionary != absent
+    assert discretionary.none_kind == "discretionary"
+    assert absent.none_kind == "absent"
+
+
+def test_numeric_max_zero_is_valid_and_negative_max_is_rejected():
+    """`max=0`인 `numeric`은 정상(RULE-11 boundary) — 0으로 나누는 자리가
+    아니라 "상한이 0인 정상값"이다. `max=-1`은 여전히 거부된다."""
+    entry = StatEntry(name="마법점", form="numeric", current=0, max=0)
+    assert entry.max == 0
+
+    with pytest.raises(InvalidStatEntry):
+        StatEntry(name="마법점", form="numeric", current=0, max=-1)
+
+
+def test_clock_current_may_equal_max_but_not_exceed_it():
+    """`clock`은 원이 다 찬 상태(`current == max`)와 빈 상태(`current == 0`)가
+    둘 다 정상이고, `current > max`는 거부된다(RULE-11 boundary)."""
+    full = StatEntry(name="위협 시계", form="clock", current=4, max=4)
+    assert full.current == full.max == 4
+
+    empty = StatEntry(name="위협 시계", form="clock", current=0, max=4)
+    assert empty.current == 0
+
+    with pytest.raises(InvalidStatEntry):
+        StatEntry(name="위협 시계", form="clock", current=5, max=4)
+
+
+def test_tag_list_accepts_empty_tags():
+    """`tag_list`는 태그가 하나도 없는 상태(`tags=()`)도 정상이다 — 빈
+    목록이 정상값이라는 것이 RULE-15의 자원 축 쪽 대응이다."""
+    entry = StatEntry(name="상태 이상", form="tag_list", tags=())
+    assert entry.tags == ()
+
+
 def test_entity_with_one_stat_and_entity_with_ten_stats_use_same_class():
     """개수를 막는 검사가 없다 — 한 개짜리와 열 개짜리가 같은 클래스로 만들어진다."""
     one_stat = Entity(
