@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 11
-current_phase_name: 룰북 표현 어휘 확장
+current_phase_name: rulebook-vocabulary
 status: executing
-stopped_at: Phase 11 context gathered
-last_updated: "2026-08-15T08:14:32.634Z"
-last_activity: 2026-08-14
-last_activity_desc: Phase 10 complete (7/7 plans, verified 6/6)
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-08-15T08:54:54.169Z"
+last_activity: 2026-08-15
+last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 22
-  completed_plans: 15
+  completed_plans: 16
   percent: 27
 ---
 
@@ -24,22 +24,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 10 — ai
+**Current focus:** Phase 11 — rulebook-vocabulary
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 11 — 룰북 표현 어휘 확장
-Plan: Not started
+Phase: 11 (rulebook-vocabulary) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-08-14 — Phase 10 complete, transitioned to Phase 11
+Last activity: 2026-08-15 — Phase 11 execution started
 
 > 라우팅 정정: `phase.complete`가 12.1을 다음으로 골랐으나 12.1은 ROADMAP상 **Phase 11·12에 의존**한다
 > (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
 > 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 73%
 
 ## Performance Metrics
 
@@ -101,6 +101,7 @@ Progress: [██████████] 100%
 | Phase 10-ai P04 | ~40min | 3 tasks | 6 files |
 | Phase 10-ai P06 | ~25min | 2 tasks | 6 files |
 | Phase 10 P07 | ~20min | 3 tasks | 7 files |
+| Phase 11 P01 | ~45min | 2 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -191,6 +192,9 @@ Progress: [██████████] 100%
 - [Phase ?]: 10-04 실측 중 발견(범위 밖): nvidia/nemotron-3-ultra-550b-a55b가 받침 복잡한 한글 음절을 못 뱉어 U+FFFD로 저장됨 — master_gm을 nemotron-3-super-120b-a12b로 교체(.gptrpg/ 로컬 설정, git 미추적). U+FFFD 감지는 10-06 담당
 - [Phase ?]: 10-06: 깨진 글자(U+FFFD)는 flagged이지 blocked가 아니다 — inspect_sentence 4번째 갈래, EVENT_SCHEMA_VERSION 6 유지(reason은 쓰기 검증에서만 쓰이고 reducer가 안 봄), 옛 실기록 1116건 예외 없이 접힘 확인
 - [Phase ?]: 10-07: WR-02 subject_len 재정의(matched_len 비절단), WR-03 SafetyFlagged source×reason 스키마+액터 이중 model_validator, WR-01 MAX_REGENERATIONS 제거·3회 호출 상한을 실제 호출-횟수 시험이 보증
+- [Phase ?]: 11-01 Task 0(D-03, widen-now): StatEntry를 네 칸에서 여덟 칸으로 넓힌다 — D-20/D-65를 뒤집는 게 아니라 그 그릇이 담는 범위를 자원 축 전체로 다시 그리는 것(D-64/D-65/D-66과 같은 패턴)
+- [Phase ?]: 11-01: numeric 형태 하나가 룰북 선언(Rulebook.resource_axes) → Entity → GET 시트 응답 → StatusPane 화면까지 관통 — 나머지 다섯 형태는 11-03이 데이터·화면을 붙인다
+- [Phase ?]: 11-01 [deviation, Rule 3+Rule 2]: Task 1의 <verify>가 요구했으나 <files> 목록엔 없던 test_entities.py/test_web_characters.py를 Task1에서 앞당겨 고침(고정 시험 8칸 재고정 포함); must_haves.truths가 요구한 ResourceAxisDecl/Rulebook 경계 시험을 위해 계획서에 없던 tests/test_rulebook.py를 신설(12건) — 둘 다 사용자/오케스트레이터 사전 승인
 
 ### Pending Todos
 
@@ -246,10 +250,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-15T06:59:53.553Z
-Stopped at: Phase 11 context gathered
+Last session: 2026-08-15T08:54:54.132Z
+Stopped at: Completed 11-01-PLAN.md
 Traceability 갱신 완료
-Resume file: .planning/phases/11-rulebook-vocabulary/11-CONTEXT.md
+Resume file: None
 
 **다음 행동:** Phase 10(AI 출력 검증과 탈옥 방어) **논의 완료** — `10-CONTEXT.md`에 결정
 13개가 잠겼다. 다음은 `/gsd-plan-phase 10`(조사 → 계획).

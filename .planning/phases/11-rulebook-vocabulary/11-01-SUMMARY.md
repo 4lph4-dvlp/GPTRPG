@@ -202,10 +202,19 @@ Task 0(D-03 결정 관문)은 코드 변경이 없는 순수 결정 확인이라
 - **Committed in:** `692f18e` (Task 2 커밋)
 - **사용자 승인:** 오케스트레이터가 Task 1 승인 시 명시적으로 요청함 — "계획서의 must_haves truths에 적힌 경계 조건들(...같은 이름 중복, 공백뿐인 이름...)을 빠짐없이 덮을 것."
 
+**3. [Rule 1 - Bug] `requirements mark-complete` 표준 절차가 RULE-11/RULE-12를 조기에 「Complete」로 표시한 것을 되돌렸다**
+- **Found during:** state_updates 단계 (플랜 완료 후 STATE.md/REQUIREMENTS.md 갱신 중)
+- **Issue:** 표준 절차대로 PLAN.md frontmatter의 `requirements: [RULE-11, RULE-12]`를 `requirements mark-complete`에 그대로 넘겼더니 REQUIREMENTS.md의 두 체크박스와 Traceability 표가 즉시 `Complete`로 바뀌었다. 그런데 이 계획의 Source Coverage Audit 표 자신이 RULE-11은 11-01·11-03·11-04 세 계획에, RULE-12는 11-01·11-03·11-07 세 계획에 걸쳐 있다고 명시한다 — RULE-11 요구사항 문장의 「여섯 형태」 중 이번 계획은 `numeric` 하나만 관통시켰고(1/6), RULE-12 요구사항 문장의 「선언하면 관련 화면과 판정 훅이 완전히 사라진다」는 서버 응답 제외 로직(Pitfall 2)이 아직 없다(11-03 몫). `requirements.md` 템플릿 자신의 완료 기준("Feature is implemented"는 부분이 아니라 전체를 뜻함)과도 어긋났다.
+- **Fix:** REQUIREMENTS.md의 RULE-11/RULE-12 체크박스를 `[x]`에서 `[ ]`로 되돌리고, 각 문장 끝에 이번 계획이 실제로 한 것(그릇 모양 + numeric 1/6, 값0/개념없음/규칙으로안셈 구분)과 남은 몫을 한 줄로 남겼다. Traceability 표의 두 행은 `Complete`에서 템플릿이 정의한 정식 상태값 `In Progress`로 고쳤다.
+- **Files modified:** `.planning/REQUIREMENTS.md`
+- **Verification:** 수정 후 파일을 다시 읽어 두 체크박스와 두 Traceability 행이 의도대로 바뀌었는지 육안 확인
+- **Committed in:** 이 커밋 (state_updates 단계)
+- **파급:** 이 문제는 이 계획에만 국한되지 않는다 — Phase 11의 남은 요구사항 중 여러 계획에 걸친 것(RULE-15 등)에도 같은 절차를 그대로 적용하면 같은 조기 완료 표시가 재발한다. 후속 계획(11-02~11-07) 실행자는 `requirements mark-complete`를 호출하기 전에 해당 요구사항이 **이번 계획으로 완전히 끝나는지** Source Coverage Audit 표로 먼저 확인해야 한다.
+
 ---
 
-**Total deviations:** 2 auto-fixed (1 blocking, 1 missing critical)
-**Impact on plan:** 둘 다 계획서 자신의 `<verify>`/`must_haves.truths`가 요구했지만 태스크 간 파일 배분이 그 요구를 충족하지 못했던 구조적 간극을 메운 것이다. 범위 이탈이 아니라 계획서가 명시한 완료 기준을 실제로 달성하기 위한 필수 보강이었고, 두 건 모두 사용자/오케스트레이터가 사전 승인했다.
+**Total deviations:** 3 auto-fixed (1 blocking, 1 missing critical, 1 bug)
+**Impact on plan:** 셋 다 계획서 자신의 `<verify>`/`must_haves.truths`/Source Coverage Audit가 요구했지만 표준 실행 절차나 태스크 간 파일 배분이 그 요구를 그대로 따라가지 못했던 구조적 간극을 메운 것이다. 범위 이탈이 아니라 계획서가 명시한 완료 기준을 정확히 반영하기 위한 필수 보강이었고, 전부 사용자/오케스트레이터 승인 또는 계획서 자신의 명시적 진술에 근거한다.
 
 ## Issues Encountered
 
