@@ -4,15 +4,15 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 11
 current_phase_name: 룰북 표현 어휘 확장
-status: planning
+status: executing
 stopped_at: Phase 11 context gathered
-last_updated: "2026-08-15T06:59:53.596Z"
+last_updated: "2026-08-15T08:14:32.634Z"
 last_activity: 2026-08-14
 last_activity_desc: Phase 10 complete (7/7 plans, verified 6/6)
 progress:
   total_phases: 11
   completed_phases: 3
-  total_plans: 15
+  total_plans: 22
   completed_plans: 15
   percent: 27
 ---
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 11 — 룰북 표현 어휘 확장
 Plan: Not started
-Status: Ready to plan
+Status: Ready to execute
 Last activity: 2026-08-14 — Phase 10 complete, transitioned to Phase 11
 
 > 라우팅 정정: `phase.complete`가 12.1을 다음으로 골랐으나 12.1은 ROADMAP상 **Phase 11·12에 의존**한다
