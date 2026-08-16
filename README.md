@@ -28,18 +28,29 @@
 
    빌드 결과는 `frontend/dist/`에 생기고 서버가 그 폴더를 그대로 내보낸다. **이 폴더가 없으면 `/`가 404다** — 서버는 정상으로 뜨는데 브라우저만 빈 화면이라 원인을 찾기 어렵다. 빌드 뒤 `frontend/dist/index.html`이 있는지 눈으로 확인한다.
 
-2. **에이전트 설정** — 역할별 제공자·모델을 `.gptrpg/agents.json`에 적는다. **이 파일은 저장소에 안 들어간다**(`.gitignore`의 `.gptrpg/`) — 새로 받은 작업 사본이나 다른 기기에는 **없다.** 없으면 서버는 뜨지만 행동 선언이 전부 503으로 떨어진다.
-
-   **역할이 둘에서 다섯으로 늘었다** (Phase 9) — `action_classifier`·`master_gm`(기존 둘)에
-   `situation_judge`·`scene_entity_judge`·`clock_judge`가 더해졌다. `docs/experiment/session-prep.md`의
-   "한도 대응 결정"대로 NIM 두 모델을 그대로 적는다:
+2. **에이전트 설정** — 역할별 제공자·모델을 `.gptrpg/agents.json`에 적는다. **이 파일 자체는 저장소에 안 들어간다**(`.gitignore`) — 새로 받은 작업 사본이나 다른 기기에는 **없다.** 없으면 서버는 뜨지만 행동 선언이 전부 503으로 떨어진다. 예시 값은 커밋되어 있으니 복사부터 한다:
 
    ```
-   uv run gptrpg agents set --role action_classifier --provider nim --model meta/llama-3.1-8b-instruct
+   cp .gptrpg/agents.example.json .gptrpg/agents.json
+   ```
+
+   **이 예시 파일의 모델 값은 장식이 아니다 — 이 값을 안 맞추면 기능 두 개가 조용히 안 켜진다(G-11-2).** Phase 11이 실제 AI 호출로 직접 측정했다:
+
+   - `action_classifier`가 `meta/llama-3.1-8b-instruct`처럼 작은 모델이면 "굴릴 필요 없음"(no_check) 판정이 실전에서 거의 안 켜진다 — "문을 연다"처럼 교과서적인 문장조차 `defend`로 잘못 분류했다. 근거·전체 측정표: [`11-MODEL-FINDING.md`](.planning/phases/11-rulebook-vocabulary/11-MODEL-FINDING.md)
+   - `master_gm`이 `nvidia/nemotron-3-super-120b-a12b`처럼 작은 모델이면 한국어 서사에 키릴 문자·영어 낱말·조어가 섞인다(실측 오염률 40%, 큰 모델로 되돌리면 0%). 근거·전체 측정표: [`11-NARRATION-LANGUAGE-FINDING.md`](.planning/phases/11-rulebook-vocabulary/11-NARRATION-LANGUAGE-FINDING.md)
+
+   이 저장소의 자동 시험은 전부 가짜 제공자를 쓰므로 **이 종류의 저하를 원리적으로 못 잡는다** — 코드는 초록인데 기능은 망가진 상태가 조용히 성립할 수 있다. 그래서 서버·CLI 어느 쪽을 기동해도 권장값보다 작은 것으로 실측된 모델이면 표준오류에 경고가 뜬다(막지는 않는다 — 일부러 싼 모델을 쓰는 선택은 그대로 존중된다). 지금 권장값(=예시 파일의 값)을 손으로 다시 치면:
+
+   ```
+   uv run gptrpg agents set --role action_classifier --provider nim --model nvidia/nemotron-3-super-120b-a12b
    uv run gptrpg agents set --role master_gm        --provider nim --model nvidia/nemotron-3-ultra-550b-a55b
    ```
 
-   그리고 두 줄이 실제로 보이는지 확인한다 — 여기서 `설정 파일이 없다`나 `역할 …의 선택이 없다`가 나오면 위 두 명령을 다시 친다:
+   **역할이 둘에서 다섯으로 늘었다** (Phase 9) — `action_classifier`·`master_gm`(기존 둘)에
+   `situation_judge`·`scene_entity_judge`·`clock_judge`가 더해졌다. 이 세 역할은 아직
+   실측된 권장값이 없다 — `docs/experiment/session-prep.md`의 "한도 대응 결정"을 따른다.
+
+   그리고 값들이 실제로 보이는지 확인한다 — 여기서 `설정 파일이 없다`나 `역할 …의 선택이 없다`가 나오면 위 명령을 다시 친다:
 
    ```
    uv run gptrpg agents show
