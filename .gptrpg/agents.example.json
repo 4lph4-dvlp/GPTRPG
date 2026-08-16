@@ -1,0 +1,10 @@
+{
+  "action_classifier": {
+    "provider": "nim",
+    "model": "nvidia/nemotron-3-super-120b-a12b"
+  },
+  "master_gm": {
+    "provider": "nim",
+    "model": "nvidia/nemotron-3-ultra-550b-a55b"
+  }
+}

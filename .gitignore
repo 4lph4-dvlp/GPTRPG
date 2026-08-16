@@ -4,6 +4,17 @@ __pycache__/
 *.db-wal
 *.db-shm
 .gstack/
-.gptrpg/
+# .gptrpg/ 전체를 무시하되(운영자별 로컬 상태 — DB·비밀 쿠키·집계 리포트),
+# agents.example.json/.md 둘만 예외로 커밋한다(G-11-2). 부모 디렉터리 자체를
+# 무시하면(예전 값 `.gptrpg/`) git이 그 안을 아예 훑지 않아 아래 `!` 예외가
+# 먹히지 않는다 — 그래서 `.gptrpg/*`로 "안의 파일들"만 무시한다.
+# **`**/`를 앞에 붙인다** — 안 붙이면(`.gptrpg/*`) 슬래시가 패턴 중간에 있어
+# 이 파일이 있는 저장소 루트에만 적용되고, 최상위 아닌 곳(예: 어쩌다 생긴
+# `frontend/.gptrpg/`)의 같은 이름 디렉터리는 더 이상 안 걸린다 — 이전 값
+# (`.gptrpg/`, 끝에만 슬래시)은 깊이에 상관없이 걸렸었으므로 그 범위를 그대로
+# 지킨다.
+**/.gptrpg/*
+!**/.gptrpg/agents.example.json
+!**/.gptrpg/agents.example.md
 .env.local
 nohup.out
