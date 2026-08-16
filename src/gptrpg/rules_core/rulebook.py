@@ -9,6 +9,7 @@
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Literal
 
 from gptrpg.rules_core.entities import Entity, NoneKind, ResourceAxisForm
 
@@ -17,6 +18,16 @@ TWO_D6 = "2d6"
 
 D100_ROLL_UNDER = "d100_roll_under"
 """판정 **방식** 이름 — 위와 동일한 성격."""
+
+D20_ROLL_UNDER = "d20_roll_under"
+"""판정 **방식** 이름 — 위 둘과 동일한 성격(d20을 굴려 능력치 이하면 통과).
+
+**11-04 시점에는 이 이름을 아는 계산기가 없다** — `session_actor.actor._RESOLVERS`에
+`D20_ROLL_UNDER` 항목이 없다(D-14 시험 순수성을 위해 Task 0에서 `declare-only`로
+결정됨, 11-04-PLAN.md). 이 방식을 선언한 룰북으로 실제 판정을 시도하면 조용히
+다른 계산기로 대체되지 않고 `session_actor.actor.CommandRejected`
+("알 수 없는 판정 방식")로 눈에 보이게 멈춘다 — 이 상태는
+`tests/test_session_actor.py`의 회귀 시험으로 고정되어 있다."""
 
 
 @dataclass(frozen=True)
@@ -78,6 +89,22 @@ class ResourceAxisDecl:
             )
 
 
+CheckTriggerMode = Literal["declared_list", "no_dice", "gm_discretion"]
+"""판정 트리거 목록이 비어 있는 경우가 두 갈래로 갈린다는 것을 룰북이 명시적으로
+골라야 한다(D-12) — 세 값은 **플랫폼 능력의 이름이지 룰북 어휘가 아니다**(위
+`TWO_D6`/`D100_ROLL_UNDER`/`D20_ROLL_UNDER`와 같은 성격, 본 모듈 상단 도크스트링의
+규율).
+
+- `declared_list`: 룰북이 무브/판정 트리거 목록을 실제로 적어 뒀고, 분류기는 그
+  목록에서 고른다. 이 값이면 목록이 비어 있으면 안 된다.
+- `no_dice`: 이 게임은 아예 주사위를 굴리지 않는다. 목록이 비어 있는 것이 정상이고,
+  그 빈 목록은 "다이스 없음"이라는 뜻이다.
+- `gm_discretion`: 굴리긴 하지만 **언제 굴릴지를 고정 목록이 아니라 그 자리에서
+  진행자가 정한다**(Cairn류). 목록이 비어 있는 것이 정상이고, 그 빈 목록은
+  "재량으로 정한다"는 뜻이다 — `no_dice`와 같은 빈 목록이지만 의미가 다르다.
+"""
+
+
 @dataclass(frozen=True)
 class Rulebook:
     """룰북 하나의 선언 전체 — 어떤 판정 방식을 쓰고 어떤 등급 밴드/자원
@@ -88,6 +115,7 @@ class Rulebook:
     resolution_method: str
     grade_bands: tuple[GradeBand, ...]
     resource_axes: tuple[ResourceAxisDecl, ...]
+    check_trigger_mode: CheckTriggerMode
 
     def __post_init__(self) -> None:
         names = [axis.name for axis in self.resource_axes]
@@ -344,3 +372,37 @@ def validate_move_stats(default_stats: Iterable[str], rulebook: Rulebook) -> Non
                 f" {rulebook.rulebook_id!r}의 자원 축 목록에 없다",
                 axis_name=default_stat,
             )
+
+
+class InvalidTriggerMode(Exception):
+    """`Rulebook.check_trigger_mode`와 그 룰북의 무브 목록 길이가 어긋날 때
+    던진다(D-12).
+
+    빈 목록은 미완성이 아니라 정상값이지만, 어느 종류의 정상인가(주사위를
+    아예 안 굴리는가, 굴리되 그 자리에서 정하는가)는 룰북이 반드시 말해야
+    한다 — 조용히 통과하면 목록을 채우다 만 룰북과 원래 목록이 없는 룰북이
+    구분되지 않는다(T-11-14).
+    """
+
+    def __init__(self, reason: str, rulebook_id: str | None = None) -> None:
+        super().__init__(
+            f"check_trigger_mode가 무브 목록과 어긋난다: {reason} (rulebook_id={rulebook_id!r})"
+        )
+        self.reason = reason
+        self.rulebook_id = rulebook_id
+
+
+def validate_trigger_mode(mode: CheckTriggerMode, move_count: int) -> None:
+    """빈 목록은 미완성이 아니라 정상값이고, 어느 종류의 정상인지를 룰북이
+    말해야 한다(D-12) — `declared_list`인데 목록이 비었거나, `no_dice`/
+    `gm_discretion`인데 목록이 차 있으면 `InvalidTriggerMode`.
+    """
+    if mode == "declared_list" and move_count == 0:
+        raise InvalidTriggerMode(
+            "declared_list인데 무브 목록이 비어 있다 — 목록을 채우거나"
+            " no_dice/gm_discretion으로 바꿔야 한다"
+        )
+    if mode in ("no_dice", "gm_discretion") and move_count > 0:
+        raise InvalidTriggerMode(
+            f"{mode!r}인데 무브 목록이 채워져 있다 — 목록이 있다면 declared_list여야 한다"
+        )

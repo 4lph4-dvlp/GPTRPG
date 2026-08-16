@@ -285,6 +285,12 @@ _GAPPED_RULEBOOK = Rulebook(
     # 이 시험 전용 룰북은 축이 없는 것이 맞다 — 「없다」를 명시하는 것이
     # D-02가 요구하는 모양이다(resource_axes는 기본값 없는 필수 필드).
     resource_axes=(),
+    # check_trigger_mode는 기본값 없는 필수 필드다(D-12). 이 시험 전용
+    # 룰북에는 무브 목록이 애초에 등록돼 있지 않다(MOVE_CATALOGS에 이
+    # rulebook_id 항목이 없다) — "no_dice"를 고른다. 이 필드 자체는
+    # `validate_registered_rulebooks()`를 지나가지 않는 런타임 전용
+    # 픽스처라 등록 검증에 걸리지 않지만, 필드가 필수이므로 값은 채워야 한다.
+    check_trigger_mode="no_dice",
 )
 
 

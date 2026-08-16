@@ -56,6 +56,7 @@ OPENQUEST = Rulebook(
     resolution_method=D100_ROLL_UNDER,
     grade_bands=OPENQUEST_GRADE_BANDS,
     resource_axes=OPENQUEST_RESOURCE_AXES,
+    check_trigger_mode="declared_list",
 )
 
 OPENQUEST_DIFFICULTY: dict[str, int] = {

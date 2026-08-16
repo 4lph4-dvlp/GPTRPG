@@ -41,6 +41,7 @@ DUNGEONWORLD_LIKE = Rulebook(
     resolution_method=TWO_D6,
     grade_bands=DUNGEONWORLD_GRADE_BANDS,
     resource_axes=DUNGEONWORLD_RESOURCE_AXES,
+    check_trigger_mode="declared_list",
 )
 
 # 자체 작성 예시 — 어떤 룰북 원문에서도 오지 않았다(D-18이 배제한 자체 창작

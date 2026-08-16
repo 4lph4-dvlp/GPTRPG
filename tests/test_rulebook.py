@@ -17,6 +17,7 @@ from gptrpg.rules_core.rulebook import (
     EntityAxisMismatch,
     GradeBand,
     InvalidResourceAxis,
+    InvalidTriggerMode,
     ResourceAxisDecl,
     Rulebook,
     ShadowedGradeBand,
@@ -24,6 +25,7 @@ from gptrpg.rules_core.rulebook import (
     validate_entity_axes,
     validate_grade_bands,
     validate_move_stats,
+    validate_trigger_mode,
 )
 from gptrpg.rulebooks import RULEBOOKS, get_rulebook, validate_registered_rulebooks
 from gptrpg.rulebooks.dungeonworld_like import (
@@ -51,6 +53,7 @@ def _rulebook(resource_axes: tuple[ResourceAxisDecl, ...]) -> Rulebook:
         resolution_method=TWO_D6,
         grade_bands=_EMPTY_BANDS,
         resource_axes=resource_axes,
+        check_trigger_mode="no_dice",
     )
 
 
@@ -63,6 +66,7 @@ def test_rulebook_without_resource_axes_raises_type_error():
             display_name="시험 전용",
             resolution_method=TWO_D6,
             grade_bands=_EMPTY_BANDS,
+            check_trigger_mode="no_dice",
         )
 
 
@@ -344,6 +348,7 @@ def test_registration_rejects_a_shadowed_rulebook():
             GradeBand(name="strong", counts_as_failure=False, margin_at_least=0),
         ),
         resource_axes=(),
+        check_trigger_mode="no_dice",
     )
     RULEBOOKS["test-shadowed-registration-only"] = shadowed_rulebook
     try:
@@ -363,6 +368,7 @@ def test_registration_rejects_a_rulebook_with_a_hole():
         resolution_method=TWO_D6,
         grade_bands=(GradeBand(name="success", counts_as_failure=False, margin_at_least=0),),
         resource_axes=(),
+        check_trigger_mode="no_dice",
     )
     RULEBOOKS["test-gapped-registration-only"] = gapped_rulebook
     try:
@@ -371,3 +377,62 @@ def test_registration_rejects_a_rulebook_with_a_hole():
     finally:
         del RULEBOOKS["test-gapped-registration-only"]
     validate_registered_rulebooks()  # 지운 뒤에는 다시 예외 없이 통과한다
+
+
+# ---------------------------------------------------------------------------
+# 판정 트리거 목록 빈 값의 두 갈래 (D-12) — 11-04
+# ---------------------------------------------------------------------------
+
+
+def test_declared_list_mode_requires_a_non_empty_move_list():
+    """`declared_list`인데 무브 목록이 비어 있으면 `InvalidTriggerMode`다 —
+    던전월드류·OpenQuest처럼 실제 목록을 적은 룰북이 이 값을 쓴다."""
+    with pytest.raises(InvalidTriggerMode):
+        validate_trigger_mode("declared_list", move_count=0)
+    validate_trigger_mode("declared_list", move_count=1)  # 예외 없이 통과한다
+
+
+def test_empty_move_list_is_valid_with_gm_discretion_mode():
+    """무브 목록이 빈 룰북이 `gm_discretion`(Cairn류 — 언제 굴릴지 그 자리에서
+    정한다)이면 통과한다."""
+    validate_trigger_mode("gm_discretion", move_count=0)  # 예외 없이 통과한다
+
+
+def test_empty_move_list_is_valid_with_no_dice_mode():
+    """무브 목록이 빈 룰북이 `no_dice`(이 게임은 주사위를 안 굴린다)면
+    통과한다."""
+    validate_trigger_mode("no_dice", move_count=0)  # 예외 없이 통과한다
+
+
+def test_non_empty_move_list_rejects_no_dice_mode():
+    """무브 목록이 있는데 `no_dice`면 `InvalidTriggerMode`다 — 주사위를 안
+    굴리는 게임에 판정 트리거 목록이 있는 것은 모순이다."""
+    with pytest.raises(InvalidTriggerMode):
+        validate_trigger_mode("no_dice", move_count=1)
+
+
+def test_non_empty_move_list_rejects_gm_discretion_mode():
+    """무브 목록이 있는데 `gm_discretion`이면 `InvalidTriggerMode`다 — 목록이
+    있다면 그 목록에서 고르는 `declared_list`여야 한다."""
+    with pytest.raises(InvalidTriggerMode):
+        validate_trigger_mode("gm_discretion", move_count=1)
+
+
+def test_rulebook_without_check_trigger_mode_raises_type_error():
+    """`check_trigger_mode`는 `resource_axes`와 같은 이유로 기본값 없는
+    필수 필드다(D-06의 "빠뜨림 불가능") — 생성자 호출 자체가 `TypeError`로
+    실패한다."""
+    with pytest.raises(TypeError):
+        Rulebook(
+            rulebook_id="test-only",
+            display_name="시험 전용",
+            resolution_method=TWO_D6,
+            grade_bands=_EMPTY_BANDS,
+            resource_axes=(),
+        )
+
+
+def test_dungeonworld_and_openquest_declare_declared_list_mode():
+    """실제 등록된 두 룰북 모두 목록을 실제로 적어 뒀으니 `declared_list`다."""
+    assert DUNGEONWORLD_LIKE.check_trigger_mode == "declared_list"
+    assert OPENQUEST.check_trigger_mode == "declared_list"

@@ -6,6 +6,7 @@ from gptrpg.rules_core.rulebook import (
     validate_entity_axes,
     validate_grade_bands,
     validate_move_stats,
+    validate_trigger_mode,
 )
 from gptrpg.rulebooks.dungeonworld_like import (
     DUNGEONWORLD_LIKE,
@@ -53,9 +54,10 @@ import하면 층 방향이 뒤집힌다(`.importlinter` contract 2) — 대신
 
 
 def validate_registered_rulebooks() -> None:
-    """`RULEBOOKS`에 등록된 각 룰북에 세 검사를 돌린다 — 등급 밴드의
+    """`RULEBOOKS`에 등록된 각 룰북에 네 검사를 돌린다 — 등급 밴드의
     가려짐/구멍(D-15), 무브 `default_stat`이 실재하는 축인지(T-11-07),
-    이 모듈이 아는 개체들의 `StatEntry`가 그 룰북 축과 맞는지(D-01).
+    이 모듈이 아는 개체들의 `StatEntry`가 그 룰북 축과 맞는지(D-01), 그리고
+    `check_trigger_mode`가 무브 목록 길이와 어긋나지 않는지(D-12, T-11-14).
     위반이 있으면 이 모듈이 임포트되는 순간 예외로 죽는다.
 
     **등록 시점 검사는 런타임 방어선을 대체하지 않는다.**
@@ -72,10 +74,10 @@ def validate_registered_rulebooks() -> None:
 
     for rulebook_id, rulebook in RULEBOOKS.items():
         validate_grade_bands(rulebook.grade_bands)
-        default_stats = tuple(
-            move.default_stat for move in MOVE_CATALOGS.get(rulebook_id, ())
-        )
+        moves = MOVE_CATALOGS.get(rulebook_id, ())
+        default_stats = tuple(move.default_stat for move in moves)
         validate_move_stats(default_stats, rulebook)
+        validate_trigger_mode(rulebook.check_trigger_mode, len(moves))
         for entity in _REGISTERED_ENTITIES_FOR_AXIS_CHECK.get(rulebook_id, ()):
             validate_entity_axes(entity, rulebook)
 
