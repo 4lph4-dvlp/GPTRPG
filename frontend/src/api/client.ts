@@ -16,6 +16,7 @@ import type {
   MoveCandidate,
   MyCharacterResponse,
   PollResponse,
+  ProceedResponse,
 } from "./types.ts";
 
 export class ApiError extends Error {
@@ -109,6 +110,26 @@ export function confirmAction(
     suggestion_move: suggestion.move,
     suggestion_stat: suggestion.stat,
     confirmed,
+    declare_seq: declareSeq,
+  });
+}
+
+/**
+ * 굴릴 필요가 없는 행동(`tier === "no_check"`)을 판정 없이 서술로 잇는다
+ * (D-10 ②갈래, 11-06). `confirmAction`과 같은 오류 처리·같은 쿠키 취급을
+ * 따른다 — `fetch`가 쿠키를 자동으로 실어 보내므로 이 함수도 다르지 않다.
+ * 서버 경로는 `confirmAction`과 달리 `/actions/` 아래가 아니다
+ * (`src/gptrpg/web/routes_actions.py`의 `proceed()`가 그렇게 등록한다).
+ */
+export function proceed(
+  sessionId: string,
+  playerId: string,
+  characterId: string,
+  declareSeq: number,
+): Promise<ProceedResponse> {
+  return postJson<ProceedResponse>(`${sessionBase(sessionId)}/proceed`, {
+    player_id: playerId,
+    character_id: characterId,
     declare_seq: declareSeq,
   });
 }

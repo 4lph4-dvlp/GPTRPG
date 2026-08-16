@@ -195,3 +195,14 @@ export interface ConfirmResponse {
    */
   narration_failed: boolean;
 }
+
+export interface ProceedResponse {
+  proceeded: boolean;
+  narration_chunk_count: number;
+  /**
+   * 서사 생성만 실패했다는 표시다(TRUST-06, D-08) — `ConfirmResponse.narration_failed`와
+   * 같은 뜻·같은 기본값이다. 이 경로는 애초에 판정이 없으므로 `rolls`/`grade`/
+   * `target` 칸 자체가 없다.
+   */
+  narration_failed: boolean;
+}

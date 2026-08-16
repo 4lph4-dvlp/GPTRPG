@@ -98,6 +98,8 @@ export const COPY = {
   narrationFailed: "이번 턴의 이야기를 쓰지 못했어요. 주사위 결과는 그대로예요",
   serverConfigFailed: "서버 설정 문제로 처리하지 못했어요. 관리자에게 알려 주세요",
   noActionRecognized: "인식된 행동이 없어요. 다른 문장으로 다시 말해 보세요",
+  noCheckNeeded: "굴릴 필요 없는 행동이에요",
+  proceedWithoutCheck: "이대로 진행",
   classifying: "AI가 분류하는 중…",
   narrating: "AI가 생각하는 중…",
   confirmSingle: "이 행동으로 진행",
