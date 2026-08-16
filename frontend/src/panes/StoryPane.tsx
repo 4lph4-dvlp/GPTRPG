@@ -13,7 +13,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TurnCard } from "../components/TurnCard.tsx";
 import { COPY } from "../labels.ts";
-import { isConfirmedTurn, type Turn } from "../session/groupTurns.ts";
+import { isVisibleTurn, type Turn } from "../session/groupTurns.ts";
 
 const NEAR_BOTTOM_PX = 48;
 
@@ -37,7 +37,7 @@ export function StoryPane({
   const [unseen, setUnseen] = useState(0);
   const [unseenAlert, setUnseenAlert] = useState(false);
 
-  const visible = turns.filter(isConfirmedTurn);
+  const visible = turns.filter(isVisibleTurn);
   const clockCount = visible.filter((turn) => turn.clock !== null).length;
   const narrationCount = visible.reduce((sum, turn) => sum + turn.narration.length, 0);
   // 삽화는 판정·서사보다 몇 초 늦게 도착해 카드를 키운다. 이 수를 세지 않으면

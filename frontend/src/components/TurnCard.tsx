@@ -30,6 +30,15 @@ interface TurnCardProps {
 function CheckLine({ turn, justRevealed }: { turn: Turn; justRevealed: boolean }) {
   const check = turn.check;
   if (check === null) {
+    if (turn.confirmed === null) {
+      // `StoryPane`은 `isVisibleTurn`을 거친 턴만 이 컴포넌트에 넘긴다 —
+      // 그 필터를 통과했는데 `confirmed`가 없다는 것은 이 턴이 확인 경로가
+      // 아니라 「이대로 진행」 경로(D-10 ②갈래, 11-06)라는 뜻이고, 그 경로는
+      // 애초에 판정 자체가 없다(결정 1, `11-06-PLAN.md`). "기다리는 중"이
+      // 아니라 처음부터 없는 것이므로 판정 줄을 아예 그리지 않는다 — 계속
+      // 기다리는 것처럼 보이는 것은 이 정상 경로를 실패처럼 읽히게 만든다.
+      return null;
+    }
     return (
       <div className="check">
         <span className="narration__waiting">

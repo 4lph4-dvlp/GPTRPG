@@ -50,9 +50,36 @@ export interface Turn {
   illustration: SceneIllustratedEvent | null;
 }
 
-/** 이 턴이 중앙 이야기 흐름에 카드로 올라갈 자격이 있는지. */
-export function isConfirmedTurn(turn: Turn): boolean {
-  return turn.confirmed !== null && turn.confirmed.player_confirmed;
+/**
+ * 이 턴이 중앙 이야기 흐름에 카드로 올라갈 자격이 있는지.
+ *
+ * 두 경로 중 하나면 자격이 있다.
+ *
+ * ① **확인 버튼을 눌러 판정까지 갔다**(`confirmed.player_confirmed === true`)
+ * — 서사 생성이 실패해도 이 갈래는 그대로 보인다(주사위 결과는 이미
+ * 나왔다, TRUST-06/D-08). 서사 성공 여부를 여기서 재확인하지 않는다.
+ *
+ * ② **「이대로 진행」 버튼을 눌러 판정 없이 서사가 실제로 나왔다**
+ * (`narration.length > 0`, D-10 ②갈래, 11-06의 `proceed()`) — 이 경로는
+ * `action_confirmed` 사건 자체가 없다(결정 1, `11-06-PLAN.md`). `confirmed`
+ * 칸만 보면 이 턴이 영원히 걸러진다 — 서버(`POST /proceed`)가 사건을
+ * 정상적으로 남기는데도 화면에 아무것도 안 뜨는 결함이 실제로 있었다
+ * (11-06 Task 3 사람 확인 관문에서 발견).
+ *
+ * 「사람이 누른 것만 서사로 간다」(D-10 결정 2, `ChatPane.tsx` 도크스트링)는
+ * 두 경로 다 지켜진다 — `narration`이 채워지는 유일한 통로가
+ * `confirm()`/`proceed()`이고, 둘 다 사람이 버튼을 눌러야 서버가 부른다.
+ *
+ * 선언만 하고 아직 확인도 진행도 안 한 턴(`confirmed === null`이고
+ * `narration.length === 0`)은 계속 안 보인다 — 함수 이름이 옛
+ * `isConfirmedTurn`에서 `isVisibleTurn`으로 바뀐 것도 이 뜻 확장을
+ * 반영한다(호출부는 `StoryPane.tsx` 한 곳뿐).
+ */
+export function isVisibleTurn(turn: Turn): boolean {
+  if (turn.confirmed !== null && turn.confirmed.player_confirmed) {
+    return true;
+  }
+  return turn.narration.length > 0;
 }
 
 /**
