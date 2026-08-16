@@ -52,3 +52,28 @@ AI가 받는 설명이 원문보다 좁아진 상태다.
 세 번째 룰북(Cairn)을 넣는 계획이다. Cairn이 같은 벽에 부딪히는지 먼저 확인하면
 **플랫폼 변경이 정말 필요한지가 데이터로 증명된다.** 11-04의 원 전제가 「플랫폼 그릇을
 안 고치고 데이터로 넣는다」이므로, 이 항목은 그 전제에 대한 정직한 반례 시험이기도 하다.
+
+## Resolved (2026-08-16, 계획 11-04)
+
+**Cairn이 이 벽에 부딪혔는가 — 아니다, 하지만 부딪히지 않은 이유가 중요하다.**
+Cairn 자체는 SRD 원문에 고정 무브/행동 목록이 없다(`MOVE_CATALOGS["cairn"] = ()`,
+`check_trigger_mode="gm_discretion"`) — 그래서 Cairn에는 애초에 `MoveDecl.default_stat`
+자리가 하나도 생기지 않는다. 이 벽에 실제로 부딪힌 것은 여전히 던전월드류의 두 무브뿐이었다
+(11-02에서 이미 발견됨). 즉 Cairn의 설계(재량 판정 모드) 자체가 이 벽을 우회한 것이지,
+플랫폼 그릇이 이 문제를 미리 해결해 둔 상태였던 것은 아니다 — 두 무브의 부채는 그대로
+남아 있었고 이번 항목이 그것을 갚았다.
+
+**적용한 수정 (계획서 Fix 1~4 그대로):**
+1. `MoveDecl.default_stat: str | None`로 확장(`moves.py`)
+2. `validate_move_stats`가 `None`을 검사에서 건너뛴다 — 구멍 검사(실제 문자열 대조)는 유지
+   (`rules_core/rulebook.py`)
+3. `prompt_assembly._format_moves`가 `None`일 때 "상황에 맞게 고른다"로 렌더링
+   (`agents/prompt_assembly.py`)
+4. `defy_danger`/`aid_or_interfere`의 `default_stat`을 `DEX`/`CHA` 근사에서 `None`으로
+   되돌리고, 근사치를 설명하던 주석을 이번 결정을 기록하는 주석으로 교체(`dungeonworld_like.py`
+   — 실제로는 `moves.py`, 무브 선언이 그 파일에 있다)
+
+`tests/test_action_classifier.py::test_format_moves_renders_none_default_stat_as_situational_choice`
+신설로 렌더링 결과를 회귀 시험으로 고정했다. `tests/test_prompt_assembly_scenario.py`는
+이 변경으로 깨지지 않았다(default_stat을 다루지 않는 파일 — 11-07도 안전).
+`uv run pytest -q` 895 passed, `uv run lint-imports` 4 kept/0 broken.

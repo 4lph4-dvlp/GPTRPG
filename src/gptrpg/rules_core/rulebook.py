@@ -354,7 +354,7 @@ def validate_entity_axes(entity: Entity, rulebook: Rulebook) -> None:
             )
 
 
-def validate_move_stats(default_stats: Iterable[str], rulebook: Rulebook) -> None:
+def validate_move_stats(default_stats: Iterable[str | None], rulebook: Rulebook) -> None:
     """룰북 무브의 `default_stat` 문자열들이 그 룰북의 `resource_axes`
     이름 목록 안에 있는지 검사한다.
 
@@ -363,9 +363,17 @@ def validate_move_stats(default_stats: Iterable[str], rulebook: Rulebook) -> Non
     `rules_core`보다 아래 층이다) — 그래서 이 함수는 `MoveDecl` 타입이
     아니라 문자열 이터러블만 받는다. 층 경계를 넘지 않기 위한 의도적
     선택이다.
+
+    **`None`은 검사에서 건너뛴다** — "이 무브는 접근 방식에 따라 어느
+    능력치든 쓸 수 있다"는 룰북 원문의 의도적 설계다(던전월드 "Defy
+    Danger"가 그 예. `.planning/todos/completed/2026-08-15-move-default-stat-optional.md`).
+    구멍 검사 자체는 유지한다 — 실제로 채워진 문자열은 계속 축 목록과
+    대조하고, 축에 없는 이름을 조용히 통과시키지 않는다.
     """
     axis_names = {axis.name for axis in rulebook.resource_axes}
     for default_stat in default_stats:
+        if default_stat is None:
+            continue
         if default_stat not in axis_names:
             raise EntityAxisMismatch(
                 f"MoveDecl.default_stat {default_stat!r}가 룰북"

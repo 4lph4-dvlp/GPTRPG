@@ -541,3 +541,19 @@ def test_classifier_prompt_handles_empty_move_list():
     assert _format_moves(()) != ""
 
 
+def test_format_moves_renders_none_default_stat_as_situational_choice():
+    """`MoveDecl.default_stat`이 `None`이면 "상황에 맞게 고른다"로 렌더링된다
+    — AI가 "없다"가 아니라 "자유롭게 고르는 자리"로 읽어야 한다
+    (`.planning/todos/completed/2026-08-15-move-default-stat-optional.md`)."""
+    from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
+    from gptrpg.rulebooks.moves import get_moves
+
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    defy_danger = next(move for move in moves if move.move_id == "defy_danger")
+    assert defy_danger.default_stat is None
+
+    rendered = _format_moves((defy_danger,))
+    assert "상황에 맞게 고른다" in rendered
+    assert "None" not in rendered
+
+

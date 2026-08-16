@@ -16,11 +16,18 @@ from gptrpg.rulebooks.openquest import OPENQUEST_ID
 
 @dataclass(frozen=True)
 class MoveDecl:
-    """무브 하나의 선언 — 분류기 프롬프트에 그대로 들어간다."""
+    """무브 하나의 선언 — 분류기 프롬프트에 그대로 들어간다.
+
+    `default_stat`은 `None`일 수 있다 — 룰북 원문이 "접근 방식에 따라 어느
+    능력치든 쓸 수 있다"고 **일부러** 단일 능력치를 정하지 않은 무브가 있다
+    (던전월드 "Defy Danger"가 그 예). `None`은 "빠뜨렸다"가 아니라 "그때그때
+    고른다"는 정상값이다 — `rules_core.rulebook.validate_move_stats`가 이
+    값을 검사에서 건너뛴다(`.planning/todos/completed/2026-08-15-move-default-stat-optional.md`).
+    """
 
     move_id: str
     display_name: str
-    default_stat: str
+    default_stat: str | None
     trigger: str
 
 
@@ -39,18 +46,16 @@ DUNGEONWORLD_LIKE_MOVES: tuple[MoveDecl, ...] = (
     ),
     MoveDecl(
         # 원문(Dungeon World "Defy Danger")은 접근 방식에 따라 어느
-        # 능력치든 쓸 수 있다고 정한다 — 고정된 기본값이 없다. 그런데
-        # 11-02가 `default_stat`을 룰북이 선언한 축 이름과 등록 시점에
-        # 대조하기 시작하면서(D-01/T-11-07), 이 필드는 더 이상 "설명
-        # 문구를 아무거나 적어도 되는 칸"일 수 없어졌다 — 여기 적힌
-        # 값은 분류기 프롬프트에 그대로 들어가는 힌트일 뿐 실제 판정
-        # 능력치를 강제하지 않는다(`ConfirmRequest.stat`이 확인 시점에
-        # 자유롭게 다시 정해진다). 「피하다」라는 트리거 어휘에 가장
-        # 가까운 단일 능력치로 DEX를 골랐다 — 원문의 유연성을 완전히
-        # 대체하지는 못하는 근사치다(11-02-SUMMARY.md 편차 기록 참조).
+        # 능력치든 쓸 수 있다고 정한다 — 고정된 기본값이 없다. 11-02
+        # 당시에는 `default_stat`이 `str` 필수 필드라 DEX로 근사했지만
+        # (편차 기록, 11-02-SUMMARY.md), 그 근사는 원문의 유연성을 좁히는
+        # 판단이었다. 11-04에서 `default_stat`을 `str | None`로 넓혀
+        # 원문 의도대로 `None`("그때그때 고른다")으로 되돌렸다 —
+        # `validate_move_stats`가 `None`을 검사에서 건너뛰고,
+        # `prompt_assembly.py`가 "상황에 맞게 고른다"로 렌더링한다.
         move_id="defy_danger",
         display_name="위험을 무릅쓰다",
-        default_stat="DEX",
+        default_stat=None,
         trigger="위험한 상황에서 다치거나 나쁜 일을 피하려 할 때",
     ),
     MoveDecl(
@@ -66,11 +71,11 @@ DUNGEONWORLD_LIKE_MOVES: tuple[MoveDecl, ...] = (
         trigger="레버리지를 걸고 NPC에게 요구할 때",
     ),
     MoveDecl(
-        # defy_danger와 같은 이유(위 주석 참조) — 사회적 개입(돕다/방해)에
-        # 가장 가까운 단일 능력치로 CHA를 골랐다.
+        # defy_danger와 같은 이유(위 주석 참조) — 원문("Aid or Interfere")도
+        # 고정된 기본값이 없다. 11-04에서 None으로 되돌렸다.
         move_id="aid_or_interfere",
         display_name="돕거나 훼방 놓다",
-        default_stat="CHA",
+        default_stat=None,
         trigger="다른 플레이어의 판정을 돕거나 방해할 때",
     ),
     MoveDecl(

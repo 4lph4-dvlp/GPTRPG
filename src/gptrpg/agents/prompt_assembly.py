@@ -119,7 +119,9 @@ def _format_moves(moves: tuple[MoveDecl, ...]) -> str:
             "③(무슨 말인지 모르겠음)만 남는다.)"
         )
     lines = [
-        f"- {move.move_id} ({move.display_name}, 기본 능력치 {move.default_stat}): {move.trigger}"
+        f"- {move.move_id} ({move.display_name}, 기본 능력치 "
+        f"{move.default_stat if move.default_stat is not None else '상황에 맞게 고른다'}): "
+        f"{move.trigger}"
         for move in moves
     ]
     return "\n".join(lines)
