@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: complete
 phase: 11-rulebook-vocabulary
 source: [11-VERIFICATION.md]
 started: 2026-08-17
@@ -23,15 +23,21 @@ reported: "없다"
 ### 2. 새 환경에서 「판정 없이 이야기가 이어지는」 기능이 실제로 켜지는지
 
 expected: 모델 설정(`.gptrpg/agents.json`)이 git 무시 파일이라 새 환경에서 기본값으로 돌아가 기능이 조용히 안 켜진다. 자동 시험은 가짜 제공자를 쓰므로 이 상태를 절대 못 잡는다.
-result: issue
+result: pass
 reported: "예시 파일을 저장소에 넣고, 켜질 때 경고하며, 문서에도 적는다"
 severity: major
+resolved_by: "G-11-2 갭 해소 (커밋 02a47e5 / 397ef27 / a54eada) — 아래 Gap Resolutions 참조"
+
+사장님이 지정한 세 가지를 그대로 실행해 닫았다. 오케스트레이터가 직접 확인한 것:
+예시 파일 2개가 `git ls-files`에 실제로 잡히고, 사장님 실제 설정(`.gptrpg/agents.json`)·
+API 키(`.env.local`)·사건 DB·쿠키 비밀은 여전히 무시되며, 작은 모델로 CLI를 돌리면
+경고 두 줄이 뜨고 종료 코드 0으로 **막지 않고** 진행되고, 권장값으로 돌리면 경고가 없다.
 
 ## Summary
 
 total: 2
-passed: 1
-issues: 1
+passed: 2
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0
@@ -40,7 +46,9 @@ blocked: 0
 
 - gap_id: G-11-2
   truth: "새 환경에서 저장소를 받은 사람이 모델 설정을 몰라 기능이 조용히 안 켜지는 일이 없다"
-  status: failed
+  status: resolved
+  resolved_by: "02a47e5 (기동 경고) / 397ef27 (예시 파일) / a54eada (README)"
+  resolved_at: 2026-08-17
   reason: "User reported: 예시 파일을 저장소에 넣고, 켜질 때 경고하며, 문서에도 적는다"
   severity: major
   test: 2
