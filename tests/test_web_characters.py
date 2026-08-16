@@ -98,6 +98,29 @@ def test_none_axis_excluded_from_sheet_response(web_client: TestClient) -> None:
     assert hidden_axis_name not in response.text
 
 
+def test_dungeonworld_discretionary_axis_is_absent_from_sheet_response(
+    web_client: TestClient,
+) -> None:
+    """던전월드류가 실제로 선언한 `form="none"`(`discretionary`) 축("소지품")이
+    브람의 시트 응답 본문 문자열 어디에도 등장하지 않는다(RULE-12, D-67,
+    11-07) — 시험 픽스처가 아니라 저장소에 출하되는 실제 룰북 데이터로
+    RULE-12를 실증한다."""
+    response = web_client.get("/api/sessions/s1/characters/bram")
+
+    assert response.status_code == 200
+    assert "소지품" not in response.text
+
+
+def test_dungeonworld_sheet_stat_count_unchanged_by_none_axis(web_client: TestClient) -> None:
+    """룰북이 「소지품」 축을 새로 선언해도, 그 축을 갖지 않은 브람의 시트
+    `stats` 길이는 `Entity.stats` 선언 길이와 완전히 같다 — 룰북이 선언한
+    `none` 축이 개체에 없는 값을 새로 실어 보내지 않는다(D-04)."""
+    response = web_client.get("/api/sessions/s1/characters/bram")
+
+    assert response.status_code == 200
+    assert len(response.json()["stats"]) == len(PLAYER_CHARACTERS["bram"].stats)
+
+
 def test_rulebook_with_zero_axes_returns_empty_stats(web_client: TestClient) -> None:
     """`resource_axes=()`인 룰북을 쓰는 개체의 시트 응답은 `stats: []`이고
     HTTP 200이다."""

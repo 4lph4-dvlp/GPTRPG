@@ -33,6 +33,20 @@ DUNGEONWORLD_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
     ResourceAxisDecl(name="WIS", form="numeric"),
     ResourceAxisDecl(name="CHA", form="numeric"),
     ResourceAxisDecl(name="방어구", form="numeric"),
+    # 소지품 — 이 룰북은 소지품을 규칙으로 세지 않는다(RULE-12, D-67, 11-07).
+    # 이 파일이 이 선언을 담아도 되는 이유: 이 모듈 도크스트링이 이미
+    # "던전월드 계열의 판정 방식을 참고한 자체 선언"이며 원문 옮김이
+    # 아니라고 밝히고 있고, PbtA 계열이 소지품을 규칙으로 세지 않고 "말이
+    # 되면 갖고 있는 것으로 친다"로 다룬다는 것은 특정 저작물의 원문이
+    # 아니라 `RULEBOOK-SURVEY.md` §3-A·§4가 정리한 스펙트럼상의 사실이다
+    # (특정 저작물의 고유명사·원문을 옮기지 않는다).
+    #
+    # **D-09를 이 자리에 문장으로 남긴다.** `none_kind="discretionary"`이므로
+    # 이 룰북에는 "소지품에 없는 것을 쓰겠다"는 판단 자체가 성립하지 않는다
+    # — 대조할 목록이 없으니 그냥 서사로 흘러간다. Phase 12가 만들 "소지품에
+    # 없는 것을 쓰면 재량 판정으로 간다"는 **세는 룰북에만** 적용되고, 이
+    # 단계는 그 대조 경로·재량 판정 분기를 여기서 새로 만들지 않는다.
+    ResourceAxisDecl(name="소지품", form="none", none_kind="discretionary"),
 )
 
 DUNGEONWORLD_LIKE = Rulebook(

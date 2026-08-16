@@ -160,12 +160,17 @@ def test_dungeonworld_and_openquest_resource_axes_have_no_internal_duplicates():
         assert len(names) == len(set(names))
 
 
-def test_dungeonworld_resource_axes_are_all_numeric_form():
-    """이 단계(11-01)는 numeric 형태 하나만 관통시킨다 — 던전월드류가
-    선언한 여덟 축 전부가 아직 numeric이다. 나머지 다섯 형태는 11-03이
-    붙인다."""
-    assert len(DUNGEONWORLD_RESOURCE_AXES) == 8
-    assert all(axis.form == "numeric" for axis in DUNGEONWORLD_RESOURCE_AXES)
+def test_dungeonworld_resource_axes_are_eight_numeric_and_one_discretionary_none():
+    """11-01이 관통시킨 numeric 여덟 축은 그대로다. 11-07이 아홉 번째 축
+    ("소지품", `form="none"`, `none_kind="discretionary"`)을 추가해
+    RULE-12를 실제 데이터로 실증한다 — "이 룰북은 소지품을 규칙으로 세지
+    않는다"는 선언이 시험 픽스처가 아니라 저장소에 출하되는 룰북에 있다."""
+    numeric_axes = [axis for axis in DUNGEONWORLD_RESOURCE_AXES if axis.form == "numeric"]
+    none_axes = [axis for axis in DUNGEONWORLD_RESOURCE_AXES if axis.form == "none"]
+    assert len(DUNGEONWORLD_RESOURCE_AXES) == 9
+    assert len(numeric_axes) == 8
+    assert [axis.name for axis in none_axes] == ["소지품"]
+    assert none_axes[0].none_kind == "discretionary"
     assert DUNGEONWORLD_LIKE.resource_axes == DUNGEONWORLD_RESOURCE_AXES
 
 
