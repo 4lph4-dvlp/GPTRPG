@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 11
 current_phase_name: rulebook-vocabulary
 status: executing
-stopped_at: Completed 11-03-PLAN.md
-last_updated: "2026-08-16T10:22:51.269Z"
+stopped_at: Completed 11-05-PLAN.md
+last_updated: "2026-08-16T10:42:40.138Z"
 last_activity: 2026-08-15
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 22
-  completed_plans: 18
+  completed_plans: 19
   percent: 27
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 11 (rulebook-vocabulary) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-08-15 — Phase 11 execution started
 
@@ -39,7 +39,7 @@ Last activity: 2026-08-15 — Phase 11 execution started
 > (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
 > 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
 
-Progress: [████████░░] 82%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -104,6 +104,7 @@ Progress: [████████░░] 82%
 | Phase 11 P01 | ~45min | 2 tasks | 15 files |
 | Phase 11 P02 | ~35min | 3 tasks | 5 files |
 | Phase 11 P03 | ~25min (Task1-2) + checkpoint overnight wait | 3 tasks | 5 files |
+| Phase 11 P05 | ~20min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -203,6 +204,10 @@ Progress: [████████░░] 82%
 - [Phase ?]: 11-03: _visible_stats()가 form=="none" 축을 시트 응답 조립 단계에서 제외 — 룰북 축 선언과 개체 StatEntry.form 두 신호를 독립적으로 확인, 등록 검증 전제에 안 기댐
 - [Phase ?]: 11-03: StatusPane이 여섯 형태(numeric/clock/named_slots/tag_list/usage_die/none) 전부에 명시적 렌더 갈래를 갖춤 — clock은 ThreatClock 재사용, none은 서버가 이미 제외해 도달 불가
 - [Phase ?]: 11-03 [deviation]: 체크포인트 확인 시 실제 룰북 데이터가 numeric만 선언해 나머지 다섯 형태를 볼 화면이 없어, 저장소를 안 건드리고 서버 메모리에만 데모 캐릭터 둘을 얹어 확인 후 폐기함
+- [Phase ?]: 11-05: ProposalTier 4값(single/several/no_check/unclear) + NO_CHECK_SIGNAL 신호, Proposal.tier 우선순위(unknown_move>후보>신호>나머지)를 코드로 못박음(D-11)
+- [Phase ?]: 11-05: 분류기 지시문이 '안 맞음'과 '필요 없음'을 3갈래로 분리, 빈 무브 목록도 예외 없이 조립(RULE-15 empty)
+- [Phase ?]: 11-05: 웹/CLI/화면/타입 네 곳이 같은 커밋(9e23c71)에서 4값 어휘로 이동 — CLI 안내 문구를 '진행합니다'(부정확)에서 '끝납니다'(정직)로 교체
+- [Phase ?]: 11-05: RULE-15는 Complete로 표시하지 않음 — 이 계획은 그릇(플랫폼 능력)만 만들었고 실증(11-04)과 no_check 실제 서사 경로(11-06)가 남음
 
 ### Pending Todos
 
@@ -258,8 +263,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-16T10:22:51.232Z
-Stopped at: Completed 11-03-PLAN.md
+Last session: 2026-08-16T10:42:40.103Z
+Stopped at: Completed 11-05-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
