@@ -771,13 +771,38 @@ def test_turn_provider_call_failure_looks_like_no_move_but_leaves_a_stderr_trail
 
 
 def test_no_check_tier_ends_turn_without_indexerror(
-    tmp_db_path, monkeypatch, fake_provider, capsys
+    tmp_db_path, monkeypatch, fake_provider
 ):
     """모델이 `no_check` 신호만 내면(tier == "no_check") CLI가
-    `IndexError` 없이 정상 종료한다 — `turn_flow.py`가 `if tier == "none"`을
-    `if tier in ("unclear", "no_check")`로 넓히지 않으면 `no_check`가
-    `else`(옛 "several" 전용) 분기로 떨어져 빈 `candidates` 튜플의 0번
-    인덱스에서 죽는다(D-11, RULE-15, T-11-18)."""
+    `IndexError` 없이 정상 종료한다 — `turn_flow.py`가 `no_check`를 별도
+    갈래로 처리하지 않으면 옛 `else`(구 "several" 전용) 분기로 떨어져 빈
+    `candidates` 튜플의 0번 인덱스에서 죽는다(D-11, RULE-15, T-11-18).
+
+    11-06부터 `no_check`는 `unclear`와 다른 화면이다 — 판정 없이 서사가
+    실제로 이어진다(D-10 ②갈래). 이 시험은 그 새 경로가 최소한
+    `IndexError` 없이 끝까지 도는지를 확인하는 자리로 남는다 — 서사 내용
+    확인은 `test_no_check_tier_produces_narration_without_check`가 맡는다."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps([{"no_check": True}])
+
+    exit_code = _run_turn_with_fake(
+        db, "s1", "문을 연다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+        input_answers=[],
+    )
+    assert exit_code == 0
+
+    events = _read_events(db, "s1")
+    assert any(e.event_type == "action_declared" for e in events)
+    assert not any(e.event_type == "action_confirmed" for e in events)
+
+
+def test_no_check_tier_produces_narration_without_check(
+    tmp_db_path, monkeypatch, fake_provider, capsys
+):
+    """`tier == "no_check"`인 턴이 실제로 판정 없이 서사로 이어진다(D-10
+    ②갈래, RULE-15, 11-06) — `check_resolved`/`action_confirmed` 사건이
+    없고 `narration_appended` 사건이 있다. 화면에는 판정 결과 줄
+    (`판정: 눈 ...`)이 찍히지 않는다 — 주사위를 굴리지 않았기 때문이다."""
     db = str(tmp_db_path)
     fake_provider.complete_value = json.dumps([{"no_check": True}])
 
@@ -788,12 +813,15 @@ def test_no_check_tier_ends_turn_without_indexerror(
     assert exit_code == 0
 
     out = capsys.readouterr().out
-    assert "판정 없이" in out
-    assert "끝납니다" in out
+    assert "판정 없이 이야기를 이어갑니다." in out
+    assert "판정:" not in out
+    assert "문이 요란하게 부서진다." in out
 
     events = _read_events(db, "s1")
-    assert any(e.event_type == "action_declared" for e in events)
+    assert not any(e.event_type == "check_resolved" for e in events)
     assert not any(e.event_type == "action_confirmed" for e in events)
+    narrations = [e for e in events if e.event_type == "narration_appended"]
+    assert len(narrations) == 2
 
 
 def test_turn_shows_progress_dots_when_classifier_response_exceeds_threshold(

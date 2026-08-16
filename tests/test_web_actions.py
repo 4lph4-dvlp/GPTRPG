@@ -14,6 +14,7 @@ from httpx import ASGITransport, AsyncClient
 
 from conftest import FakeProvider
 from conftest import select_character as _select_character_at
+from gptrpg.agents.context import NO_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.imagery import imagery_config_from_env
@@ -1199,3 +1200,118 @@ async def test_concurrent_confirm_same_declare_seq_http_layer_one_check_resolved
     events = events_response.json()["events"]
     resolved = [e for e in events if e["event_type"] == "check_resolved"]
     assert len(resolved) == 1
+
+
+# ---------------------------------------------------------------------------
+# 11-06 Task 1: 판정 없이 서술로 가는 경로 — POST /sessions/{id}/proceed
+# ---------------------------------------------------------------------------
+
+
+def _proceed_body(declare_seq: int, **overrides) -> dict:
+    body = {
+        "player_id": "bram",
+        "declare_seq": declare_seq,
+        "rulebook_id": "dungeonworld_like",
+        "character_id": "bram",
+    }
+    body.update(overrides)
+    return body
+
+
+def test_proceed_narrates_without_resolve_check(web_client_with_fake_provider) -> None:
+    """`proceed()` 호출 뒤 사건 기록에 `check_resolved`가 없고 서사 사건이
+    있다 — 판정 없이 진행한 턴의 기록이 「선언만 있고 아무것도 없는 턴」과
+    구조적으로 구분된다(결정 1, PLAN.md)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        resolved = _events_of_type(client, "check_resolved")
+        narrations = _events_of_type(client, "narration_appended")
+
+    assert body["proceeded"] is True
+    assert body["narration_failed"] is False
+    assert body["narration_chunk_count"] == 2
+    assert resolved == []
+    assert narrations
+
+
+def test_proceed_does_not_submit_confirm_action(web_client_with_fake_provider) -> None:
+    """판정 없이 진행하는 경로가 `action_confirmed`도 남기지 않는다 —
+    확인 버튼 자체가 없는 경로이므로(D-10 ②갈래)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+        assert response.status_code == 200
+        confirmed = _events_of_type(client, "action_confirmed")
+
+    assert confirmed == []
+
+
+def test_proceed_rejects_mismatched_character_identity(web_client_with_fake_provider) -> None:
+    """신원 대조가 `confirm()`과 같은 규칙으로 앞서 걸린다(TRUST-02, D-04)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed",
+            json=_proceed_body(declare_seq, character_id="no_such_character"),
+        )
+    assert response.status_code == 403
+
+
+def test_proceed_narration_failure_returns_200_with_flag(web_client_with_fake_provider) -> None:
+    """서사 생성만 실패하면 200 + `narration_failed=true`로 돌아온다 —
+    판정 실패와 구분되는 기존 규율(TRUST-06, D-08)이 판정 없는 경로에도
+    그대로 적용된다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+    gm = _NarrationRaisingProvider()
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        resolved = _events_of_type(client, "check_resolved")
+
+    assert body["proceeded"] is True
+    assert body["narration_failed"] is True
+    assert resolved == []
+
+
+def test_proceed_passes_fixed_summary_not_player_text(web_client_with_fake_provider) -> None:
+    """진행자(상황판단)에게 넘어가는 `check_summary` 자리가 `NO_CHECK_SUMMARY`와
+    같다 — 그 자리에는 이번 턴 플레이어 원문이 들어가지 않는다(SAFE-03 울타리
+    우회 방지). 최근 대화(`recent_turns`)에 원문이 나오는 것은 별개의 정당한
+    경로다(10-02가 이미 대조 소스에서 뺀 자리) — 이 시험은 `check_summary`
+    슬롯 하나만 정밀하게 잘라서 확인한다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    situation_judge = FakeProvider(complete_value="[]")
+    raw_text = "문을 연다"
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=gm, situation_judge=situation_judge
+    ) as client:
+        declare_seq = _declare_first(client, raw_text=raw_text)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+        assert response.status_code == 200
+
+    assert len(situation_judge.calls) == 1
+    _system, messages = situation_judge.calls[0]
+    turn_text = messages[-1]["content"]
+    assert f"방금 판정 결과: {NO_CHECK_SUMMARY}" in turn_text
+    check_summary_line = turn_text.rsplit("방금 판정 결과: ", 1)[-1]
+    assert check_summary_line == NO_CHECK_SUMMARY
+    assert raw_text not in check_summary_line

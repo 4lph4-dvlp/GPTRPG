@@ -17,6 +17,7 @@ from typing import TypeVar
 
 from gptrpg.agents.action_classifier import MoveCandidate, classify
 from gptrpg.agents.config import AgentChoice, load_config, resolve_provider
+from gptrpg.agents.context import NO_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
 from gptrpg.agents.providers.base import Provider
@@ -214,6 +215,196 @@ def _last_result_or_failure_envelope(provider: Provider, *, elapsed_ms: int) -> 
         )
 
 
+async def _proceed_without_check(
+    store: EventStore,
+    actor: SessionActor,
+    args: argparse.Namespace,
+    *,
+    declare_seq: int,
+    rulebook,
+) -> int:
+    """굴릴 필요가 없다고 분류된 행동(`tier == "no_check"`)을 판정 없이
+    서술로 잇는다(D-10 ②갈래, RULE-15, 11-06).
+
+    `web/routes_actions.py`의 `proceed()`와 같은 뜻·같은 구조를 CLI 방식으로
+    밟는다 — `confirm`/`roll`에 해당하는 사건을 제출하지 않고,
+    `check_summary` 자리에는 `NO_CHECK_SUMMARY` 고정 문장을 쓴다. 이 함수
+    전체에서 `caused_by_seq`는 `declare_seq` 하나로 고정된다 — 이 경로에는
+    확인·판정 사건이 없다(결정 1, PLAN.md).
+    """
+    ctx = _build_turn_context(store, args.session, args.rulebook)
+
+    # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
+    # 병렬로 부른다 — `_turn_flow`의 판정 뒤 구간과 같은 구조·같은 이유
+    # (ARCH-04). 실패해도 진행을 막지 않는다(D-05, ARCH-05).
+    situation_judge_choice = _resolve_role_choice(args, "situation_judge")
+    entity_judge_choice = _resolve_role_choice(args, "scene_entity_judge")
+    clock_judge_choice = _resolve_role_choice(args, "clock_judge")
+    try:
+        situation_provider = resolve_provider(
+            "situation_judge", {"situation_judge": situation_judge_choice}, os.environ
+        )
+        entity_provider = resolve_provider(
+            "scene_entity_judge", {"scene_entity_judge": entity_judge_choice}, os.environ
+        )
+        clock_provider = resolve_provider(
+            "clock_judge", {"clock_judge": clock_judge_choice}, os.environ
+        )
+        judgments = await gather_turn_judgments(
+            situation_provider=situation_provider,
+            situation_model=situation_judge_choice.model,
+            entity_provider=entity_provider,
+            entity_model=entity_judge_choice.model,
+            clock_provider=clock_provider,
+            clock_model=clock_judge_choice.model,
+            ctx=ctx,
+            check_summary=NO_CHECK_SUMMARY,
+            rulebook_display_name=rulebook.display_name,
+        )
+    except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성)이 실패해도 진행을 막지 않는다
+        print(
+            f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (declare_seq {declare_seq}) — {exc}",
+            file=sys.stderr,
+        )
+        judgments = empty_turn_judgments()
+        clock_provider = None
+
+    await actor.submit(
+        RecordAiCall(
+            agent_role="situation_judge",
+            model=situation_judge_choice.model,
+            provider=situation_judge_choice.provider,
+            prompt_tokens=judgments.situation.ai.prompt_tokens,
+            completion_tokens=judgments.situation.ai.completion_tokens,
+            cached_prompt_tokens=judgments.situation.ai.cached_prompt_tokens,
+            latency_ms=judgments.situation.ai.elapsed_ms,
+            caused_by_seq=declare_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="scene_entity_judge",
+            model=entity_judge_choice.model,
+            provider=entity_judge_choice.provider,
+            prompt_tokens=judgments.entity.ai.prompt_tokens,
+            completion_tokens=judgments.entity.ai.completion_tokens,
+            cached_prompt_tokens=judgments.entity.ai.cached_prompt_tokens,
+            latency_ms=judgments.entity.ai.elapsed_ms,
+            caused_by_seq=declare_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="clock_judge",
+            model=clock_judge_choice.model,
+            provider=clock_judge_choice.provider,
+            prompt_tokens=judgments.clock.ai.prompt_tokens,
+            completion_tokens=judgments.clock.ai.completion_tokens,
+            cached_prompt_tokens=judgments.clock.ai.cached_prompt_tokens,
+            latency_ms=judgments.clock.ai.elapsed_ms,
+            caused_by_seq=declare_seq,
+        )
+    )
+
+    facts = build_narration_facts(ctx=ctx, check_summary=NO_CHECK_SUMMARY, judgments=judgments)
+
+    gm_choice = _resolve_role_choice(args, "master_gm")
+    gm_provider = resolve_provider("master_gm", {"master_gm": gm_choice}, os.environ)
+
+    # 서사 — `_turn_flow`의 ⑤ 구간과 한 글자도 다르지 않다(예외 포착 범위·
+    # 되감지 않음·실패 처리 전부 동일). caused_by_seq만 `declare_seq`로 다르다.
+    narration_start = time.monotonic()
+    narration_error: Exception | None = None
+    chunk_index = 0
+    narration_texts: list[str] = []
+    try:
+        narration_iter = narrate(
+            provider=gm_provider,
+            model=gm_choice.model,
+            facts=facts,
+            rulebook_display_name=rulebook.display_name,
+        )
+        first_sentence = with_progress_dots(
+            lambda: next(narration_iter, _NO_SENTENCE),
+            threshold_s=args.progress_after,
+            tick_s=args.progress_tick,
+        )
+    except Exception as exc:  # noqa: BLE001 - 서사 스트림 생성/첫 조각 실패만 여기서 잡는다(G-03-3)
+        narration_error = exc
+        first_sentence = _NO_SENTENCE
+
+    if first_sentence is not _NO_SENTENCE:
+        await _submit_narration_chunk(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
+            actor=actor,
+            chunk=first_sentence,
+            chunk_index=chunk_index,
+            resolve_seq=declare_seq,
+            narration_texts=narration_texts,
+        )
+        chunk_index += 1
+        while True:
+            try:
+                sentence = next(narration_iter)
+            except StopIteration:
+                break
+            except Exception as exc:  # noqa: BLE001 - 서사 스트림 이어받기 실패만 여기서 잡는다(G-03-3)
+                narration_error = exc
+                break
+            await _submit_narration_chunk(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
+                actor=actor,
+                chunk=sentence,
+                chunk_index=chunk_index,
+                resolve_seq=declare_seq,
+                narration_texts=narration_texts,
+            )
+            chunk_index += 1
+
+    elapsed_ms = int((time.monotonic() - narration_start) * 1000)
+    gm_result = _last_result_or_failure_envelope(gm_provider, elapsed_ms=elapsed_ms)
+    try:
+        await actor.submit(
+            RecordAiCall(
+                agent_role="master_gm",
+                model=gm_choice.model,
+                provider=gm_choice.provider,
+                prompt_tokens=gm_result.prompt_tokens,
+                completion_tokens=gm_result.completion_tokens,
+                cached_prompt_tokens=gm_result.cached_prompt_tokens,
+                latency_ms=gm_result.elapsed_ms,
+                caused_by_seq=declare_seq,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 - "항상 제출한다" 기록 제출 실패도 raw traceback으로 새면 안 된다(WR-02)
+        print(f"오류: 진행자 AI 호출 기록 제출이 실패했다 — {exc}", file=sys.stderr)
+        return 1
+
+    if narration_error is not None or not gm_result.ok:
+        reason = (
+            str(narration_error)
+            if narration_error is not None
+            else "제공자가 last_result() 규약을 어겼다"
+        )
+        print(f"오류: 서사가 끝까지 나오지 못했다 — {reason}", file=sys.stderr)
+        return 1
+
+    if judgments.clock.should_check and clock_provider is not None:
+        # `_turn_flow`와 같은 CLI/웹 비대칭 이유(Pitfall 1) — 여기서도
+        # `await`로 끝까지 기다린다.
+        await run_clock_condition_check(
+            actor=actor,
+            provider=clock_provider,
+            model=clock_judge_choice.model,
+            judge_ctx=build_clock_judge_context(ctx, NO_CHECK_SUMMARY),
+            rulebook_display_name=rulebook.display_name,
+            narration_text="\n".join(narration_texts),
+            resolve_seq=declare_seq,
+            clock_id=ctx.clock_state.clock_id,
+            clock_segment_count=CLOCK_SEGMENT_COUNT,
+        )
+
+    return 0
+
+
 async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Namespace) -> int:
     """`turn` 하위 명령의 본체 — 분류 -> 세 갈래 확인 -> 판정 -> 문장 단위 서사.
 
@@ -280,19 +471,23 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
 
     tier = proposal.tier
 
-    # ③ 네 갈래 확인 화면 — 어느 갈래에서도 사람 입력 없이 다음으로 못 넘어간다.
-    # `unclear`(AI가 못 알아들었음)와 `no_check`(굴릴 필요 없음)는 이 계획
-    # 시점에서는 아직 같은 화면으로 간다 — 둘 다 이번 턴을 판정 없이 끝낸다
-    # (D-11, 11-05). 옛 문구 「무브 없음 — 판정 없이 진행합니다」는 실제로는
-    # 서사를 안 이어 주고 그냥 턴을 끝내는데 "진행합니다"라고 적어 부정확했다
-    # — 정직하게 "끝납니다"로 고친다. `no_check`가 실제로 판정 없이 서사가
-    # 이어지는 화면을 여는 것은 11-06 몫이다.
-    if tier in ("unclear", "no_check"):
-        # 되돌리기 전용 화면을 만들지 않는다 — ConfirmAction 자체를 제출하지
-        # 않는다. 「확인 사건 없는 선언 사건」이 곧 「직접 찾아야 함」 사례의
-        # 기록이다 (D-29, D-36, HYP-04의 세 번째 칸).
+    # ③ 네 갈래 확인 화면 — 어느 갈래에서도 사람 입력 없이 다음으로 못
+    # 넘어간다. `unclear`(AI가 못 알아들었음)만 이번 턴을 판정 없이 끝낸다
+    # — 되돌리기 전용 화면을 만들지 않는다, ConfirmAction 자체를 제출하지
+    # 않는다. 「확인 사건 없는 선언 사건」이 곧 「직접 찾아야 함」 사례의
+    # 기록이다 (D-29, D-36, HYP-04의 세 번째 칸).
+    if tier == "unclear":
         print("이번 턴은 판정 없이 여기서 끝납니다. 필요하면 다음 턴에 roll 명령을 직접 쓰세요.")
         return 0
+
+    # `no_check`(굴릴 필요 없음)는 11-06부터 판정 없이 서사가 실제로
+    # 이어지는 별도 갈래다(D-10 ②갈래, RULE-15) — `unclear`와 더 이상 같은
+    # 화면이 아니다. 후보 확인 화면(아래 single/several)으로도 가지 않는다
+    # — `_prompt_candidate_or_reject`/`_read_single_confirmation`은 후보가
+    # 있을 때만 의미가 있고, 이 갈래는 애초에 후보가 0개다.
+    if tier == "no_check":
+        print("판정 없이 이야기를 이어갑니다.")
+        return await _proceed_without_check(store, actor, args, declare_seq=declare_seq, rulebook=rulebook)
 
     if tier == "single":
         (candidate,) = proposal.candidates

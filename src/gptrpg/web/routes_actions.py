@@ -1,7 +1,11 @@
-"""선언·확인 두 경로 — 브라우저에서 한 턴이 끝까지 돈다.
+"""선언·확인·진행 세 경로 — 브라우저에서 한 턴이 끝까지 돈다.
 
 `POST /sessions/{session_id}/actions/declare`: 문장 하나 -> 무브 후보.
 `POST /sessions/{session_id}/actions/confirm`: 확인/거부 -> 판정 -> 서사.
+`POST /sessions/{session_id}/proceed`: 굴릴 필요 없는 행동(`tier ==
+"no_check"`) -> 판정 없이 서사(D-10 ②갈래, 11-06). `confirm()`의 판정
+이후 구간을 거울처럼 따라가되 `ConfirmAction`/`ResolveCheck`를 제출하지
+않는다.
 
 처리기는 전부 `async def`다(`routes_events.py`와 같은 이유 — `EventStore`의
 sqlite3 연결이 만든 스레드에 묶여 있다). **막는 AI 호출(`classify`, 서사
@@ -34,6 +38,7 @@ from pydantic import BaseModel, Field
 
 from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
+from gptrpg.agents.context import NO_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
 from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, UnknownProvider
@@ -758,6 +763,254 @@ async def confirm(
         rolls=list(check_event.rolls),
         grade=check_event.grade,
         target=check_event.target,
+        narration_chunk_count=chunk_index,
+    )
+
+
+class ProceedRequest(BaseModel):
+    player_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    declare_seq: int = Field(ge=0)
+    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
+    character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+
+
+class ProceedResponse(BaseModel):
+    proceeded: bool
+    narration_chunk_count: int = 0
+    narration_failed: bool = False
+    """서사 생성만 실패했다는 표시다 — `ConfirmResponse.narration_failed`와
+    같은 뜻·같은 기본값이다(TRUST-06, D-08). 판정이 애초에 없는 경로라
+    `rolls`/`grade`/`target` 칸 자체가 없다."""
+
+
+@router.post("/sessions/{session_id}/proceed", response_model=ProceedResponse)
+async def proceed(
+    session_id: str,
+    request: Request,
+    body: ProceedRequest,
+    background: BackgroundTasks,
+) -> ProceedResponse:
+    """굴릴 필요가 없다고 분류된 행동(`tier == "no_check"`)을 판정 없이
+    서술로 잇는다(D-10 ②갈래, RULE-15, 11-06).
+
+    `confirm()`의 **판정 이후 구간을 거울처럼 따라간다** — 다른 점은 딱
+    둘이다: `ConfirmAction`/`ResolveCheck`를 제출하지 않고, `check_summary`
+    자리에 판정 결과 요약 대신 `agents.context.NO_CHECK_SUMMARY` 고정
+    문장을 쓴다. 이 턴의 사건 기록은 「선언 + 서사」모양으로 남는다 — 확인·
+    판정 사건이 없다(결정 1, PLAN.md). 서사·시계 판단이 가리키는 원인
+    사건(`caused_by_seq`)은 `body.declare_seq`다 — 이 경로에 확인·판정
+    사건이 없으므로 그보다 앞서 이미 기록된 선언 사건을 가리킨다.
+
+    **신원 대조가 맨 앞이다(TRUST-02, D-04).** `confirm()`과 같은 이유·
+    같은 형식이다.
+    """
+    identity = read_identity(request, session_id)
+    if identity is None or identity.character_id != body.character_id:
+        print("경고: 신원 검증 실패 — proceed 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+
+    store = request.app.state.store
+    registry = request.app.state.registry
+    actor = registry.get_or_create(session_id)
+
+    character = get_character(body.character_id)
+    if character is None:
+        raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
+
+    try:
+        rulebook = get_rulebook(body.rulebook_id)
+    except UnknownRulebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        choices = load_config(request.app.state.agent_config_path)
+        gm_choice = choices["master_gm"]
+        gm_provider: Provider = request.app.state.provider_resolver(
+            "master_gm", choices, os.environ
+        )
+    except (
+        ConfigNotFound,
+        InvalidAgentConfig,
+        UnknownProvider,
+        MissingApiKey,
+        ProviderNotImplemented,
+    ) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    ctx = build_turn_context(
+        store,
+        session_id,
+        body.rulebook_id,
+        character_stats=character.stats,
+        character_names=_CHARACTER_NAMES,
+    )
+
+    # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
+    # 병렬로 부른다 — `confirm()`과 같은 구조·같은 이유(09-RESEARCH.md
+    # Pitfall 3, ARCH-04). 실패해도 확인/진행 요청을 막지 않는다(D-05,
+    # ARCH-05) — `confirm()`과 완전히 같은 방어.
+    situation_judge_choice = choices["situation_judge"]
+    entity_judge_choice = choices["scene_entity_judge"]
+    clock_judge_choice = choices["clock_judge"]
+    try:
+        situation_provider: Provider = request.app.state.provider_resolver(
+            "situation_judge", choices, os.environ
+        )
+        entity_provider: Provider = request.app.state.provider_resolver(
+            "scene_entity_judge", choices, os.environ
+        )
+        clock_provider: Provider = request.app.state.provider_resolver(
+            "clock_judge", choices, os.environ
+        )
+        judgments = await gather_turn_judgments(
+            situation_provider=situation_provider,
+            situation_model=situation_judge_choice.model,
+            entity_provider=entity_provider,
+            entity_model=entity_judge_choice.model,
+            clock_provider=clock_provider,
+            clock_model=clock_judge_choice.model,
+            ctx=ctx,
+            check_summary=NO_CHECK_SUMMARY,
+            rulebook_display_name=rulebook.display_name,
+        )
+    except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성) 실패가 진행 요청을 막지 않는다
+        print(
+            f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (declare_seq {body.declare_seq}) — {exc}",
+            file=sys.stderr,
+        )
+        judgments = empty_turn_judgments()
+        clock_provider = None
+
+    # 새 에이전트 호출 셋의 기록 — 성공·실패 어느 쪽에서도 항상 제출한다
+    # (MEAS-02, `confirm()`과 같은 규율). caused_by_seq는 `body.declare_seq`다
+    # — 이 경로에는 confirm_seq/resolve_seq가 없다.
+    await actor.submit(
+        RecordAiCall(
+            agent_role="situation_judge",
+            model=situation_judge_choice.model,
+            provider=situation_judge_choice.provider,
+            prompt_tokens=judgments.situation.ai.prompt_tokens,
+            completion_tokens=judgments.situation.ai.completion_tokens,
+            cached_prompt_tokens=judgments.situation.ai.cached_prompt_tokens,
+            latency_ms=judgments.situation.ai.elapsed_ms,
+            caused_by_seq=body.declare_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="scene_entity_judge",
+            model=entity_judge_choice.model,
+            provider=entity_judge_choice.provider,
+            prompt_tokens=judgments.entity.ai.prompt_tokens,
+            completion_tokens=judgments.entity.ai.completion_tokens,
+            cached_prompt_tokens=judgments.entity.ai.cached_prompt_tokens,
+            latency_ms=judgments.entity.ai.elapsed_ms,
+            caused_by_seq=body.declare_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="clock_judge",
+            model=clock_judge_choice.model,
+            provider=clock_judge_choice.provider,
+            prompt_tokens=judgments.clock.ai.prompt_tokens,
+            completion_tokens=judgments.clock.ai.completion_tokens,
+            cached_prompt_tokens=judgments.clock.ai.cached_prompt_tokens,
+            latency_ms=judgments.clock.ai.elapsed_ms,
+            caused_by_seq=body.declare_seq,
+        )
+    )
+
+    facts = build_narration_facts(ctx=ctx, check_summary=NO_CHECK_SUMMARY, judgments=judgments)
+
+    # 서사 — `confirm()`의 ⑤ 구간과 한 글자도 다르지 않다(예외 포착 범위·
+    # 되감지 않음·narration_failed 규약 전부 동일). caused_by_seq만
+    # `body.declare_seq`로 다르다.
+    narration_start = time.monotonic()
+    narration_error: Exception | None = None
+    chunk_index = 0
+    narration_texts: list[str] = []
+    try:
+        narration_iter = narrate(
+            provider=gm_provider,
+            model=gm_choice.model,
+            facts=facts,
+            rulebook_display_name=rulebook.display_name,
+        )
+        first_sentence = await asyncio.to_thread(next, narration_iter, _NO_SENTENCE)
+    except Exception as exc:  # noqa: BLE001 - 서사 스트림 생성/첫 조각 실패만 여기서 잡는다(G-03-3)
+        narration_error = exc
+        first_sentence = _NO_SENTENCE
+
+    if first_sentence is not _NO_SENTENCE:
+        await _submit_narration_chunk(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
+            actor=actor,
+            chunk=first_sentence,
+            chunk_index=chunk_index,
+            resolve_seq=body.declare_seq,
+            narration_texts=narration_texts,
+        )
+        chunk_index += 1
+        while True:
+            try:
+                sentence = await asyncio.to_thread(next, narration_iter, _NO_SENTENCE)
+            except Exception as exc:  # noqa: BLE001 - 서사 스트림 이어받기 실패만 여기서 잡는다(G-03-3)
+                narration_error = exc
+                break
+            if sentence is _NO_SENTENCE:
+                break
+            await _submit_narration_chunk(  # 액터/저장소 결함은 여기서 그대로 터진다(WR-01)
+                actor=actor,
+                chunk=sentence,
+                chunk_index=chunk_index,
+                resolve_seq=body.declare_seq,
+                narration_texts=narration_texts,
+            )
+            chunk_index += 1
+
+    elapsed_ms = int((time.monotonic() - narration_start) * 1000)
+    gm_result = _last_result_or_failure_envelope(gm_provider, elapsed_ms=elapsed_ms)
+    await actor.submit(
+        RecordAiCall(
+            agent_role="master_gm",
+            model=gm_choice.model,
+            provider=gm_choice.provider,
+            prompt_tokens=gm_result.prompt_tokens,
+            completion_tokens=gm_result.completion_tokens,
+            cached_prompt_tokens=gm_result.cached_prompt_tokens,
+            latency_ms=gm_result.elapsed_ms,
+            caused_by_seq=body.declare_seq,
+        )
+    )
+
+    if narration_error is not None or not gm_result.ok:
+        # D-08/TRUST-06과 같은 이유 — 이 경로는 애초에 판정이 없으므로
+        # 버릴 굴림 결과 자체가 없다. 200을 돌려주고 narration_failed로
+        # 실패를 알린다.
+        return ProceedResponse(
+            proceeded=True,
+            narration_chunk_count=chunk_index,
+            narration_failed=True,
+        )
+
+    # 시계 조건 검사 배경 등록 — `confirm()`과 같은 자리·같은 조건
+    # (ARCH-03/D-01). caused_by_seq는 `body.declare_seq`다.
+    if judgments.clock.should_check and clock_provider is not None:
+        background.add_task(
+            run_clock_condition_check,
+            actor=actor,
+            provider=clock_provider,
+            model=clock_judge_choice.model,
+            judge_ctx=build_clock_judge_context(ctx, NO_CHECK_SUMMARY),
+            rulebook_display_name=rulebook.display_name,
+            narration_text="\n".join(narration_texts),
+            resolve_seq=body.declare_seq,
+            clock_id=ctx.clock_state.clock_id,
+            clock_segment_count=CLOCK_SEGMENT_COUNT,
+        )
+
+    return ProceedResponse(
+        proceeded=True,
         narration_chunk_count=chunk_index,
     )
 

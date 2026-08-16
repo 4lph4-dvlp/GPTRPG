@@ -76,6 +76,11 @@ async def gather_turn_judgments(
     check_summary)`로, 장면 신규 대상 판단용 문맥(`EntityJudgeContext`)은
     `_build_entity_judge_context(ctx, check_summary)`로 이 함수 안에서
     만든다 — 각 판단이 필요로 하는 좁은 칸만 여기서 뽑는다(ARCH-06).
+
+    판정 없는 턴(11-06, `web/routes_actions.py`의 `proceed()` ·
+    `cli/turn_flow.py`의 `no_check` 갈래)에서는 호출부가
+    `check_summary=agents.context.NO_CHECK_SUMMARY`를 넘긴다 — 이 함수의
+    시그니처는 바뀌지 않는다.
     """
     clock_judge_ctx = build_clock_judge_context(ctx, check_summary)
     entity_judge_ctx = _build_entity_judge_context(ctx, check_summary)
@@ -134,6 +139,9 @@ def build_narration_facts(
     `judge_new_entity`가 이미 `NEW_ENTITY_LIMIT`으로 잘라 뒀으므로 여기서
     다시 자르지 않는다. 시계 상태는 애초에 옮길 칸이 없다 — `NarrationFacts`가
     그 칸을 갖고 있지 않다(ARCH-02).
+
+    판정 없는 턴에서는 호출부가 `check_summary=agents.context.NO_CHECK_SUMMARY`를
+    넘긴다(11-06) — 이 함수의 시그니처는 바뀌지 않는다.
     """
     return NarrationFacts(
         check_summary=check_summary,

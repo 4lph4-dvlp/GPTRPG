@@ -14,6 +14,17 @@ from gptrpg.rules_core.entities import Entity, StatEntry
 RECENT_TURNS_LIMIT = 10
 """매 턴 넣는 최근 대화의 최대 개수 (D-31)."""
 
+NO_CHECK_SUMMARY = "이번 행동은 판정 없이 진행됐다."
+"""판정 없이 진행한 턴에서 `check_summary` 자리에 넣는 플랫폼 고정 문장(11-06,
+D-10 ②갈래).
+
+판정이 없었으므로 판정 결과 요약(등급·목표값)이 없다 — 이 자리에 플레이어가
+친 원문을 요약해 넣으면 SAFE-03이 세운 원문 울타리(`fence_player_text`)를
+우회하는 경로가 생긴다(원문이 `check_summary`를 통해 울타리 없이 진행자
+프롬프트로 흘러 들어간다). 그래서 룰북 어휘도 플레이어 원문도 담지 않는
+플랫폼 고정 문장 하나를 쓴다. `web/routes_actions.py`의 `proceed()`와
+`cli/turn_flow.py`의 `no_check` 갈래가 이 상수를 그대로 넘긴다."""
+
 
 class TooMuchContext(Exception):
     """`recent_turns`가 `RECENT_TURNS_LIMIT`을 넘겼을 때 던진다.
