@@ -6,7 +6,7 @@ current_phase: 11
 current_phase_name: rulebook-vocabulary
 status: verifying
 stopped_at: Completed 11-07-PLAN.md — Phase 11 전체 계획 7/7 완료
-last_updated: "2026-08-16T15:34:07.570Z"
+last_updated: "2026-08-16T16:28:56.626Z"
 last_activity: 2026-08-15
 last_activity_desc: Phase 11 execution started
 progress:
@@ -221,6 +221,7 @@ Progress: [██████████] 100%
 - [Phase ?]: 11-07: _format_resource_treatment()가 discretionary/absent 두 갈래를 서로 다른 처리 지침 문장으로 세 프롬프트 조립 함수의 영구 고정 블록에 싣는다(D-08) — RESOURCE_TREATMENT_LINES_LIMIT=8, 초과 시 ContextCapExceeded
 - [Phase ?]: 11-07: resource_axes 매개변수를 기본값 ()로 넓혀 classify/judge_situation/narrate/gather_turn_judgments에 추가 — 이 저장소 전역의 기존 프롬프트 조립 호출부·시험이 대부분 무변경으로 남고, 웹·CLI 실제 호출부 10곳만 rulebook.resource_axes를 명시적으로 넘긴다
 - [Phase ?]: 11-07: _format_character_state가 stat.form 여섯 값 명시적 분기로 재작성됨 — form=="none"은 건너뛴다(T-11-25). _format_scene_entities는 같은 버그를 잠재적으로 갖고 있으나 이 계획 범위 밖, WINDOWS.md에 todo로 기록
+- [Phase ?]: 11-06 rework 2(코드 리뷰 후 차단 결함, T-11-29): POST /proceed가 라우트 계층 신원 대조만 하고 선언 소유권·분류 결과(tier)를 서버 자체 검증 없이 클라이언트 말을 믿어, 판정이 필요한 행동을 선언한 뒤 판정을 통째로 건너뛸 수 있었다. ActionClassified 사건(판 7)+SessionActor.VerifyProceedEligibility(declare_owners+declare_no_check 이중 검사)로 막았다. 옛/미분류 기록은 declare_owners의 '모르면 통과'와 반대로 '모르면 거부'한다 — 통과시키면 이 구멍이 다시 열린다
 
 ### Pending Todos
 
