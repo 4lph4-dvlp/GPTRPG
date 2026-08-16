@@ -26,6 +26,7 @@ from gptrpg.event_log.schema import (
     utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
+from gptrpg.rules_core.entities import StatEntry
 from gptrpg.rules_core.rulebook import ResourceAxisDecl
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
@@ -482,3 +483,73 @@ def test_build_classifier_prompt_system_is_byte_identical_across_calls_with_diff
         raw_text="창문으로 넘어간다",
     )
     assert system1 == system2
+
+
+# ---------------------------------------------------------------------------
+# 11-07 Task 3: 캐릭터 상태 문자열이 여섯 표현 형태를 전부 다룬다.
+# ---------------------------------------------------------------------------
+
+_SIX_FORM_STATS = (
+    StatEntry(name="체력", form="numeric", current=20, max=20),
+    StatEntry(name="긴장", form="clock", current=2, max=6),
+    StatEntry(
+        name="가방",
+        form="named_slots",
+        slot_values=("장검", "랜턴", None, None),
+    ),
+    StatEntry(name="상태이상", form="tag_list", tags=("중독", "출혈")),
+    StatEntry(name="영감", form="usage_die", current=6),
+    StatEntry(name="소진된자원", form="usage_die", current=0),
+    StatEntry(name="소지품", form="none", none_kind="discretionary"),
+)
+
+
+def test_character_state_renders_all_six_forms():
+    """여섯 형태를 담은 상태 튜플 하나를 한 번에 돌려 각 형태의 기대 조각을
+    확인한다."""
+    rendered = prompt_assembly._format_character_state(_SIX_FORM_STATS)
+
+    assert "체력 20" in rendered  # numeric — 기존 문자열 그대로(회귀 없음)
+    assert "긴장 2/6칸" in rendered  # clock
+    assert "가방 장검, 랜턴 (빈 칸 2개)" in rendered  # named_slots
+    assert "상태이상 중독, 출혈" in rendered  # tag_list
+    assert "영감 d6" in rendered  # usage_die (안 소진)
+    assert "소진된자원 소진" in rendered  # usage_die (0 == 소진)
+    assert "소지품" not in rendered  # form == "none" — 건너뛴다
+
+
+def test_character_state_renders_named_slots_with_no_filled_slots_as_none_placeholder():
+    """`named_slots`인데 채워진 칸이 하나도 없으면 「없음」 표시와 빈 칸
+    개수가 함께 나온다 — `None` 글자가 새지 않는다."""
+    empty_slots = (StatEntry(name="가방", form="named_slots", slot_values=(None, None, None)),)
+    rendered = prompt_assembly._format_character_state(empty_slots)
+    assert rendered == "가방 없음 (빈 칸 3개)"
+    assert "None" not in rendered
+
+
+def test_character_state_renders_tag_list_with_no_tags_as_none_placeholder():
+    """`tag_list`인데 태그가 없으면(빈 튜플) 「없음」 표시가 나온다."""
+    no_tags = (StatEntry(name="상태이상", form="tag_list", tags=()),)
+    rendered = prompt_assembly._format_character_state(no_tags)
+    assert rendered == "상태이상 없음"
+
+
+def test_character_state_never_prints_the_word_none():
+    """여섯 형태를 담은 상태 튜플로 만든 문자열에 파이썬 `None`의 표기가
+    없다."""
+    rendered = prompt_assembly._format_character_state(_SIX_FORM_STATS)
+    assert "None" not in rendered
+
+
+def test_none_form_stat_is_skipped_in_character_state():
+    """`form == "none"`인 값은 캐릭터 상태 문자열에 아예 안 들어간다 —
+    「안 쓴다」로 선언된 것이 값처럼 새지 않는다(T-11-25)."""
+    only_none = (StatEntry(name="소지품", form="none", none_kind="discretionary"),)
+    assert prompt_assembly._format_character_state(only_none) == "(캐릭터 상태 없음)"
+
+
+def test_character_state_numeric_form_matches_pre_11_07_string():
+    """`numeric` 축은 예전과 같은 `"이름 현재값"` 문자열로 나온다 — 기존
+    시험이 그대로 통과해야 하는 회귀 없음 증거."""
+    stats = (StatEntry(name="체력", form="numeric", current=15, max=20),)
+    assert prompt_assembly._format_character_state(stats) == "체력 15"

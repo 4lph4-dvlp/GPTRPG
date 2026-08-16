@@ -194,9 +194,57 @@ def _format_scene_entities(entities: tuple) -> str:
 
 
 def _format_character_state(stats: tuple) -> str:
+    """캐릭터 상태값 튜플을 진행자가 읽는 한국어 한 줄로 편다(11-07,
+    RULE-11) — `stat.form` 여섯 값 전부에 대한 명시적 분기다.
+
+    **여섯 형태 중 무엇을 어떤 모양으로 넘기고 무엇을 안 넘기는가(ARCH-06):**
+
+    | `form`        | 넘기는 모양                                    | 안 넘기는 것 |
+    |---------------|-------------------------------------------------|--------------|
+    | `numeric`     | `"이름 현재값"`(예: "체력 20") — 기존 문자열 그대로 | `max` 등     |
+    | `clock`       | `"이름 현재/최대칸"`(예: "긴장 2/6칸")             | -            |
+    | `named_slots` | 채워진 칸 이름 나열 + `"(빈 칸 N개)"` 요약          | 빈 칸 자체(`None`) |
+    | `tag_list`    | 태그 쉼표 나열, 없으면 `"없음"`                     | -            |
+    | `usage_die`   | `"이름 dN"`, `0`이면 `"이름 소진"`                  | -            |
+    | `none`        | 아예 건너뛴다 — 진행자 문맥에 값처럼 안 들어간다        | 전부(T-11-25) |
+
+    `form == "none"`인 값을 건너뛰는 이유: 「안 쓴다」로 선언된 것이 진행자
+    문맥에 값처럼 들어가면 `_format_resource_treatment`가 만드는 처리
+    지침 문장(D-08)과 서로 어긋난다. 형태 이름 자체(`named_slots` 같은
+    플랫폼 어휘)는 출력 문자열에 넣지 않는다 — 진행자에게 필요한 것은
+    "가방에 무엇이 들어 있는가"이지 "이 축의 플랫폼 형태 이름이 무엇인가"가
+    아니다. 어떤 형태에서도 파이썬 `None`의 글자 표기가 결과 문자열에
+    그대로 찍히지 않는다.
+    """
     if not stats:
         return "(캐릭터 상태 없음)"
-    return ", ".join(f"{stat.name} {stat.current}" for stat in stats)
+    parts: list[str] = []
+    for stat in stats:
+        if stat.form == "none":
+            continue
+        elif stat.form == "numeric":
+            parts.append(f"{stat.name} {stat.current}")
+        elif stat.form == "clock":
+            parts.append(f"{stat.name} {stat.current}/{stat.max}칸")
+        elif stat.form == "named_slots":
+            slot_values = stat.slot_values or ()
+            filled = [value for value in slot_values if value is not None]
+            empty_count = len(slot_values) - len(filled)
+            filled_text = ", ".join(filled) if filled else "없음"
+            parts.append(f"{stat.name} {filled_text} (빈 칸 {empty_count}개)")
+        elif stat.form == "tag_list":
+            tags_text = ", ".join(stat.tags) if stat.tags else "없음"
+            parts.append(f"{stat.name} {tags_text}")
+        elif stat.form == "usage_die":
+            parts.append(f"{stat.name} 소진" if stat.current == 0 else f"{stat.name} d{stat.current}")
+        else:
+            # 알려지지 않은 형태 — 조용히 삼키지 않는다는 저장소 규율을
+            # 그대로 따르되, 이 함수는 예외를 던지지 않는 렌더 헬퍼이므로
+            # 사람이 알아볼 표시만 남긴다.
+            parts.append(f"{stat.name} (알 수 없는 형태 {stat.form!r})")
+    if not parts:
+        return "(캐릭터 상태 없음)"
+    return ", ".join(parts)
 
 
 def _format_clock_state(clock) -> str:
