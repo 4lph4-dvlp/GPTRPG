@@ -1,8 +1,9 @@
-"""후보 개수가 화면 강도(`tier`)를 정확히 결정한다 — 숫자 임계값 없이.
+"""후보 개수 + `no_check` 신호가 화면 강도(`tier`)를 정확히 결정한다 —
+숫자 임계값 없이, 네 갈래로(D-11, 11-05).
 
 `classify`를 `FakeProvider`로 직접 부른다(네트워크를 타지 않는다). 03-03이
-이미 만든 「제공자 두 번 실패 -> 빈 후보」 경로도 여기서 `tier`가 `none`으로
-떨어짐을 확인한다.
+이미 만든 「제공자 두 번 실패 -> 빈 후보」 경로도 여기서 `tier`가 `unclear`로
+떨어짐을 확인한다(옛 `"none"`을 개명한 값 — 뜻이 좁아졌다).
 """
 
 import json
@@ -12,6 +13,7 @@ import pytest
 
 from gptrpg.agents.action_classifier import (
     MAX_CANDIDATES,
+    NO_CHECK_SIGNAL,
     MoveCandidate,
     Proposal,
     UnknownMove,
@@ -57,13 +59,13 @@ def test_max_candidates_is_three():
 
 
 # ---------------------------------------------------------------------------
-# 후보 0·1·2·3·4개 -> 단계 none/single/several/several/several(3개로 잘림)
+# 후보 0·1·2·3·4개 -> 단계 unclear/single/several/several/several(3개로 잘림)
 # ---------------------------------------------------------------------------
 
 
-def test_zero_candidates_yields_none_tier(fake_provider):
+def test_zero_candidates_yields_unclear_tier(fake_provider):
     proposal = _classify_with_candidate_count(fake_provider, 0)
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.candidates == ()
 
 
@@ -92,7 +94,75 @@ def test_four_candidates_are_truncated_to_three_and_yield_several_tier(fake_prov
 
 
 # ---------------------------------------------------------------------------
-# 03-03이 만든 실패 경로(제공자 두 번 실패) -> tier == "none"
+# `no_check` 신호(RULE-15, D-11) — "굴릴 필요 없음"과 "못 알아들었음"이
+# 여기서 처음으로 갈라진다.
+# ---------------------------------------------------------------------------
+
+
+def test_no_check_signal_yields_no_check_tier(fake_provider):
+    """후보 없이 `{"no_check": true}` 신호만 오면 tier가 `no_check`다."""
+    fake_provider.complete_value = json.dumps([{NO_CHECK_SIGNAL: True}])
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="문을 연다",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "no_check"
+    assert proposal.candidates == ()
+    assert proposal.unknown_move is None
+
+
+def test_candidate_wins_when_no_check_signal_arrives_together(fake_provider):
+    """후보 1개와 `no_check` 신호가 같은 응답에 함께 오면 후보가 이긴다
+    (RULE-15 adjacency) — tier는 `single`이지 `no_check`가 아니다."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    fake_provider.complete_value = json.dumps(
+        [
+            {"move": moves[0].move_id, "stat": moves[0].default_stat},
+            {NO_CHECK_SIGNAL: True},
+        ]
+    )
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "single"
+    assert len(proposal.candidates) == 1
+    assert proposal.candidates[0].move == moves[0].move_id
+
+
+def test_unknown_move_absorption_never_yields_no_check_tier(fake_provider):
+    """목록 밖 이름 흡수는 `no_check` 신호가 같이 왔어도 `unclear`로만
+    간다 — 계약 위반이 신호보다 우선한다(SAFE-07/10-05 흡수 계약,
+    T-11-16)."""
+    fake_provider.complete_value = json.dumps(
+        [
+            {"move": "fireball", "stat": "INT"},
+            {NO_CHECK_SIGNAL: True},
+        ]
+    )
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="불덩이를 던진다",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.tier == "unclear"
+    assert proposal.candidates == ()
+    assert proposal.unknown_move == "fireball"
+
+
+# ---------------------------------------------------------------------------
+# 03-03이 만든 실패 경로(제공자 두 번 실패) -> tier == "unclear"
 # ("모델이 못 고름"과 "모델이 응답을 못 함"이 같은 단계로 합쳐진다)
 # ---------------------------------------------------------------------------
 
@@ -116,7 +186,7 @@ class _AlwaysFailsProvider:
         raise RuntimeError("호출된 적 없음")
 
 
-def test_provider_failure_after_retry_yields_none_tier():
+def test_provider_failure_after_retry_yields_unclear_tier():
     moves = get_moves(DUNGEONWORLD_LIKE_ID)
     proposal = classify(
         provider=_AlwaysFailsProvider(),
@@ -126,9 +196,27 @@ def test_provider_failure_after_retry_yields_none_tier():
         moves=moves,
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.candidates == ()
     assert proposal.ai.ok is False
+
+
+def test_provider_failure_yields_unclear_not_no_check():
+    """제공자 호출이 두 번 다 실패해도 `no_check`는 기본값 `False`로
+    남는다 — 응답이 없는 상황이 "판정 없이 진행해도 됨"으로 읽히지
+    않는다(T-11-17)."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=_AlwaysFailsProvider(),
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.no_check is False
+    assert proposal.tier == "unclear"
+    assert proposal.tier != "no_check"
 
 
 # ---------------------------------------------------------------------------
@@ -151,8 +239,8 @@ def test_parse_candidates_still_raises_unknown_move_directly(fake_provider):
     assert exc_info.value.move_id == "fireball"
 
 
-def test_classify_absorbs_unknown_move_into_none_tier_proposal(fake_provider):
-    """`classify()`는 목록 밖 이름에 대해 예외 없이 `tier == "none"`인
+def test_classify_absorbs_unknown_move_into_unclear_tier_proposal(fake_provider):
+    """`classify()`는 목록 밖 이름에 대해 예외 없이 `tier == "unclear"`인
     `Proposal`을 돌려주고, `unknown_move`에 그 이름을 남긴다."""
     fake_provider.complete_value = json.dumps([{"move": "fireball", "stat": "INT"}])
     proposal = classify(
@@ -163,7 +251,7 @@ def test_classify_absorbs_unknown_move_into_none_tier_proposal(fake_provider):
         moves=get_moves(DUNGEONWORLD_LIKE_ID),
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.candidates == ()
     assert proposal.unknown_move == "fireball"
 
@@ -180,7 +268,7 @@ def test_classify_empty_array_leaves_unknown_move_none(fake_provider):
         moves=get_moves(DUNGEONWORLD_LIKE_ID),
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.unknown_move is None
 
 
@@ -196,7 +284,7 @@ def test_classify_provider_failure_after_retry_also_leaves_unknown_move_none():
         moves=moves,
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.unknown_move is None
 
 
@@ -222,7 +310,7 @@ def test_classify_multiple_unknown_moves_keeps_only_the_first_and_no_candidates_
         moves=moves,
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.candidates == ()
     assert proposal.unknown_move == "fireball"
 
@@ -242,7 +330,7 @@ def test_classify_case_variant_move_name_is_treated_as_unknown_move(fake_provide
         moves=moves,
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.unknown_move == variant
 
 
@@ -259,7 +347,7 @@ def test_classify_whitespace_padded_move_name_is_treated_as_unknown_move(fake_pr
         moves=moves,
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.unknown_move == variant
 
 
@@ -280,7 +368,7 @@ def test_classify_unicode_normalization_variant_move_name_is_treated_as_unknown_
         moves=moves,
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.unknown_move == variant
 
 
@@ -324,7 +412,7 @@ def test_classify_unknown_move_does_not_increase_provider_call_count(fake_provid
 
 def test_proposal_field_names_have_no_confidence_slot():
     field_names = frozenset(f.name for f in fields(Proposal))
-    assert field_names == frozenset({"candidates", "ai", "unknown_move"})
+    assert field_names == frozenset({"candidates", "ai", "unknown_move", "no_check"})
     for name in field_names:
         assert "confidence" not in name
         assert "score" not in name
@@ -397,20 +485,20 @@ def test_unknown_move_inside_think_block_wrapped_response_is_absorbed_not_raised
     경계에서 흡수된다(더 이상 예외로 새 나가지 않는다)."""
     raw = '<think>음...</think>\n[{"move": "fireball", "stat": "INT"}]'
     proposal = _classify_with_raw_completion(fake_provider, raw)
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.unknown_move == "fireball"
 
 
 def test_completely_unparseable_response_yields_none_tier_not_a_crash(fake_provider):
     proposal = _classify_with_raw_completion(fake_provider, "죄송하지만 판단할 수 없습니다.")
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.candidates == ()
 
 
 def test_non_list_json_response_yields_none_tier_not_a_crash(fake_provider):
     """모델이 배열이 아니라 단일 객체를 돌려줘도(형식 위반) 죽지 않는다."""
     proposal = _classify_with_raw_completion(fake_provider, '{"move": "hack_and_slash"}')
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.candidates == ()
 
 

@@ -259,7 +259,7 @@ def test_classify_absorbs_move_name_outside_closed_list_into_no_move_proposal(fa
         moves=get_moves(DUNGEONWORLD_LIKE_ID),
         rulebook_display_name="Dungeonworld-like",
     )
-    assert proposal.tier == "none"
+    assert proposal.tier == "unclear"
     assert proposal.candidates == ()
     assert proposal.unknown_move == "fireball"
 
