@@ -16,6 +16,7 @@ from pathlib import Path
 
 from gptrpg.event_log.schema import (
     EVENT_SCHEMA_VERSION,
+    ActionClassified,
     ActionConfirmed,
     ActionDeclared,
     AiInvoked,
@@ -197,6 +198,37 @@ class RecordSafetyFlag:
     caused_by_seq: int | None = None
 
 
+@dataclass(frozen=True)
+class RecordActionClassification:
+    """분류기가 이 선언에 대해 판정이 필요한지(`no_check`) 최종 결정했다는
+    사실을 기록하는 명령(판 7, 11-06 rework, T-11-29 — CR 차단 결함 수정).
+
+    `RecordAiCall`·`RecordSafetyFlag`와 같은 모양이다 — 운영 사실 하나를
+    사건으로 남긴다. `no_check` 하나만 남기는 이유는
+    `_prepare_verify_proceed_eligibility`가 서버 재시작 뒤에도 필요로 하는
+    것이 그 값 하나뿐이기 때문이다(`single`/`several`/`unclear` 구분은
+    웹 응답의 `tier` 칸이 이미 담당하고, 서버 상태에 중복해서 담지 않는다).
+    """
+
+    no_check: bool
+    caused_by_seq: int | None = None
+
+
+@dataclass(frozen=True)
+class VerifyProceedEligibility:
+    """`proceed()`(웹)·CLI `no_check` 갈래가 실제로 그 자격이 있는지 사건에서
+    접은 상태로 확인만 하는 명령(11-06 rework, T-11-29 — CR 차단 결함 수정).
+
+    성공해도 사건을 남기지 않는다 — 결과는 `ProceedEligible` 예외로
+    돌아온다(`AlreadyOccupied`/`AlreadyConfirmed`와 같은 이유: `_prepare`가
+    `(event_type, ...)` 튜플이 아니라 예외를 던지면 `_process`가 append
+    이전에 멈춘다).
+    """
+
+    declare_seq: int
+    character_id: str
+
+
 Command = (
     DeclareAction
     | ConfirmAction
@@ -207,6 +239,8 @@ Command = (
     | RecordAiCall
     | RecordSceneIllustration
     | RecordSafetyFlag
+    | RecordActionClassification
+    | VerifyProceedEligibility
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
@@ -226,6 +260,7 @@ _EVENT_CLASSES: dict[str, type] = {
     "scene_illustrated": SceneIllustrated,
     "character_occupied": CharacterOccupied,
     "safety_flagged": SafetyFlagged,
+    "action_classified": ActionClassified,
 }
 
 
@@ -284,6 +319,17 @@ class AlreadyResolved(CommandRejected):
     def __init__(self, resolve_seq: int) -> None:
         super().__init__("이미 판정된 확인이다")
         self.resolve_seq = resolve_seq
+
+
+class ProceedEligible(CommandRejected):
+    """`VerifyProceedEligibility` 검증이 전부 통과했다는 뜻이다 —
+    `proceed()`(웹)·CLI `no_check` 갈래 전용(11-06 rework, T-11-29).
+
+    `CommandRejected`의 하위 클래스인 이유는 `AlreadyOccupied`/
+    `AlreadyConfirmed`와 같다 — 사건을 안 남기는 「확인만 하는」 명령의
+    성공을 예외로 표현해야 `_process`가 append 이전에 멈춘다. **이름과
+    달리 실패가 아니다** — 라우트/CLI는 이 예외를 성공으로 해석하고
+    그대로 진행한다."""
 
 
 class SessionActor:
@@ -453,6 +499,10 @@ class SessionActor:
             return self._prepare_scene_illustration(command)
         if isinstance(command, RecordSafetyFlag):
             return self._prepare_safety_flag(command)
+        if isinstance(command, RecordActionClassification):
+            return self._prepare_record_action_classification(command)
+        if isinstance(command, VerifyProceedEligibility):
+            return self._prepare_verify_proceed_eligibility(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -792,6 +842,57 @@ class SessionActor:
                 "chunk_index": command.chunk_index,
             },
         )
+
+    def _prepare_record_action_classification(
+        self, command: RecordActionClassification
+    ) -> tuple[str, int | None, dict]:
+        """분류 결정 기록 — 이 명령 자체는 열린 값을 검증할 게 없다
+        (`no_check`는 불리언, `RecordSafetyFlag`류의 닫힌 목록 검증이
+        필요 없다). `caused_by_seq`만 존재하는 순번인지 확인한다."""
+        self._validate_caused_by(command.caused_by_seq)
+        return (
+            "action_classified",
+            command.caused_by_seq,
+            {"no_check": command.no_check},
+        )
+
+    def _prepare_verify_proceed_eligibility(
+        self, command: VerifyProceedEligibility
+    ) -> tuple[str, int | None, dict]:
+        """TRUST-03 확장 — `proceed()`(웹)·CLI `no_check` 갈래 전용 이중
+        검사(11-06 rework, T-11-29).
+
+        라우트 계층 검사(「내가 이 캐릭터의 주인인가」)만으로는 두 우회가
+        남는다 — ① **다른 캐릭터가 낸 선언**에 진행 버튼을 누르는 것(라우트는
+        "내 캐릭터"만 보고 "이 선언을 낸 캐릭터"는 안 본다) ② **판정이
+        필요했던 선언**(`tier`가 `no_check`가 아니었다)에 진행 버튼을 눌러
+        판정을 건너뛰는 것. 두 검사 다 사건에서 접은 상태(`declare_owners`/
+        `declare_no_check`)를 본다 — `_prepare_confirm`의 소유권 검사와
+        정확히 같은 이유다(우회 경로가 CLI·시험·다음 단계의 새 호출부로
+        남는다, D-11 — 서버 재시작 뒤에도 이 검사는 성립한다).
+
+        검증을 전부 통과하면 `ProceedEligible`을 던진다 — 사건을 남기지
+        않는다(결정 1, `11-06-PLAN.md`가 여전히 유효하다: 이 검증 자체는
+        「판정 없이 진행」 턴의 사건 모양을 하나도 늘리지 않는다).
+        """
+        if command.declare_seq < 0 or command.declare_seq >= self._store.next_seq(
+            self._session_id
+        ):
+            raise CommandRejected(
+                f"declare_seq {command.declare_seq}는 이 세션에 실제로 존재하는 순번이 아니다"
+            )
+
+        declared_owner = self.state.declare_owners.get(command.declare_seq)
+        if declared_owner is not None and declared_owner != command.character_id:
+            raise CommandRejected("이 선언은 다른 캐릭터가 낸 것이다")
+
+        # `declare_owners`와 반대 방향의 "모르면 어떻게 하나" 규칙이다 —
+        # `GameState.declare_no_check` 도크스트링 참조. 모르면 통과시키지
+        # 않는다: 통과시키면 이 검사가 막으려는 구멍이 다시 열린다.
+        if not self.state.declare_no_check.get(command.declare_seq, False):
+            raise CommandRejected("이 선언은 판정이 필요해 판정 없이 진행할 수 없다")
+
+        raise ProceedEligible()
 
 
 class SessionRegistry:

@@ -15,8 +15,25 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-EVENT_SCHEMA_VERSION = 6
-"""판 1 -> 판 2: `CheckResolved`에 `counts_as_failure` 필수 칸이 늘었다(D-12).
+EVENT_SCHEMA_VERSION = 7
+"""판 6 -> 판 7: `proceed()`(웹)/CLI `no_check` 갈래의 서버 쪽 안전 검사(11-06
+rework, T-11-29 — 판정이 필요했던 선언을 판정 없이 진행할 수 있던 차단
+결함)가 사건 형식에 닿았다. 새 사건 종류가 하나 늘었다 — `ActionClassified`
+(분류기가 이 선언에 대해 `no_check` 여부를 최종 결정했다는 운영 사실).
+`caused_by_seq`가 그 `action_declared` 사건이다. `no_check` 불리언 하나만
+남긴다 — `single`/`several`/`unclear`의 구분은 웹 응답의 `tier` 칸이 이미
+담당하므로 서버 상태에 중복해서 담지 않는다. 기존 아홉 종류의 칸은 하나도
+바뀌지 않았으므로 판 1~6으로 쓰인 기록은 글자 그대로 다시 읽힌다(늘어난
+것이 「새 종류」일 뿐이라 옛 기록에는 그 종류의 사건이 없다) —
+`rules_core/reducer.py`의 `action_classified` 분기는 이 판 올리기와 반드시
+같은 커밋이다(08-CONTEXT.md D-06). **옛 기록(이 사건이 없는 declare_seq)의
+처리:** `SessionActor._prepare_verify_proceed_eligibility`는 이 표에 없는
+declare_seq를 「no_check로 분류된 적이 없다」로 읽어 **거부**한다 —
+`declare_owners`의 "모르면 통과" 관례와 다른 선택이다(그 관례는 캐릭터
+개념이 없던 호출부의 정당한 「모른다」를 반영하지만, 여기서 "모른다"를
+통과시키면 이 판 올리기가 막으려는 바로 그 구멍이 다시 열린다).
+
+판 1 -> 판 2: `CheckResolved`에 `counts_as_failure` 필수 칸이 늘었다(D-12).
 판 3 -> 판 4: 사건 종류가 하나 늘었다 — `SceneIllustrated`. 기존 여섯 종류의
 칸은 하나도 바뀌지 않았으므로 판 1~3으로 쓰인 기록은 글자 그대로 다시 읽힌다
 (늘어난 것이 「새 종류」일 뿐이어서, 옛 기록에는 그 종류의 사건이 없다).
@@ -314,6 +331,29 @@ class SafetyFlagged(EventEnvelope):
         return self
 
 
+class ActionClassified(EventEnvelope):
+    """분류기가 이 선언에 대해 판정이 필요한지를 최종 결정했다(판 7,
+    11-06 rework, T-11-29). `caused_by_seq`가 그 `action_declared` 사건이다.
+
+    **이 사건은 오직 하나의 목적을 갖는다** — `proceed()`(웹)·CLI
+    `no_check` 갈래가 서버 재시작 후에도 「이 선언이 실제로 `no_check`로
+    분류됐는가」를 사건에서 다시 접어 확인할 수 있게 한다(TRUST-03 확장).
+    `declare_owners`가 같은 이유로 판 5에 늘었던 것과 같은 자리다.
+
+    `no_check` 불리언 하나만 남기고 `single`/`several`/`unclear`를 구분해
+    담지 않는다 — 이 안전 검사가 필요로 하는 것이 그 값 하나뿐이고, 화면이
+    보여줄 나머지 구분(웹 응답의 `tier` 칸)은 서버 상태에 중복해서 담을
+    이유가 없다(YAGNI, 구분이 필요해지면 그때 넓힌다).
+
+    **상태를 그 외에는 하나도 바꾸지 않는다** — `rules_core.reducer.
+    apply_event`의 `action_classified` 분기는 `declare_no_check` 표 하나만
+    채우고 판정·실패 누적·시계 어디에도 닿지 않는다.
+    """
+
+    event_type: Literal["action_classified"]
+    no_check: bool
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -325,6 +365,7 @@ GameEvent = Annotated[
         SceneIllustrated,
         CharacterOccupied,
         SafetyFlagged,
+        ActionClassified,
     ],
     Field(discriminator="event_type"),
 ]

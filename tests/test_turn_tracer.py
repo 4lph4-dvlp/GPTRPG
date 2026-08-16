@@ -93,8 +93,12 @@ def test_turn_runs_full_loop_and_records_events_in_causal_order(
 
     assert types[0] == "action_declared"
     assert types[1] == "ai_invoked"
-    assert types[2] == "action_confirmed"
-    assert types[3] == "check_resolved"
+    # T-11-29(11-06 rework) — 분류 결정 기록(`action_classified`)이 분류기
+    # `ai_invoked` 바로 뒤, 확인보다 앞에 낀다(웹·CLI 모두, `proceed()`의
+    # 서버 쪽 안전 검사가 서버 재시작 뒤에도 읽을 수 있어야 한다).
+    assert types[2] == "action_classified"
+    assert types[3] == "action_confirmed"
+    assert types[4] == "check_resolved"
     assert types[-1] == "ai_invoked"
 
     narration_events = [event for event in events if event.event_type == "narration_appended"]
@@ -115,12 +119,15 @@ def test_turn_runs_full_loop_and_records_events_in_causal_order(
     declared = events[0]
     assert declared.raw_text == "문을 부수고 들어간다"
 
-    # caused_by_seq 인과 사슬 — ① 선언 -> ② 분류AI -> ③ 확인 -> ④ 판정
-    # -> ⑤ 서사조각들 -> ⑥ 진행AI
+    # caused_by_seq 인과 사슬 — ① 선언 -> ② 분류AI -> ③ 분류결정(T-11-29) ->
+    # ④ 확인 -> ⑤ 판정 -> ⑥ 서사조각들 -> ⑦ 진행AI
     declare_seq = declared.seq
     classifier_ai = events[1]
-    confirm_event = events[2]
+    action_classified_event = events[2]
+    confirm_event = events[3]
     assert classifier_ai.caused_by_seq == declare_seq
+    assert action_classified_event.caused_by_seq == declare_seq
+    assert action_classified_event.no_check is False
     assert confirm_event.caused_by_seq == declare_seq
     assert check_event.caused_by_seq == confirm_event.seq
     for narration_event in narration_events:

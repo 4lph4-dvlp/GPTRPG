@@ -65,10 +65,13 @@ from gptrpg.session_actor.actor import (
     CommandRejected,
     ConfirmAction,
     DeclareAction,
+    ProceedEligible,
+    RecordActionClassification,
     RecordAiCall,
     RecordSafetyFlag,
     RecordSceneIllustration,
     ResolveCheck,
+    VerifyProceedEligibility,
 )
 from gptrpg.session_actor.actor import SessionActor
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
@@ -326,6 +329,16 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
             completion_tokens=proposal.ai.completion_tokens,
             cached_prompt_tokens=proposal.ai.cached_prompt_tokens,
             latency_ms=proposal.ai.elapsed_ms,
+            caused_by_seq=declare_seq,
+        )
+    )
+    # T-11-29(11-06 rework) — 분류 결정을 사건에 durable하게 남긴다.
+    # `proceed()`의 서버 쪽 안전 검사(`VerifyProceedEligibility`)가 이 표를
+    # 서버 재시작 뒤에도 다시 접어 읽는다 — 클라이언트가 보낸 `declare_seq`
+    # 하나만 믿고 판정을 건너뛰게 두지 않는다.
+    await actor.submit(
+        RecordActionClassification(
+            no_check=proposal.tier == "no_check",
             caused_by_seq=declare_seq,
         )
     )
@@ -806,6 +819,15 @@ async def proceed(
 
     **신원 대조가 맨 앞이다(TRUST-02, D-04).** `confirm()`과 같은 이유·
     같은 형식이다.
+
+    **신원 대조만으로는 부족하다(T-11-29, 11-06 rework).** 「내가 이
+    캐릭터의 주인인가」는 위 신원 대조가 보지만, 「이 `declare_seq`가
+    실제로 이 캐릭터가 낸 선언인가」·「이 선언이 실제로 `no_check`로
+    분류됐는가」는 별개의 질문이다 — 라우트 계층만으로는 둘 다 클라이언트가
+    보낸 값을 그대로 믿게 된다(판정을 요구했던 행동을 판정 없이 진행하는
+    구멍). `VerifyProceedEligibility`가 액터의 사건-접은 상태
+    (`declare_owners`/`declare_no_check`)로 둘 다 다시 확인한다 —
+    `_prepare_confirm`의 소유권 검사와 같은 이유·같은 서버-재시작 내구성.
     """
     identity = read_identity(request, session_id)
     if identity is None or identity.character_id != body.character_id:
@@ -815,6 +837,20 @@ async def proceed(
     store = request.app.state.store
     registry = request.app.state.registry
     actor = registry.get_or_create(session_id)
+
+    try:
+        await actor.submit(
+            VerifyProceedEligibility(
+                declare_seq=body.declare_seq,
+                character_id=identity.character_id,
+            )
+        )
+    except ProceedEligible:
+        pass  # 검증 통과 — 사건은 안 남는다(위 도크스트링 참조), 그대로 진행한다.
+    except CommandRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     character = get_character(body.character_id)
     if character is None:

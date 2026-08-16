@@ -90,6 +90,20 @@ class GameState:
     사건은 자기 `caused_by_seq`로 **확인** 사건을 가리키고 선언 사건을 직접
     가리키지 않는다 — 이 되짚는 표가 없으면 판정을 어느 선언에 붙여야
     하는지 알 수 없고, 매번 사건 전체를 다시 훑게 된다."""
+    declare_no_check: dict[int, bool] = field(default_factory=dict)
+    """선언 순번(declare_seq) -> 그 선언이 실제로 `no_check`로 분류됐는지
+    (판 7+, 11-06 rework, T-11-29). `action_classified` 사건에서만 채워진다.
+    `SessionActor._prepare_verify_proceed_eligibility`가 서버 재시작 뒤에도
+    이 표에서 판단한다 — `declare_owners`와 같은 이유로 사건에서 다시 접은
+    값이라 재시작에도 살아남는다.
+
+    **`declare_owners`와 다른 「모르면 어떻게 하나」 규칙:** `declare_owners`는
+    소유자를 모르면 통과시킨다(캐릭터 개념이 없던 호출부의 정당한 「모른다」).
+    이 표는 반대다 — `declare_seq`가 이 표에 없으면 **거부**로 읽는다(아래
+    소비부는 `.get(declare_seq, False)`를 쓴다). 이 표에 없다는 것은 "이
+    선언이 실제로 `no_check`로 분류됐다는 증거가 없다"는 뜻이고, 그것을
+    통과시키면 이 표가 막으려는 구멍(판정이 필요한 선언을 판정 없이 진행)이
+    다시 열린다."""
 
 
 def initial_state(session_id: str) -> GameState:
@@ -122,7 +136,7 @@ def _legacy_v1_counts_as_failure(grade: str) -> bool:
 def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameState:
     """사건 하나를 이전 상태에 접어 새 상태를 돌려준다.
 
-    아홉 종류를 전부 다룬다(판 6, `safety_flagged` 추가). 모르는 종류가
+    열 종류를 전부 다룬다(판 7, `action_classified` 추가). 모르는 종류가
     오면 UnknownEventType을 던진다 — 조용히 넘어가지 않는다.
     """
     seq = payload["seq"]
@@ -253,6 +267,19 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
         # 5->6)와 이 분기는 반드시 같은 커밋이다(08-CONTEXT.md D-06, 이미 두 번
         # 난 사고).
         return replace(state, last_seq=seq)
+    if event_type == "action_classified":
+        # 분류 결정 기록(판 7, 11-06 rework, T-11-29)은 게임 상태를 `declare_no_check`
+        # 표 하나 말고는 바꾸지 않는다 — 판정·실패 누적·시계 어디에도 안 닿는다
+        # (`scene_illustrated`/`safety_flagged` 분기와 같은 최소 모양 + 표 하나).
+        # **그래도 분기가 있어야 한다:** 이 분기가 없으면 이 종류가 하나라도 있는
+        # 세션이 폴링마다 UnknownEventType을 맞고 영구히 안 열린다(08-CONTEXT.md
+        # D-06, 이미 여러 번 난 사고 — 이 판 올리기와 이 분기는 반드시 같은 커밋).
+        declare_seq = payload.get("caused_by_seq")
+        declare_no_check = state.declare_no_check
+        if declare_seq is not None:
+            declare_no_check = dict(declare_no_check)
+            declare_no_check[declare_seq] = payload["no_check"]
+        return replace(state, last_seq=seq, declare_no_check=declare_no_check)
     raise UnknownEventType(event_type)
 
 

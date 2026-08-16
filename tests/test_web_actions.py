@@ -1315,3 +1315,85 @@ def test_proceed_passes_fixed_summary_not_player_text(web_client_with_fake_provi
     check_summary_line = turn_text.rsplit("방금 판정 결과: ", 1)[-1]
     assert check_summary_line == NO_CHECK_SUMMARY
     assert raw_text not in check_summary_line
+
+
+# ---------------------------------------------------------------------------
+# 11-06 rework (T-11-29) — proceed()의 서버 쪽 이중 검사.
+#
+# 오케스트레이터가 실제 서버로 재현한 차단 결함: ① POST /actions/declare가
+# tier == "single"(판정이 필요한 행동)을 돌려줘도 ② POST /proceed를 그
+# declare_seq로 부르면 200이 나고 판정 없이 서사가 나왔다 — 플레이어가
+# 공격을 선언한 뒤 판정을 건너뛰고 결과만 받아갈 수 있었다. 두 갈래
+# (선언 소유권 미검증 / 분류 결과 미보존)를 각각 회귀 시험으로 고정한다.
+# ---------------------------------------------------------------------------
+
+
+def test_proceed_on_declare_that_needed_a_check_returns_400_and_appends_nothing(
+    web_client_with_fake_provider,
+) -> None:
+    """차단 결함의 정확한 재현 — 판정이 필요했던 선언(tier == "single")에
+    `/proceed`를 부르면 거부되고, 사건 기록에 확인·판정·서사 어느 것도
+    남지 않는다. 서버가 굴려야 할 주사위를 건너뛸 수 없다."""
+    classifier = FakeProvider(
+        complete_value=json.dumps([{"move": "hack_and_slash", "stat": "STR"}])
+    )
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        declare_response = _declare(client, raw_text="적을 칼로 벤다")
+        assert declare_response.status_code == 200
+        assert declare_response.json()["tier"] == "single"
+        declare_seq = declare_response.json()["declare_seq"]
+
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+        events_after = _events(client)
+
+    assert response.status_code == 400
+    assert not any(e["event_type"] == "action_confirmed" for e in events_after)
+    assert not any(e["event_type"] == "check_resolved" for e in events_after)
+    assert not any(e["event_type"] == "narration_appended" for e in events_after)
+
+
+def test_proceed_on_another_characters_declare_returns_400_and_appends_nothing(
+    web_client_with_fake_provider,
+) -> None:
+    """다른 캐릭터가 낸 선언에는(설령 `no_check`로 분류됐어도) `/proceed`를
+    부를 수 없다 — 라우트 계층의 신원 대조("내 캐릭터인가")만으로는 이
+    우회를 못 잡는다. 액터가 사건에서 접은 `declare_owners`로 다시
+    확인한다(T-11-29, `_prepare_confirm`과 같은 근거)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+
+    with web_client_with_fake_provider(action_classifier=classifier) as client_nari:
+        nari_response = _declare(
+            client_nari, player_id="nari", character_id="nari", raw_text="문을 연다"
+        )
+        assert nari_response.status_code == 200
+        assert nari_response.json()["tier"] == "no_check"
+        nari_declare_seq = nari_response.json()["declare_seq"]
+
+    with web_client_with_fake_provider(action_classifier=classifier) as client_bram:
+        _select_character(client_bram, "bram")
+        response = client_bram.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(nari_declare_seq)
+        )
+        events_after = _events(client_bram)
+
+    assert response.status_code == 400
+    assert not any(e["event_type"] == "narration_appended" for e in events_after)
+
+
+def test_proceed_on_own_no_check_declare_still_returns_200(
+    web_client_with_fake_provider,
+) -> None:
+    """정상 경로(`no_check` + 본인 선언)는 이중 검사가 들어간 뒤에도 계속
+    통과한다 — 새 안전 검사가 정상 흐름을 막지 않는다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+
+    assert response.status_code == 200
+    assert response.json()["proceeded"] is True

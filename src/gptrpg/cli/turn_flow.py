@@ -29,11 +29,14 @@ from gptrpg.session_actor.actor import (
     AppendNarration,
     ConfirmAction,
     DeclareAction,
+    ProceedEligible,
+    RecordActionClassification,
     RecordAiCall,
     RecordSafetyFlag,
     ResolveCheck,
     SessionActor,
     SessionRegistry,
+    VerifyProceedEligibility,
 )
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
@@ -231,7 +234,21 @@ async def _proceed_without_check(
     `check_summary` 자리에는 `NO_CHECK_SUMMARY` 고정 문장을 쓴다. 이 함수
     전체에서 `caused_by_seq`는 `declare_seq` 하나로 고정된다 — 이 경로에는
     확인·판정 사건이 없다(결정 1, PLAN.md).
+
+    **웹과 같은 서버 쪽 이중 검사를 거친다(T-11-29, 11-06 rework).** CLI가
+    직접 계산한 `tier`를 그대로 믿지 않는다 — `_turn_flow`가 이 함수를 부를
+    수 있는 경로 자체는 지금 하나뿐이지만, `_prepare_confirm`의 소유권
+    검사가 이미 세운 규율(우회 경로가 CLI·시험·다음 단계의 새 호출부로
+    남는다, D-11)을 이 함수도 똑같이 따른다 — 액터가 사건에서 접은
+    `declare_owners`/`declare_no_check`로 다시 확인한다.
     """
+    try:
+        await actor.submit(
+            VerifyProceedEligibility(declare_seq=declare_seq, character_id=args.player)
+        )
+    except ProceedEligible:
+        pass  # 검증 통과 — 사건은 안 남는다, 그대로 진행한다.
+
     ctx = _build_turn_context(store, args.session, args.rulebook)
 
     # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
@@ -455,6 +472,16 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             completion_tokens=ai_result.completion_tokens,
             cached_prompt_tokens=ai_result.cached_prompt_tokens,
             latency_ms=ai_result.elapsed_ms,
+            caused_by_seq=declare_seq,
+        )
+    )
+    # T-11-29(11-06 rework) — 웹(`web/routes_actions.py`)과 똑같은 자리·
+    # 똑같은 이유로 분류 결정을 사건에 durable하게 남긴다. CLI가 직접 계산한
+    # `tier`를 그대로 믿지 않고, `_proceed_without_check`가 이 표를 다시
+    # 접어 확인하게 한다(웹/CLI 어느 쪽도 「직접 찾아야 함」 우회가 없다).
+    await actor.submit(
+        RecordActionClassification(
+            no_check=proposal.tier == "no_check",
             caused_by_seq=declare_seq,
         )
     )

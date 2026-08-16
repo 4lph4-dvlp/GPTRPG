@@ -32,10 +32,13 @@ from gptrpg.session_actor.actor import (
     ConfirmAction,
     DeclareAction,
     OccupyCharacter,
+    ProceedEligible,
+    RecordActionClassification,
     RecordAiCall,
     ResolveCheck,
     SessionActor,
     SessionRegistry,
+    VerifyProceedEligibility,
 )
 from gptrpg.session_actor.projection import rebuild_state
 
@@ -1282,3 +1285,141 @@ def test_ai_turn_no_move_turn_has_declaration_but_no_confirmation_event(
     assert any(e.event_type == "action_declared" for e in events)
     assert not any(e.event_type == "action_confirmed" for e in events)
     assert not any(e.event_type == "check_resolved" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# 11-06 rework (T-11-29) — proceed() 전용 이중 검사(VerifyProceedEligibility).
+#
+# 오케스트레이터가 실제 서버로 재현한 차단 결함: 판정이 필요한 것으로
+# 분류된 선언(tier == "single")에 POST /proceed를 불러 판정을 통째로
+# 건너뛸 수 있었다. 두 갈래 원인 — ① 선언 소유권 검사를 안 지나간다
+# ② 분류 결과(tier)가 서버 어디에도 안 남아 있었다. 이 절이 두 갈래를
+# 각각 회귀 시험으로 고정한다(`..._is_rejected_and_appends_nothing` 관례).
+# ---------------------------------------------------------------------------
+
+
+async def test_proceed_eligible_for_own_no_check_declare_raises_proceed_eligible(
+    tmp_db_path,
+):
+    """본인이 낸 선언이 실제로 no_check로 분류됐으면 검증이 통과한다 —
+    `ProceedEligible`을 던지고(성공을 알리는 자리, `AlreadyOccupied`와
+    같은 패턴) 사건은 하나도 늘지 않는다(결정 1, 11-06-PLAN.md)."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq = await actor.submit(
+            DeclareAction(player_id="bram", raw_text="문을 연다", character_id="bram")
+        )
+        await actor.submit(RecordActionClassification(no_check=True, caused_by_seq=declare_seq))
+        events_before = len(_read_events(tmp_db_path))
+
+        with pytest.raises(ProceedEligible):
+            await actor.submit(
+                VerifyProceedEligibility(declare_seq=declare_seq, character_id="bram")
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert len(_read_events(tmp_db_path)) == events_before
+
+
+async def test_proceed_on_declare_that_needed_a_check_is_rejected_and_appends_nothing(
+    tmp_db_path,
+):
+    """판정이 필요했던 선언(tier != no_check, 여기서는 `single`을
+    흉내낸다)에 진행을 시도하면 거부되고 사건 기록에 아무것도 안 쌓인다 —
+    이 검사가 막는 정확히 그 결함(주사위 없이 결과만 받아가는 것)."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq = await actor.submit(
+            DeclareAction(player_id="bram", raw_text="적을 칼로 벤다", character_id="bram")
+        )
+        # tier == "single"이었다는 뜻 — no_check=False로 분류 결정을 남긴다.
+        await actor.submit(RecordActionClassification(no_check=False, caused_by_seq=declare_seq))
+        events_before = len(_read_events(tmp_db_path))
+
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                VerifyProceedEligibility(declare_seq=declare_seq, character_id="bram")
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert len(_read_events(tmp_db_path)) == events_before
+
+
+async def test_proceed_on_never_classified_declare_is_rejected_and_appends_nothing(
+    tmp_db_path,
+):
+    """`action_classified` 사건이 아예 없는 선언(옛 기록·분류가 안 끝난
+    경로)은 「no_check로 분류된 적이 없다」로 읽혀 거부된다 —
+    `declare_owners`의 "모르면 통과" 관례와 반대다(`GameState.
+    declare_no_check` 도크스트링이 그 이유를 적어 둔다: 모르면 통과시키면
+    이 검사가 막으려는 구멍이 다시 열린다)."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq = await actor.submit(
+            DeclareAction(player_id="bram", raw_text="문을 연다", character_id="bram")
+        )
+        events_before = len(_read_events(tmp_db_path))
+
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                VerifyProceedEligibility(declare_seq=declare_seq, character_id="bram")
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert len(_read_events(tmp_db_path)) == events_before
+
+
+async def test_proceed_on_another_characters_declare_is_rejected_and_appends_nothing(
+    tmp_db_path,
+):
+    """다른 캐릭터가 낸 선언(설령 no_check로 분류됐어도)에는 진행할 수
+    없다 — `_prepare_confirm`의 소유권 검사와 같은 이유·같은 근거
+    (`declare_owners`가 사건에서 접은 값이므로 서버 재시작 뒤에도 성립,
+    D-11)."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq = await actor.submit(
+            DeclareAction(player_id="nari", raw_text="문을 연다", character_id="nari")
+        )
+        await actor.submit(RecordActionClassification(no_check=True, caused_by_seq=declare_seq))
+        events_before = len(_read_events(tmp_db_path))
+
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                VerifyProceedEligibility(declare_seq=declare_seq, character_id="bram")
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert len(_read_events(tmp_db_path)) == events_before
+
+
+async def test_record_action_classification_appends_one_action_classified_event(
+    tmp_db_path,
+):
+    """`RecordActionClassification`이 `action_classified` 사건 하나를 남기고
+    `caused_by_seq`가 선언 순번을 가리킨다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        declare_seq = await actor.submit(
+            DeclareAction(player_id="bram", raw_text="문을 연다", character_id="bram")
+        )
+        seq = await actor.submit(
+            RecordActionClassification(no_check=True, caused_by_seq=declare_seq)
+        )
+    finally:
+        await actor.stop()
+        store.close()
+
+    events = _read_events(tmp_db_path)
+    classified = next(e for e in events if e.event_type == "action_classified")
+    assert classified.seq == seq
+    assert classified.caused_by_seq == declare_seq
+    assert classified.no_check is True

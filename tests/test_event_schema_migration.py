@@ -281,13 +281,20 @@ def test_freshly_written_corrupted_glyph_safety_flagged_event_folds_without_exce
 
 
 # ---------------------------------------------------------------------------
-# ④ 판 못박기 — EVENT_SCHEMA_VERSION이 6에서 안 올랐다(10-06-PLAN.md 설계 판단 3)
+# ④ 판 못박기 — EVENT_SCHEMA_VERSION이 corrupted_glyph 하나로는 6에서 안 올랐다
+# (10-06-PLAN.md 설계 판단 3). 판이 7인 것은 이후 11-06 rework가 올린 결과다.
 # ---------------------------------------------------------------------------
 
 
-def test_event_schema_version_is_still_six():
-    """`corrupted_glyph` 사유값 하나를 더해도 `EVENT_SCHEMA_VERSION`은 6에서
-    안 오른다 — `reason`은 쓰기 검증에서만 쓰이고(`session_actor/actor.py`),
-    `rules_core.reducer.py`의 `safety_flagged` 분기는 `reason`을 아예 안 본다.
-    누가 무심코 올리면 이 시험이 잡는다."""
-    assert EVENT_SCHEMA_VERSION == 6
+def test_event_schema_version_was_not_bumped_for_corrupted_glyph_alone():
+    """`corrupted_glyph` 사유값 하나를 더한 것(10-06) 자체는
+    `EVENT_SCHEMA_VERSION`을 올리지 않았다 — `reason`은 쓰기 검증에서만
+    쓰이고(`session_actor/actor.py`), `rules_core.reducer.py`의
+    `safety_flagged` 분기는 `reason`을 아예 안 본다.
+
+    **판이 7인 것은 이후 11-06 rework(T-11-29, `ActionClassified` 사건
+    추가 — 판정이 필요했던 선언을 판정 없이 진행할 수 있던 차단 결함
+    수정)가 올린 결과다.** 10-06 시점의 판은 6이었다는 사실 자체를 이
+    시험이 여전히 문서로 남긴다 — 누가 무심코 판을 또 올리면 이 값이
+    바뀌어 이 시험이 잡는다."""
+    assert EVENT_SCHEMA_VERSION == 7
