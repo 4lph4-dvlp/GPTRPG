@@ -106,6 +106,18 @@ delimiting 단계. 여섯 프롬프트 조립 함수 전부의 `permanent`(영�
 
 
 def _format_moves(moves: tuple[MoveDecl, ...]) -> str:
+    """무브 목록을 펼친다. 빈 튜플이면 「목록이 잘려서 안 왔나」로 읽히지
+    않도록 명시적인 「목록 없음」 문장을 낸다(RULE-15 empty, D-12의
+    `gm_discretion` 갈래) — 이 룰북에서는 분류기 지시문의 ①(어울리는 무브
+    고르기)이 애초에 성립할 수 없고 ②(판정 불필요)·③(무슨 말인지 모르겠음)
+    두 갈래만 남는다는 것을 함께 적는다. 형제 포매터들(`_format_scene_entities`
+    등)의 "(없음)" 자리표시자 관례를 따른다."""
+    if not moves:
+        return (
+            "(이 룰북에는 미리 정해 둔 판정 목록이 없다 — 이 룰북에서는 "
+            "①(어울리는 무브 고르기)이 성립하지 않는다. ②(판정 불필요)와 "
+            "③(무슨 말인지 모르겠음)만 남는다.)"
+        )
     lines = [
         f"- {move.move_id} ({move.display_name}, 기본 능력치 {move.default_stat}): {move.trigger}"
         for move in moves
@@ -210,15 +222,31 @@ def build_classifier_prompt(
     ctx: TurnContext,
     raw_text: str,
 ) -> tuple[list[dict], list[dict]]:
-    """action_classifier 프롬프트를 조립한다. `(system, messages)` 짝을 돌려준다."""
+    """action_classifier 프롬프트를 조립한다. `(system, messages)` 짝을 돌려준다.
+
+    지시문이 "안 맞음"과 "필요 없음"을 세 갈래로 명시해서 가른다(D-11,
+    11-05) — 예전에는 "어느 것도 안 맞으면 하나도 내지 말 것" 한 문장이
+    "굴릴 필요가 없는 행동"과 "무슨 말인지 모르겠는 문장"을 뭉뚱그렸다.
+    ②의 신호 문자열은 `action_classifier.NO_CHECK_SIGNAL`에서 가져온다 —
+    지시문과 파서(`_parse_candidates`)가 같은 문자열을 쓴다는 것이 코드로
+    보장된다. 순환 임포트(action_classifier가 이 모듈의 `build_classifier_prompt`를
+    모듈 최상단에서 가져다 쓴다)를 피하려고 함수 안에서 지역 임포트한다.
+    """
+    from gptrpg.agents.action_classifier import NO_CHECK_SIGNAL
+
     permanent = (
         f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 행동 분류기다. "
         "플레이어의 자유 문장을 읽고 아래 닫힌 목록에서 어울리는 무브와 능력치를 "
-        "고른다. 목록에 없는 이름을 만들어 내지 않는다. 확실하면 무브 하나만, "
-        "애매하면 둘이나 셋을, 어느 것도 안 맞으면 하나도 내지 말 것. 응답은 "
-        "JSON 배열로만 한다 — 예: "
-        '[{"move": "hack_and_slash", "stat": "STR"}]. 어울리는 무브가 없으면 '
-        "빈 배열 []을 돌려준다. 설명 문장을 덧붙이지 않는다.\n\n"
+        "고른다. 목록에 없는 이름을 만들어 내지 않는다. 다음 세 갈래 중 정확히 "
+        "하나로 답한다.\n"
+        "① 어울리는 무브가 있으면: 확실할 때는 무브 하나만, 애매할 때는 "
+        "둘이나 셋을 담은 JSON 배열 — 예: "
+        '[{"move": "hack_and_slash", "stat": "STR"}].\n'
+        "② 문을 열거나 눈을 뜨는 것처럼 실패할 여지가 없거나 실패해도 걸리는 "
+        f'것이 없어 굴릴 필요가 없는 행동이면: [{{"{NO_CHECK_SIGNAL}": true}}]처럼 '
+        "이 신호 원소 하나만 담은 배열.\n"
+        "③ 무슨 말인지 모르겠으면: 빈 배열 [].\n"
+        "응답은 항상 JSON 배열로만 한다. 설명 문장을 덧붙이지 않는다.\n\n"
         f"무브 목록:\n{_format_moves(moves)}\n\n{NOT_AN_INSTRUCTION_LINE}"
     )
     session = _session_block_text(ctx)

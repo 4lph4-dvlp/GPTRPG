@@ -21,6 +21,7 @@ from gptrpg.agents.action_classifier import (
 )
 from gptrpg.agents.context import ClockState, TurnContext
 from gptrpg.agents.envelope import AgentResult
+from gptrpg.agents.prompt_assembly import _format_moves, build_classifier_prompt
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID, EXAMPLE_SINGLE_STAT_FOE
 from gptrpg.rulebooks.moves import get_moves
 
@@ -489,16 +490,54 @@ def test_unknown_move_inside_think_block_wrapped_response_is_absorbed_not_raised
     assert proposal.unknown_move == "fireball"
 
 
-def test_completely_unparseable_response_yields_none_tier_not_a_crash(fake_provider):
+def test_completely_unparseable_response_yields_unclear_tier_not_a_crash(fake_provider):
     proposal = _classify_with_raw_completion(fake_provider, "죄송하지만 판단할 수 없습니다.")
     assert proposal.tier == "unclear"
     assert proposal.candidates == ()
 
 
-def test_non_list_json_response_yields_none_tier_not_a_crash(fake_provider):
+def test_non_list_json_response_yields_unclear_tier_not_a_crash(fake_provider):
     """모델이 배열이 아니라 단일 객체를 돌려줘도(형식 위반) 죽지 않는다."""
     proposal = _classify_with_raw_completion(fake_provider, '{"move": "hack_and_slash"}')
     assert proposal.tier == "unclear"
     assert proposal.candidates == ()
+
+
+# ---------------------------------------------------------------------------
+# 분류기 지시문(prompt_assembly.build_classifier_prompt) — 「안 맞음」과
+# 「필요 없음」이 세 갈래로 나뉘어 있고, 무브 목록이 빈 룰북에서도 예외 없이
+# 조립된다(11-05 Task 2).
+# ---------------------------------------------------------------------------
+
+
+def test_classifier_prompt_mentions_the_no_check_signal():
+    """지시문의 `permanent` 블록에 `NO_CHECK_SIGNAL` 문자열이 들어 있다 —
+    지시문과 파서가 같은 신호 문자열을 쓴다는 것이 이 시험으로 고정된다."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    system, _messages = build_classifier_prompt(
+        rulebook_display_name="Dungeonworld-like",
+        moves=moves,
+        ctx=_ctx(),
+        raw_text="문을 연다",
+    )
+    permanent_text = system[0]["text"]
+    assert NO_CHECK_SIGNAL in permanent_text
+    assert "필요 없" in permanent_text or "필요가 없" in permanent_text
+
+
+def test_classifier_prompt_handles_empty_move_list():
+    """무브 목록이 빈 튜플이어도 예외 없이 조립되고, 「목록 없음」 표시가
+    결과 문자열에 남는다 — 「목록이 잘려서 안 왔나」로 읽히지 않는다
+    (RULE-15 empty)."""
+    system, _messages = build_classifier_prompt(
+        rulebook_display_name="Cairn-like",
+        moves=(),
+        ctx=_ctx(),
+        raw_text="문을 연다",
+    )
+    permanent_text = system[0]["text"]
+    assert "무브 목록:\n" in permanent_text
+    assert _format_moves(()) in permanent_text
+    assert _format_moves(()) != ""
 
 
