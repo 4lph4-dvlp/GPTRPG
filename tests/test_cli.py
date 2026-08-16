@@ -515,8 +515,8 @@ class _SlowCompleteProvider:
 class _AlwaysFailsCompleteProvider:
     """`complete()`가 매번 예외를 던지는 이중체 — 실제 제공자 호출이 죽는
     경우(네트워크·요청 형식·모델 쪽 문제 등)를 재현한다. `call_with_one_retry`가
-    두 시도 다 소진하고 나면 빈 후보(tier="none")로 조용히 떨어진다 — 이게
-    "무브 없음" 화면과 똑같이 보이면서도 `RecordAiCall`에는 토큰 0인 실패
+    두 시도 다 소진하고 나면 빈 후보(tier="unclear")로 조용히 떨어진다 — 이게
+    평소 tier == "unclear" 화면과 똑같이 보이면서도 `RecordAiCall`에는 토큰 0인 실패
     껍데기가 그대로 기록된다는 것을 이 아래 시험이 증명한다(03-04 Task 3
     라이브 검증에서 나온 "AI 호출 수는 늘었는데 토큰 합계는 그대로"라는
     관측을 재현/설명한다 — 이건 기록 버그가 아니라 D-30이 이미 검증해 둔
@@ -671,7 +671,8 @@ def test_turn_several_candidates_reprompts_on_out_of_range_and_non_digit_input(
 def test_turn_no_candidates_proceeds_without_check_and_records_no_confirm_event(
     tmp_db_path, monkeypatch, fake_provider, capsys
 ):
-    """후보 없음 -> 판정 없이 진행한다는 안내, 확인 사건 자체가 없다 (D-29, D-36)."""
+    """후보 없음(tier == "unclear") -> 판정 없이 끝난다는 안내, 확인 사건
+    자체가 없다 (D-29, D-36, 11-05가 "none"을 "unclear"로 개명)."""
     db = str(tmp_db_path)
     fake_provider.complete_value = json.dumps([])
 
@@ -682,7 +683,8 @@ def test_turn_no_candidates_proceeds_without_check_and_records_no_confirm_event(
     assert exit_code == 0
 
     out = capsys.readouterr().out
-    assert "판정 없이 진행" in out
+    assert "판정 없이" in out
+    assert "끝납니다" in out
     assert not _DECIMAL_NUMBER.search(out)
 
     events = _read_events(db, "s1")
@@ -695,9 +697,9 @@ def test_turn_classifier_unknown_move_proceeds_without_check_and_records_safety_
     tmp_db_path, monkeypatch, fake_provider, capsys
 ):
     """분류기가 룰북 목록 밖 무브 이름을 내도(SAFE-07/D-12, 10-05) 종료
-    코드는 0이고 「무브 없음」과 같은 안내가 나온다 — 2026-08-12 Phase 9
-    UAT에서 실제로 `'track'`이 이 경로에서 exit 1로 턴을 죽였던 결함의
-    회귀 방지 시험이자, 웹 쪽 짝 시험(`test_web_actions.py`)과 같은
+    코드는 0이고 tier == "unclear"와 같은 안내가 나온다 — 2026-08-12
+    Phase 9 UAT에서 실제로 `'track'`이 이 경로에서 exit 1로 턴을 죽였던
+    결함의 회귀 방지 시험이자, 웹 쪽 짝 시험(`test_web_actions.py`)과 같은
     시나리오를 명령줄에서 돈다."""
     db = str(tmp_db_path)
     fake_provider.complete_value = json.dumps([{"move": "not_a_real_move", "stat": "STR"}])
@@ -709,7 +711,7 @@ def test_turn_classifier_unknown_move_proceeds_without_check_and_records_safety_
     assert exit_code == 0
 
     out, err = capsys.readouterr()
-    assert "판정 없이 진행" in out  # 기존 「무브 없음」 문구를 그대로 재사용한다
+    assert "판정 없이" in out  # tier == "unclear"와 같은 안내 문구를 그대로 재사용한다
     assert "not_a_real_move" in err  # 운영자는 stderr로 어떤 이름이었는지 확인할 수 있다
 
     events = _read_events(db, "s1")
@@ -757,7 +759,7 @@ def test_turn_provider_call_failure_looks_like_no_move_but_leaves_a_stderr_trail
     assert exit_code == 0
 
     out, err = capsys.readouterr()
-    assert "판정 없이 진행" in out  # 플레이어 화면은 "무브 없음"과 구분이 안 된다(D-29)
+    assert "판정 없이" in out  # 플레이어 화면은 tier == "unclear"와 구분이 안 된다(D-29)
     assert "nim이 응답하지 않는다" in err  # 하지만 운영자는 stderr로 구분할 수 있다
 
     events = _read_events(db, "s1")
@@ -765,6 +767,32 @@ def test_turn_provider_call_failure_looks_like_no_move_but_leaves_a_stderr_trail
     assert ai_event.prompt_tokens == 0
     assert ai_event.completion_tokens == 0
     assert ai_event.latency_ms >= 0
+    assert not any(e.event_type == "action_confirmed" for e in events)
+
+
+def test_no_check_tier_ends_turn_without_indexerror(
+    tmp_db_path, monkeypatch, fake_provider, capsys
+):
+    """모델이 `no_check` 신호만 내면(tier == "no_check") CLI가
+    `IndexError` 없이 정상 종료한다 — `turn_flow.py`가 `if tier == "none"`을
+    `if tier in ("unclear", "no_check")`로 넓히지 않으면 `no_check`가
+    `else`(옛 "several" 전용) 분기로 떨어져 빈 `candidates` 튜플의 0번
+    인덱스에서 죽는다(D-11, RULE-15, T-11-18)."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps([{"no_check": True}])
+
+    exit_code = _run_turn_with_fake(
+        db, "s1", "문을 연다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+        input_answers=[],
+    )
+    assert exit_code == 0
+
+    out = capsys.readouterr().out
+    assert "판정 없이" in out
+    assert "끝납니다" in out
+
+    events = _read_events(db, "s1")
+    assert any(e.event_type == "action_declared" for e in events)
     assert not any(e.event_type == "action_confirmed" for e in events)
 
 

@@ -172,7 +172,11 @@ export interface MoveCandidate {
 
 export interface DeclareResponse {
   declare_seq: number;
-  tier: "none" | "single" | "several";
+  // 네 값(D-11, 11-05) — 옛 세 갈래의 마지막 값 하나를 개명해 "no_check"
+  // (판정 불필요)와 "unclear"(무슨 말인지 모르겠음) 둘로 갈랐다. 이 계획
+  // 시점에서는 두 값 모두 ChatPane.tsx에서 같은 화면(다시 쓰기)으로
+  // 간다 — 11-06이 갈래를 쪼갠다.
+  tier: "single" | "several" | "no_check" | "unclear";
   candidates: MoveCandidate[];
 }
 

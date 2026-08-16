@@ -86,14 +86,28 @@ def test_declare_single_candidate_returns_tier_single(web_client_with_fake_provi
     assert body["candidates"][0] == {"move": "parley", "stat": "CHA"}
 
 
-def test_declare_no_candidates_returns_tier_none(web_client_with_fake_provider) -> None:
+def test_declare_no_candidates_returns_tier_unclear(web_client_with_fake_provider) -> None:
     fake = FakeProvider(complete_value="[]")
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = _declare(client)
 
     assert response.status_code == 200
     body = response.json()
-    assert body["tier"] == "none"
+    assert body["tier"] == "unclear"
+    assert body["candidates"] == []
+
+
+def test_declare_no_check_signal_returns_tier_no_check(web_client_with_fake_provider) -> None:
+    """모델이 `{"no_check": true}` 신호만 내면 응답 `tier`가 `"no_check"`다
+    (D-11, 11-05) — 웹 쪽 호출부는 `proposal.tier`를 그대로 통과시킬 뿐이라
+    코드 변경 없이 새 값이 그대로 나온다."""
+    fake = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+    with web_client_with_fake_provider(action_classifier=fake) as client:
+        response = _declare(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tier"] == "no_check"
     assert body["candidates"] == []
 
 
@@ -109,7 +123,7 @@ def test_action_declared_event_persists_when_classifier_names_unknown_move(
 
         assert response.status_code == 200
         body = response.json()
-        assert body["tier"] == "none"
+        assert body["tier"] == "unclear"
         assert body["candidates"] == []
         declared = _events_of_type(client, "action_declared")
 
@@ -149,7 +163,7 @@ def test_classifier_empty_candidates_records_no_safety_flagged_event(
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = _declare(client)
         assert response.status_code == 200
-        assert response.json()["tier"] == "none"
+        assert response.json()["tier"] == "unclear"
 
         flagged = _events_of_type(client, "safety_flagged")
 

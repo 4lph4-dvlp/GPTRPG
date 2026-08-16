@@ -280,12 +280,18 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
 
     tier = proposal.tier
 
-    # ③ 세 갈래 확인 화면 — 어느 갈래에서도 사람 입력 없이 다음으로 못 넘어간다
-    if tier == "none":
+    # ③ 네 갈래 확인 화면 — 어느 갈래에서도 사람 입력 없이 다음으로 못 넘어간다.
+    # `unclear`(AI가 못 알아들었음)와 `no_check`(굴릴 필요 없음)는 이 계획
+    # 시점에서는 아직 같은 화면으로 간다 — 둘 다 이번 턴을 판정 없이 끝낸다
+    # (D-11, 11-05). 옛 문구 「무브 없음 — 판정 없이 진행합니다」는 실제로는
+    # 서사를 안 이어 주고 그냥 턴을 끝내는데 "진행합니다"라고 적어 부정확했다
+    # — 정직하게 "끝납니다"로 고친다. `no_check`가 실제로 판정 없이 서사가
+    # 이어지는 화면을 여는 것은 11-06 몫이다.
+    if tier in ("unclear", "no_check"):
         # 되돌리기 전용 화면을 만들지 않는다 — ConfirmAction 자체를 제출하지
         # 않는다. 「확인 사건 없는 선언 사건」이 곧 「직접 찾아야 함」 사례의
         # 기록이다 (D-29, D-36, HYP-04의 세 번째 칸).
-        print("무브 없음 — 판정 없이 진행합니다. 필요하면 다음 턴에 roll 명령을 직접 쓰세요.")
+        print("이번 턴은 판정 없이 여기서 끝납니다. 필요하면 다음 턴에 roll 명령을 직접 쓰세요.")
         return 0
 
     if tier == "single":
@@ -293,7 +299,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         confirmed = _read_single_confirmation(candidate)
         suggestion = candidate
         picked = candidate
-    else:  # tier == "several"
+    else:  # tier == "several" — 후보가 2개 이상인 유일한 남은 갈래
         candidates = proposal.candidates
         suggestion = candidates[0]  # 시스템이 처음 내민 것 — 사람이 뭘 고르든 안 바뀐다
         chosen = _prompt_candidate_or_reject(candidates)

@@ -5,8 +5,12 @@
  * 응답을 받아도 이야기를 직접 그리지 않는다. 렌더 경로가 둘이 되면 행동한
  * 사람과 구경한 사람이 서로 다른 화면을 보게 된다.
  *
- * **확인 버튼을 누르는 것만이 판정으로 가는 유일한 통로다** — `tier === "none"`
- * 에서는 확인 버튼을 아예 만들지 않는다(T-04-25).
+ * **확인 버튼을 누르는 것만이 판정으로 가는 유일한 통로다** — `tier === "unclear"`
+ * 또는 `tier === "no_check"`에서는 확인 버튼을 아예 만들지 않는다(T-04-25).
+ * 이 두 값은 D-11(11-05)이 옛 tier 값 하나를 갈라서 만들었다(`api/types.ts`의
+ * `DeclareResponse.tier` 주석 참조) — 이 계획 시점에서는 둘 다 같은
+ * 화면(다시 쓰기)으로 가지만, 11-06이 `no_check`를 "판정 없이 서사가
+ * 이어지는" 실제 경로로 쪼갤 예정이다.
  *
  * 꼬리표는 **사건이 있을 때만** 붙인다. 남이 선언만 하고 아직 확인하지 않은
  * 줄에 "판정 대기" 같은 말을 지어내지 않는다 — 그건 내 브라우저가 알 수 없는
@@ -180,7 +184,10 @@ export function ChatPane({
       <div className="composer">
         {proposal !== null ? (
           <div className="proposal">
-            {proposal.tier === "none" ? (
+            {/* unclear(못 알아들었음)와 no_check(굴릴 필요 없음)는 이 계획
+                시점에서는 같은 화면으로 간다 — 11-06이 no_check를 실제
+                서사 경로로 쪼갠다(D-11). */}
+            {proposal.tier === "unclear" || proposal.tier === "no_check" ? (
               <>
                 <p className="t-label">{COPY.noActionRecognized}</p>
                 <button

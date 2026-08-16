@@ -212,6 +212,13 @@ class DeclareRequest(BaseModel):
 class DeclareResponse(BaseModel):
     declare_seq: int
     tier: str
+    """`Proposal.tier`(`action_classifier.ProposalTier`)를 그대로 통과시킨
+    네 값 중 하나(D-11, 11-05) — `"single"`(후보 하나), `"several"`(후보
+    둘 이상), `"no_check"`(모델이 판정 불필요를 명시적으로 표시), `"unclear"`
+    (후보도 신호도 없거나, 목록 밖 이름 흡수, 또는 제공자 호출 실패). 이
+    타입을 `Literal`로 좁히지 않고 `str`로 남긴 이유: `ProposalTier`가
+    바뀌어도 이 파일을 안 고치기 위해서가 아니라, 값 자체가 `Proposal.tier`
+    한 곳에서만 정의돼야 한다는 규율을 지키기 위해서다."""
     candidates: list[MoveCandidateView]
 
 
@@ -230,10 +237,11 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
 
     **`UnknownMove`는 여기서 더 이상 예외로 나타나지 않는다(SAFE-07, D-12,
     10-05).** `classify()`가 함수 경계에서 이미 흡수했다 — `proposal.tier`가
-    `"none"`이고 `candidates`가 빈 목록인 평소 「무브 없음」 응답이 그대로
-    돌아온다. 계약 위반이었다는 사실은 `proposal.unknown_move`에 남고,
-    아래에서 `RecordSafetyFlag(source="classifier")`로 운영자 기록에
-    남긴다 — 새 응답 칸도 새 상태 코드도 만들지 않는다.
+    `"unclear"`이고 `candidates`가 빈 목록인 응답이 그대로 돌아온다(옛
+    값을 11-05가 개명했다 — `DeclareResponse.tier` 도크스트링 참조). 계약
+    위반이었다는 사실은 `proposal.unknown_move`에 남고, 아래에서
+    `RecordSafetyFlag(source="classifier")`로 운영자 기록에 남긴다 — 새
+    응답 칸도 새 상태 코드도 만들지 않는다.
     """
     identity = read_identity(request, session_id)
     if identity is None or identity.character_id != body.character_id:
