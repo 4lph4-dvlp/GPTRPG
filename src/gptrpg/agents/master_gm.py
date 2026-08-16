@@ -23,6 +23,7 @@ from gptrpg.agents.narration_guard import (
 )
 from gptrpg.agents.prompt_assembly import build_gm_prompt
 from gptrpg.agents.providers.base import Provider
+from gptrpg.rules_core.rulebook import ResourceAxisDecl
 
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?])\s+|(?<=[.!?])$")
 
@@ -325,9 +326,14 @@ def narrate(
     model: str,
     facts: NarrationFacts,
     rulebook_display_name: str,
+    resource_axes: tuple[ResourceAxisDecl, ...] = (),
     stall_timeout_s: float = STREAM_STALL_TIMEOUT_S,
 ) -> Iterator[NarrationChunk]:
     """서사를 문장 단위로 흘려보낸다. `provider.stream` 호출을 `GM_TIMEOUT_S`로 묶는다.
+
+    `resource_axes`(11-07)는 그대로 `build_gm_prompt`(첫 호출·재생성 호출
+    둘 다)로 넘어간다 — 「안 쓴다」로 선언된 축의 처리 지침이 영구 고정
+    블록에 실리는 자리다. 기본값 `()`은 그런 축이 없다는 뜻이다.
 
     **한 문장 지연 버퍼(D-01, 10-01).** 문장을 만드는 즉시 내보내지 않고
     보류 중인 문장을 하나 들고 있다가, 다음 문장이 나오면 그 둘을
@@ -420,7 +426,9 @@ def narrate(
     한 턴의 제공자 스트림 호출 상한을 3회(정상 경로 최대 2회 + 재생성
     1회)로 고정한다.
     """
-    system, messages = build_gm_prompt(rulebook_display_name=rulebook_display_name, facts=facts)
+    system, messages = build_gm_prompt(
+        rulebook_display_name=rulebook_display_name, facts=facts, resource_axes=resource_axes
+    )
     source_texts = (system[0]["text"],)
 
     start = time.monotonic()
@@ -527,6 +535,7 @@ def narrate(
         _, regen_messages = build_gm_prompt(
             rulebook_display_name=rulebook_display_name,
             facts=facts,
+            resource_axes=resource_axes,
             avoid_text=blocked_avoid_text,
             written_so_far=tuple(written_so_far),
         )

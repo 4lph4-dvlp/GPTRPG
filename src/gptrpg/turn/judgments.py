@@ -33,6 +33,7 @@ from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.providers.base import Provider
 from gptrpg.agents.scene_entity_judge import EntityJudgment, judge_new_entity
 from gptrpg.agents.situation_judge import SituationJudgment, judge_situation
+from gptrpg.rules_core.rulebook import ResourceAxisDecl
 from gptrpg.turn.clock_condition import build_clock_judge_context
 
 
@@ -69,6 +70,7 @@ async def gather_turn_judgments(
     ctx: TurnContext,
     check_summary: str,
     rulebook_display_name: str,
+    resource_axes: tuple[ResourceAxisDecl, ...] = (),
 ) -> TurnJudgments:
     """상황판단·장면 신규 대상 판단·시계 신호 관문을 `asyncio.gather`로 동시에 부른다.
 
@@ -81,6 +83,11 @@ async def gather_turn_judgments(
     `cli/turn_flow.py`의 `no_check` 갈래)에서는 호출부가
     `check_summary=agents.context.NO_CHECK_SUMMARY`를 넘긴다 — 이 함수의
     시그니처는 바뀌지 않는다.
+
+    `resource_axes`(11-07)는 `judge_situation`으로만 전달된다 —
+    `judge_new_entity`/`judge_clock_signal`이 쓰는 프롬프트 조립 함수는
+    이 계획에서 손대지 않았다. 기본값 `()`은 「안 쓴다」로 선언된 축이
+    없다는 뜻이다.
     """
     clock_judge_ctx = build_clock_judge_context(ctx, check_summary)
     entity_judge_ctx = _build_entity_judge_context(ctx, check_summary)
@@ -93,6 +100,7 @@ async def gather_turn_judgments(
             ctx=ctx,
             check_summary=check_summary,
             rulebook_display_name=rulebook_display_name,
+            resource_axes=resource_axes,
         ),
         asyncio.to_thread(
             judge_new_entity,

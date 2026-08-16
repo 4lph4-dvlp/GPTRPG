@@ -19,6 +19,7 @@ from gptrpg.agents.invoke import SITUATION_TIMEOUT_S, call_with_one_retry
 from gptrpg.agents.json_parsing import try_parse_json_array
 from gptrpg.agents.prompt_assembly import build_situation_prompt
 from gptrpg.agents.providers.base import Provider
+from gptrpg.rules_core.rulebook import ResourceAxisDecl
 
 
 @dataclass(frozen=True)
@@ -37,8 +38,12 @@ def judge_situation(
     ctx: TurnContext,
     check_summary: str,
     rulebook_display_name: str,
+    resource_axes: tuple[ResourceAxisDecl, ...] = (),
 ) -> SituationJudgment:
     """제공자를 불러 서술용 사실 묶음을 얻는다.
+
+    `resource_axes`(11-07)는 그대로 `build_situation_prompt`로 넘어간다.
+    기본값 `()`은 「안 쓴다」로 선언된 축이 없다는 뜻이다.
 
     `call_with_one_retry`(D-27/D-28)를 거친다. 재시도까지 실패하면 예외를
     던지지 않고 `scene_summary=""`, `facts=()`인 빈 판단을 돌려준다(D-05).
@@ -55,6 +60,7 @@ def judge_situation(
         rulebook_display_name=rulebook_display_name,
         ctx=ctx,
         check_summary=check_summary,
+        resource_axes=resource_axes,
     )
 
     def _call_once() -> AgentResult:

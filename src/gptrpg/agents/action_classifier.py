@@ -14,6 +14,7 @@ from gptrpg.agents.invoke import CLASSIFIER_TIMEOUT_S, call_with_one_retry
 from gptrpg.agents.json_parsing import try_parse_json_array
 from gptrpg.agents.prompt_assembly import build_classifier_prompt
 from gptrpg.agents.providers.base import Provider
+from gptrpg.rules_core.rulebook import ResourceAxisDecl
 from gptrpg.rulebooks.moves import MoveDecl
 
 ProposalTier = Literal["single", "several", "no_check", "unclear"]
@@ -171,8 +172,13 @@ def classify(
     raw_text: str,
     moves: tuple[MoveDecl, ...],
     rulebook_display_name: str,
+    resource_axes: tuple[ResourceAxisDecl, ...] = (),
 ) -> Proposal:
     """제공자를 불러 후보를 얻는다.
+
+    `resource_axes`(11-07)는 그대로 `build_classifier_prompt`로 넘어간다 —
+    「안 쓴다」로 선언된 축의 처리 지침을 영구 고정 블록에 싣는 자리다.
+    기본값 `()`은 그런 축이 없다는 뜻이다.
 
     제공자를 직접 부르지 않고 `call_with_one_retry`(D-27/D-28의 타임아웃·
     재시도 층)를 거친다. 재시도까지 실패하면 예외를 던지지 않고 후보가 빈
@@ -213,6 +219,7 @@ def classify(
         moves=moves,
         ctx=ctx,
         raw_text=raw_text,
+        resource_axes=resource_axes,
     )
 
     def _call_once() -> AgentResult:

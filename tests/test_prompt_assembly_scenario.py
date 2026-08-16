@@ -26,6 +26,7 @@ from gptrpg.event_log.schema import (
     utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
+from gptrpg.rules_core.rulebook import ResourceAxisDecl
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST
@@ -335,6 +336,133 @@ def test_build_gm_prompt_system_is_byte_identical_across_calls_with_different_re
     facts2 = _blank_narration_facts(recent_turns=("플레이어: 두 번째 발화",))
     system1, _ = prompt_assembly.build_gm_prompt(rulebook_display_name="던전월드 계열", facts=facts1)
     system2, _ = prompt_assembly.build_gm_prompt(rulebook_display_name="던전월드 계열", facts=facts2)
+    assert system1 == system2
+
+
+# ---------------------------------------------------------------------------
+# 11-07 Task 2: D-08 — 「안 쓴다」 축의 처리 지침이 영구 고정 블록에 실린다.
+# 「없다」로 뭉뚱그리지 않고 두 갈래(discretionary/absent)가 서로 다른
+# 문장으로 전달된다는 것을 확인한다.
+# ---------------------------------------------------------------------------
+
+_DISCRETIONARY_AXIS = ResourceAxisDecl(name="소지품", form="none", none_kind="discretionary")
+_ABSENT_AXIS = ResourceAxisDecl(name="영혼", form="none", none_kind="absent")
+_NUMERIC_AXIS = ResourceAxisDecl(name="체력", form="numeric")
+
+
+def test_resource_treatment_discretionary_axis_appears_in_story_but_is_not_counted():
+    """`discretionary`(있지만 규칙으로 안 셈) 축은 "서사에는 등장하되 숫자로
+    세지 않는다"는 뜻의 문장을 낸다 — "없다"로 뭉뚱그리지 않는다(D-08, D-09).
+    "갖고 있는지를 따지지 않는다"는 문구가 있어야 진행자가 "그건 갖고 있지
+    않습니다"로 장면을 끊는 실패(D-09)를 막는다."""
+    system, _messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열",
+        facts=_blank_narration_facts(),
+        resource_axes=(_DISCRETIONARY_AXIS,),
+    )
+    permanent_text = system[0]["text"]
+    assert "소지품" in permanent_text
+    assert "규칙으로 세지 않는다" in permanent_text
+    assert "따지지 않는다" in permanent_text
+
+
+def test_resource_treatment_absent_axis_tells_gm_the_concept_does_not_exist():
+    """`absent`(이 세계에 개념 자체가 없음) 축은 "이 세계에 없다"는 뜻의
+    문장을 낸다."""
+    system, _messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열",
+        facts=_blank_narration_facts(),
+        resource_axes=(_ABSENT_AXIS,),
+    )
+    permanent_text = system[0]["text"]
+    assert "영혼" in permanent_text
+    assert "이 세계에 없다" in permanent_text
+
+
+def test_resource_treatment_two_none_kinds_produce_different_sentences():
+    """`discretionary`와 `absent`가 같은 문장으로 뭉개지지 않는다(D-05)."""
+    discretionary_system, _ = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열",
+        facts=_blank_narration_facts(),
+        resource_axes=(_DISCRETIONARY_AXIS,),
+    )
+    absent_system, _ = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열",
+        facts=_blank_narration_facts(),
+        resource_axes=(_ABSENT_AXIS,),
+    )
+    discretionary_line = prompt_assembly._format_resource_treatment((_DISCRETIONARY_AXIS,))
+    absent_line = prompt_assembly._format_resource_treatment((_ABSENT_AXIS,))
+    assert discretionary_line != absent_line
+    assert discretionary_system[0]["text"] != absent_system[0]["text"]
+
+
+def test_non_none_axes_are_not_in_the_treatment_block():
+    """`form != "none"`인 축은 처리 지침 목록에 들어가지 않는다."""
+    treatment = prompt_assembly._format_resource_treatment((_NUMERIC_AXIS, _DISCRETIONARY_AXIS))
+    assert "체력" not in treatment
+    assert "소지품" in treatment
+
+
+def test_resource_treatment_block_omitted_when_rulebook_has_no_none_axes():
+    """`none` 축이 하나도 없으면 처리 지침 블록 자체가 안 붙는다 — 빈
+    제목만 남지 않는다."""
+    system, _messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열",
+        facts=_blank_narration_facts(),
+        resource_axes=(_NUMERIC_AXIS,),
+    )
+    assert "자원 처리 지침" not in system[0]["text"]
+
+    default_system, _ = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=_blank_narration_facts()
+    )
+    assert "자원 처리 지침" not in default_system[0]["text"]
+
+
+def test_treatment_block_is_in_the_permanent_cached_block():
+    """처리 지침 문장이 세션 고정 블록(`system[1]`)이 아니라 영구 고정
+    블록(`system[0]`)에 있다 — 캐싱 순서 규약(영구 → 세션 → 턴)을 지킨다.
+    세 조립 함수 전부에서 확인한다."""
+    gm_system, _ = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열",
+        facts=_blank_narration_facts(),
+        resource_axes=(_DISCRETIONARY_AXIS,),
+    )
+    assert "소지품" in gm_system[0]["text"]
+    assert "소지품" not in gm_system[1]["text"]
+
+    situation_system, _ = prompt_assembly.build_situation_prompt(
+        rulebook_display_name="던전월드 계열",
+        ctx=_blank_turn_context(),
+        check_summary="c",
+        resource_axes=(_DISCRETIONARY_AXIS,),
+    )
+    assert "소지품" in situation_system[0]["text"]
+    assert "소지품" not in situation_system[1]["text"]
+
+    classifier_system, _ = prompt_assembly.build_classifier_prompt(
+        rulebook_display_name="던전월드 계열",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        ctx=_blank_turn_context(),
+        raw_text="문을 연다",
+        resource_axes=(_DISCRETIONARY_AXIS,),
+    )
+    assert "소지품" in classifier_system[0]["text"]
+    assert "소지품" not in classifier_system[1]["text"]
+
+
+def test_build_gm_prompt_system_byte_identical_across_calls_with_same_resource_axes():
+    """캐싱 순서 규약 — `resource_axes`가 같으면(룰북 단위로 고정) 여러 번
+    불러도 `system`이 바이트 단위로 같다."""
+    facts1 = _blank_narration_facts(recent_turns=("플레이어: 첫 번째 발화",))
+    facts2 = _blank_narration_facts(recent_turns=("플레이어: 두 번째 발화",))
+    system1, _ = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=facts1, resource_axes=(_DISCRETIONARY_AXIS,)
+    )
+    system2, _ = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=facts2, resource_axes=(_DISCRETIONARY_AXIS,)
+    )
     assert system1 == system2
 
 

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from gptrpg.agents import prompt_assembly
 from gptrpg.agents.context import (
     ClockJudgeContext,
     ClockState,
@@ -29,6 +30,7 @@ from gptrpg.agents.context import (
 from gptrpg.event_log.schema import ActionDeclared, EVENT_SCHEMA_VERSION
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.entities import Entity
+from gptrpg.rules_core.rulebook import ResourceAxisDecl
 from gptrpg.turn import judgments as judgments_module
 from gptrpg.turn.clock_condition import build_clock_judge_context
 from gptrpg.turn.context import build_turn_context
@@ -125,6 +127,26 @@ def test_narration_facts_raises_context_cap_exceeded_over_recent_turns_limit():
 def test_narration_facts_raises_context_cap_exceeded_over_new_entities_limit():
     with pytest.raises(ContextCapExceeded):
         _narration_facts(new_entities=tuple(f"대상 {i}" for i in range(NEW_ENTITY_LIMIT + 1)))
+
+
+def test_resource_treatment_lines_over_limit_raises():
+    """`form == "none"`인 축이 `RESOURCE_TREATMENT_LINES_LIMIT`을 넘으면
+    조용히 잘라내지 않고 `ContextCapExceeded`를 던진다(D-66/ARCH-06,
+    11-07) — 기존 상한 시험들과 같은 모양이다."""
+    over_limit_axes = tuple(
+        ResourceAxisDecl(name=f"축{i}", form="none", none_kind="discretionary")
+        for i in range(prompt_assembly.RESOURCE_TREATMENT_LINES_LIMIT + 1)
+    )
+    with pytest.raises(ContextCapExceeded):
+        prompt_assembly._format_resource_treatment(over_limit_axes)
+
+
+def test_resource_treatment_lines_at_limit_does_not_raise():
+    at_limit_axes = tuple(
+        ResourceAxisDecl(name=f"축{i}", form="none", none_kind="discretionary")
+        for i in range(prompt_assembly.RESOURCE_TREATMENT_LINES_LIMIT)
+    )
+    prompt_assembly._format_resource_treatment(at_limit_axes)
 
 
 # ---------------------------------------------------------------------------

@@ -260,6 +260,7 @@ async def _proceed_without_check(
             ctx=ctx,
             check_summary=NO_CHECK_SUMMARY,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성)이 실패해도 진행을 막지 않는다
         print(
@@ -323,6 +324,7 @@ async def _proceed_without_check(
             model=gm_choice.model,
             facts=facts,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
         first_sentence = with_progress_dots(
             lambda: next(narration_iter, _NO_SENTENCE),
@@ -438,6 +440,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             raw_text=args.text,
             moves=moves,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         ),
         threshold_s=args.progress_after,
         tick_s=args.progress_tick,
@@ -590,6 +593,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             ctx=ctx,
             check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성)이 실패해도 턴을 막지 않는다
         print(
@@ -675,6 +679,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             model=gm_choice.model,
             facts=facts,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
         first_sentence = with_progress_dots(
             lambda: next(narration_iter, _NO_SENTENCE),

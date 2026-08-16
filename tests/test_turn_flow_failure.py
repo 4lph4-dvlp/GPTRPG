@@ -229,7 +229,9 @@ def test_stream_always_fails_before_first_chunk_exits_nonzero_with_zero_narratio
 # ---------------------------------------------------------------------------
 
 
-def _stub_narrate_emits_one_then_raises(*, provider, model, facts, rulebook_display_name):
+def _stub_narrate_emits_one_then_raises(
+    *, provider, model, facts, rulebook_display_name, resource_axes=()
+):
     """`narrate()` 이름 자체를 바꿔치기하는 이중체(10-01부터 `NarrationChunk`를
     낸다) — `turn_flow._submit_narration_chunk`가 기대하는 반환 모양을
     맞춘다."""

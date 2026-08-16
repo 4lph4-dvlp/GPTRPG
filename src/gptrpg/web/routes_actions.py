@@ -299,6 +299,7 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
             raw_text=body.raw_text,
             moves=moves,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
     except (CommandRejected, UnknownRulebook) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -568,6 +569,7 @@ async def confirm(
             ctx=ctx,
             check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성) 실패가 확인 요청을 막지 않는다
         print(
@@ -645,6 +647,7 @@ async def confirm(
             model=gm_choice.model,
             facts=facts,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
         first_sentence = await asyncio.to_thread(next, narration_iter, _NO_SENTENCE)
     except Exception as exc:  # noqa: BLE001 - 서사 스트림 생성/첫 조각 실패만 여기서 잡는다(G-03-3)
@@ -872,6 +875,7 @@ async def proceed(
             ctx=ctx,
             check_summary=NO_CHECK_SUMMARY,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성) 실패가 진행 요청을 막지 않는다
         print(
@@ -936,6 +940,7 @@ async def proceed(
             model=gm_choice.model,
             facts=facts,
             rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
         )
         first_sentence = await asyncio.to_thread(next, narration_iter, _NO_SENTENCE)
     except Exception as exc:  # noqa: BLE001 - 서사 스트림 생성/첫 조각 실패만 여기서 잡는다(G-03-3)

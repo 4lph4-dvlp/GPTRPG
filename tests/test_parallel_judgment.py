@@ -54,7 +54,7 @@ def _install_counting_stubs(monkeypatch) -> dict[str, int]:
     """`gptrpg.turn.judgments` 이름공간의 세 이름을 호출 횟수를 세는 대역으로 갈아 끼운다."""
     counts = {"situation": 0, "entity": 0, "clock": 0}
 
-    def _stub_judge_situation(*, provider, model, ctx, check_summary, rulebook_display_name):
+    def _stub_judge_situation(*, provider, model, ctx, check_summary, rulebook_display_name, resource_axes=()):
         counts["situation"] += 1
         return SituationJudgment(scene_summary="장면.", facts=(), ai=_EMPTY_AI)
 
@@ -195,7 +195,7 @@ async def test_three_judgments_actually_overlap_in_time(monkeypatch):
         with lock:
             ends[name] = time.monotonic()
 
-    def _stub_judge_situation(*, provider, model, ctx, check_summary, rulebook_display_name):
+    def _stub_judge_situation(*, provider, model, ctx, check_summary, rulebook_display_name, resource_axes=()):
         _record("situation")
         return SituationJudgment(scene_summary="", facts=(), ai=_EMPTY_AI)
 
