@@ -358,7 +358,7 @@ Plans:
      > 선언 순서로 해소한다. 글자 그대로 구현하면 저장소 자신의 룰북 둘이 등록 거부된다.
      > 등록 검사가 잡는 것은 ① 가려짐 ② 구멍 둘뿐이다. 근거와 회귀 시험은 `11-02-PLAN.md`.
 
-**Plans**: 4/7 plans executed
+**Plans**: 5/7 plans executed
 
 Plans:
 **Wave 1**
@@ -372,7 +372,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 11-04-PLAN.md — 세 번째 룰북 Cairn(CC BY-SA 4.0) 데이터 투입 + 빈 판정 트리거 목록의 두 갈래 + 라이선스 표기 (wave 3)
+- [x] 11-04-PLAN.md — 세 번째 룰북 Cairn(CC BY-SA 4.0) 데이터 투입 + 빈 판정 트리거 목록의 두 갈래 + 라이선스 표기 (wave 3)
 - [x] 11-05-PLAN.md — 분류기 반환 계약을 네 갈래로 + 웹·CLI·화면 어휘 통일 (wave 3)
 
 **Wave 4** *(blocked on Wave 3)*
@@ -732,7 +732,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 8. 신원 검증과 멱등성 | v1.1 | 4/4 | Complete    | 2026-08-06 |
 | 9. 에이전트 구조 재편 | v1.1 | 4/4 | Complete    | 2026-08-12 |
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 7/7 | Complete    | 2026-08-14 |
-| 11. 룰북 표현 어휘 확장 | v1.1 | 4/7 | In Progress|  |
+| 11. 룰북 표현 어휘 확장 | v1.1 | 5/7 | In Progress|  |
 | 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 0/TBD | Not started | - |
 | 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 0/TBD | Not started | - |
 | 13. 장면 — 오프닝과 대상 | v1.1 | 0/TBD | Not started | - |

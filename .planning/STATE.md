@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 11
 current_phase_name: rulebook-vocabulary
 status: executing
-stopped_at: Completed 11-05-PLAN.md
-last_updated: "2026-08-16T10:42:40.138Z"
+stopped_at: Completed 11-04-PLAN.md
+last_updated: "2026-08-16T11:30:35.026Z"
 last_activity: 2026-08-15
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 22
-  completed_plans: 19
+  completed_plans: 20
   percent: 27
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 11 (rulebook-vocabulary) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-08-15 — Phase 11 execution started
 
@@ -39,7 +39,7 @@ Last activity: 2026-08-15 — Phase 11 execution started
 > (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
 > 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -105,6 +105,7 @@ Progress: [█████████░] 86%
 | Phase 11 P02 | ~35min | 3 tasks | 5 files |
 | Phase 11 P03 | ~25min (Task1-2) + checkpoint overnight wait | 3 tasks | 5 files |
 | Phase 11 P05 | ~20min | 3 tasks | 11 files |
+| Phase 11 P04 | ~50min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -208,6 +209,10 @@ Progress: [█████████░] 86%
 - [Phase ?]: 11-05: 분류기 지시문이 '안 맞음'과 '필요 없음'을 3갈래로 분리, 빈 무브 목록도 예외 없이 조립(RULE-15 empty)
 - [Phase ?]: 11-05: 웹/CLI/화면/타입 네 곳이 같은 커밋(9e23c71)에서 4값 어휘로 이동 — CLI 안내 문구를 '진행합니다'(부정확)에서 '끝납니다'(정직)로 교체
 - [Phase ?]: 11-05: RULE-15는 Complete로 표시하지 않음 — 이 계획은 그릇(플랫폼 능력)만 만들었고 실증(11-04)과 no_check 실제 서사 경로(11-06)가 남음
+- [Phase ?]: 11-04 Task 0(declare-only, 승인): Cairn d20 계산기는 이번 단계에 안 만든다 — 선언·등록까지만, CommandRejected로 눈에 보이게 멈춘다
+- [Phase ?]: 11-04: Cairn(CC BY-SA 4.0)을 플랫폼 그릇 변경 없이 세 번째 룰북으로 등록(D-14) — named_slots(10칸 소지품) 형태를 실제 데이터로 첫 실증
+- [Phase ?]: 11-04: check_trigger_mode(declared_list/no_dice/gm_discretion) 신설(D-12) — 빈 판정 트리거 목록의 두 갈래를 룰북이 명시적으로 선택하게 강제
+- [Phase ?]: 11-04 [접어넣은 todo]: Cairn은 default_stat 벽에 부딪히지 않음(무브 목록 자체가 없음) — 그래도 MoveDecl.default_stat을 str | None으로 넓혀 던전월드 defy_danger/aid_or_interfere를 원래 의도(None)로 되돌림, 11-02 편차 해소
 
 ### Pending Todos
 
@@ -263,8 +268,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-16T10:42:40.103Z
-Stopped at: Completed 11-05-PLAN.md
+Last session: 2026-08-16T11:30:34.988Z
+Stopped at: Completed 11-04-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
