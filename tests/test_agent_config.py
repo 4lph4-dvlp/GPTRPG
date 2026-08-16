@@ -300,3 +300,92 @@ def test_agents_select_with_no_available_providers_exits_nonzero_and_lists_env_v
     err = capsys.readouterr().err
     for env_var in providers_module.PROVIDER_ENV_VARS.values():
         assert env_var in err
+
+
+# ---------------------------------------------------------------------------
+# G-11-2 — `agents set`/`agents show`가 실측 미달 모델을 stderr에 경고한다
+# ---------------------------------------------------------------------------
+
+
+def test_agents_set_with_known_undersized_model_warns_on_stderr_but_still_saves(
+    tmp_path, capsys
+):
+    """경고가 저장을 막지 않는다 — 종료 코드 0, 파일에 그대로 저장된다."""
+    path = tmp_path / "agents.json"
+    exit_code = main(
+        [
+            "agents",
+            "set",
+            "--config",
+            str(path),
+            "--role",
+            "action_classifier",
+            "--provider",
+            "nim",
+            "--model",
+            "meta/llama-3.1-8b-instruct",
+        ]
+    )
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "경고" in err
+    assert "action_classifier" in err
+    assert "meta/llama-3.1-8b-instruct" in err
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["action_classifier"] == {
+        "provider": "nim",
+        "model": "meta/llama-3.1-8b-instruct",
+    }
+
+
+def test_agents_set_with_recommended_model_has_no_warning(tmp_path, capsys):
+    path = tmp_path / "agents.json"
+    exit_code = main(
+        [
+            "agents",
+            "set",
+            "--config",
+            str(path),
+            "--role",
+            "master_gm",
+            "--provider",
+            "nim",
+            "--model",
+            "nvidia/nemotron-3-ultra-550b-a55b",
+        ]
+    )
+    assert exit_code == 0
+    assert "경고" not in capsys.readouterr().err
+
+
+def test_agents_show_warns_on_stderr_for_known_undersized_model_without_polluting_stdout(
+    tmp_path, capsys
+):
+    path = tmp_path / "agents.json"
+    save_config(
+        path,
+        {
+            "action_classifier": AgentChoice(
+                provider="nim", model="meta/llama-3.1-8b-instruct"
+            ),
+            "master_gm": AgentChoice(
+                provider="nim", model="nvidia/nemotron-3-ultra-550b-a55b"
+            ),
+        },
+    )
+
+    exit_code = main(["agents", "show", "--config", str(path)])
+    assert exit_code == 0
+
+    out, err = capsys.readouterr()
+    # `agents show`는 여전히 다섯 줄만 stdout에 찍는다 — 경고가 이 계약을
+    # 깨지 않는다(09-01의 `test_agents_show_prints_all_five_roles_without_key_values`
+    # 회귀 방지와 같은 이유).
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) == len(AGENT_ROLES) == 5
+    warning_lines = [line for line in err.splitlines() if line.startswith("경고")]
+    assert len(warning_lines) == 1
+    assert "action_classifier" in warning_lines[0]
+    assert "master_gm" not in warning_lines[0]  # master_gm은 권장값이므로 경고가 없다

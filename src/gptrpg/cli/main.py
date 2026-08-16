@@ -21,6 +21,7 @@ from gptrpg.agents.config import (
     load_partial_config,
     save_config,
 )
+from gptrpg.agents.model_recommendations import check_model_recommendations
 from gptrpg.agents.providers import (
     PROVIDER_ENV_VARS,
     MissingApiKey,
@@ -53,6 +54,18 @@ from gptrpg.session_actor.report import DEFAULT_REPORTS_DIR, UnsafeSessionId, bu
 # `from gptrpg.cli.main import _build_turn_context`로 이 이름을 계속 찾는다 — 위
 # import가 그 이름을 이 모듈의 네임스페이스로 다시 노출한다 (단방향 재노출,
 # 순환 import 없음: `turn_flow`는 `main`을 전혀 모른다).
+
+
+def _print_model_recommendation_warnings(choices: dict[str, AgentChoice]) -> None:
+    """G-11-2 — 실측으로 미달이 확인된 모델과 정확히 같으면 stderr에 경고를 찍는다.
+
+    막지 않는다(호출부는 이 함수 뒤에도 그대로 진행한다). `_cmd_agents_set`
+    (역할 하나 저장 직후)·`_cmd_agents_show`(전체 확인)·`_cmd_turn`(실제
+    호출 직전) 세 자리에서 부른다 — 웹 쪽(`web/app.py`의 서버 기동)과
+    똑같은 표를 쓴다(`gptrpg.agents.model_recommendations`).
+    """
+    for warning in check_model_recommendations(choices):
+        print(warning, file=sys.stderr)
 
 
 _CLI_ROLL_IDENTITY = "cli"
@@ -437,6 +450,7 @@ def _cmd_agents_set(args: argparse.Namespace) -> int:
                 "물려받는다 — 따로 정하려면 'gptrpg agents set --role "
                 f"{role}'을 쓰세요"
             )
+    _print_model_recommendation_warnings(choices)
     return 0
 
 
@@ -451,6 +465,7 @@ def _cmd_agents_show(args: argparse.Namespace) -> int:
     for role in AGENT_ROLES:
         choice = choices[role]
         print(f"{role}: {choice.provider}/{choice.model}")
+    _print_model_recommendation_warnings(choices)
     return 0
 
 
@@ -468,6 +483,21 @@ def _cmd_turn(args: argparse.Namespace) -> int:
     if bool(args.provider) != bool(args.model):
         print("오류: --provider와 --model은 항상 함께 줘야 한다", file=sys.stderr)
         return 1
+
+    # G-11-2 — 이 명령이 실제로 모델을 호출하기 직전, 웹 서버 기동과 같은
+    # 표(`gptrpg.agents.model_recommendations`)로 한 번 확인한다. `--provider`/
+    # `--model`을 둘 다 주면(빠른 수동 시험용) 두 역할 모두 그 값을 쓴다 —
+    # `turn_flow._resolve_role_choice`와 같은 규칙이다. 설정 파일을 못 읽어도
+    # (아직 없거나 깨졌어도) `load_partial_config`는 예외를 던지지 않으므로
+    # 이 확인이 명령 실행 자체를 막지 않는다.
+    if args.provider and args.model:
+        turn_start_choices: dict[str, AgentChoice] = {
+            role: AgentChoice(provider=args.provider, model=args.model)
+            for role in STRICT_AGENT_ROLES
+        }
+    else:
+        turn_start_choices = load_partial_config(Path(args.config))
+    _print_model_recommendation_warnings(turn_start_choices)
 
     store = EventStore(args.db)
     store.initialize()

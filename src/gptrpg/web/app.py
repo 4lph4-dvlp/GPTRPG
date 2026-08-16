@@ -25,7 +25,8 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
-from gptrpg.agents.config import DEFAULT_CONFIG_PATH, resolve_provider
+from gptrpg.agents.config import DEFAULT_CONFIG_PATH, load_partial_config, resolve_provider
+from gptrpg.agents.model_recommendations import check_model_recommendations
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore
 from gptrpg.imagery import (
@@ -103,6 +104,15 @@ def create_app(
         app.state.cookie_secret = load_or_create_secret(
             Path(db_path).parent / COOKIE_SECRET_FILENAME
         )
+        # G-11-2 — 기동 시 권장값보다 작은 것으로 실측된 모델이면 stderr에
+        # 눈에 보이는 경고를 찍는다. `load_partial_config`는 파일이 없거나
+        # 깨졌어도 예외를 던지지 않는다(빈 사전) — 이 검사가 서버 기동을
+        # 막으면 안 되기 때문에 일부러 그 함수를 쓴다(`load_config`가 아니다).
+        # 경고는 사람이 읽고 다음에 뭘 할지 알 수 있는 문구다 — 막지 않는다.
+        for warning in check_model_recommendations(
+            load_partial_config(agent_config_path)
+        ):
+            print(warning, file=sys.stderr)
         warm_up_task = _start_renderer_warm_up(config, renderer)
         try:
             yield

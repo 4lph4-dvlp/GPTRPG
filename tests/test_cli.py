@@ -824,6 +824,92 @@ def test_no_check_tier_produces_narration_without_check(
     assert len(narrations) == 2
 
 
+# ---------------------------------------------------------------------------
+# G-11-2 — `turn` 기동 시 실측 미달 모델이면 stderr에 경고, 진행은 막지 않는다
+# ---------------------------------------------------------------------------
+
+
+def test_turn_with_known_undersized_model_warns_but_still_completes(
+    tmp_db_path, monkeypatch, fake_provider, capsys
+):
+    """`--provider nim --model meta/llama-3.1-8b-instruct`로 돌려도 턴은
+    끝까지 진행된다(경고가 막지 않는다) — stderr에 G-11-2 경고 문구가 뜬다."""
+    db = str(tmp_db_path)
+    _install_provider(monkeypatch, fake_provider, name="nim", env_var="NIM_API_KEY_TEST")
+    monkeypatch.setattr("builtins.input", lambda *_args: "")
+
+    exit_code = main(
+        [
+            "turn",
+            "--db",
+            db,
+            "--session",
+            "s1",
+            "--player",
+            "p1",
+            "--text",
+            "문을 부수고 들어간다",
+            "--provider",
+            "nim",
+            "--model",
+            "meta/llama-3.1-8b-instruct",
+        ]
+    )
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "경고" in err
+    assert "action_classifier" in err
+    assert "meta/llama-3.1-8b-instruct" in err
+    assert "막지 않는다" in err
+
+
+def test_turn_with_recommended_model_has_no_warning(
+    tmp_db_path, tmp_path, monkeypatch, fake_provider, capsys
+):
+    """`--provider`/`--model`을 함께 주면 두 역할 모두 같은 값을 쓰므로(빠른
+    수동 시험용 규칙), 역할마다 다른 권장값을 확인하려면 `--config` 파일을
+    쓴다 — action_classifier/master_gm 둘 다 각자의 권장값으로 저장한다."""
+    db = str(tmp_db_path)
+    _install_provider(monkeypatch, fake_provider, name="nim", env_var="NIM_API_KEY_TEST")
+    monkeypatch.setattr("builtins.input", lambda *_args: "")
+
+    config_path = tmp_path / "agents.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "action_classifier": {
+                    "provider": "nim",
+                    "model": "nvidia/nemotron-3-super-120b-a12b",
+                },
+                "master_gm": {
+                    "provider": "nim",
+                    "model": "nvidia/nemotron-3-ultra-550b-a55b",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "turn",
+            "--db",
+            db,
+            "--session",
+            "s1",
+            "--player",
+            "p1",
+            "--text",
+            "문을 부수고 들어간다",
+            "--config",
+            str(config_path),
+        ]
+    )
+    assert exit_code == 0
+    assert "경고" not in capsys.readouterr().err
+
+
 def test_turn_shows_progress_dots_when_classifier_response_exceeds_threshold(
     tmp_db_path, monkeypatch, capsys
 ):
