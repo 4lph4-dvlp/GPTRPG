@@ -358,7 +358,7 @@ Plans:
      > 선언 순서로 해소한다. 글자 그대로 구현하면 저장소 자신의 룰북 둘이 등록 거부된다.
      > 등록 검사가 잡는 것은 ① 가려짐 ② 구멍 둘뿐이다. 근거와 회귀 시험은 `11-02-PLAN.md`.
 
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -378,7 +378,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3)*
 
 - [x] 11-06-PLAN.md — 판정 없이 이야기가 이어지는 정식 경로를 웹·CLI·화면에 연다 (wave 4)
-- [ ] 11-07-PLAN.md — 출하 룰북이 「안 쓴다」를 실제로 선언 + AI에게 「어떻게 다루는가」 전달 (wave 4)
+- [x] 11-07-PLAN.md — 출하 룰북이 「안 쓴다」를 실제로 선언 + AI에게 「어떻게 다루는가」 전달 (wave 4)
 
 > **왜 새로 생겼나.** 2026-08-06 룰북 서베이(`.planning/research/RULEBOOK-SURVEY.md`)의 결과다.
 > 실제 출간작 스펙트럼의 **한쪽 끝은 언제나 「이 개념 자체가 없음」**이다 — *Wanderhome*과
@@ -732,7 +732,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 8. 신원 검증과 멱등성 | v1.1 | 4/4 | Complete    | 2026-08-06 |
 | 9. 에이전트 구조 재편 | v1.1 | 4/4 | Complete    | 2026-08-12 |
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 7/7 | Complete    | 2026-08-14 |
-| 11. 룰북 표현 어휘 확장 | v1.1 | 6/7 | In Progress|  |
+| 11. 룰북 표현 어휘 확장 | v1.1 | 7/7 | In Progress|  |
 | 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 0/TBD | Not started | - |
 | 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 0/TBD | Not started | - |
 | 13. 장면 — 오프닝과 대상 | v1.1 | 0/TBD | Not started | - |

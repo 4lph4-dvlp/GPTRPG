@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 11
 current_phase_name: rulebook-vocabulary
-status: executing
-stopped_at: Completed 11-06-PLAN.md
-last_updated: "2026-08-16T15:14:01.861Z"
+status: verifying
+stopped_at: Completed 11-07-PLAN.md — Phase 11 전체 계획 7/7 완료
+last_updated: "2026-08-16T15:34:07.570Z"
 last_activity: 2026-08-15
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 11
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 22
-  completed_plans: 21
-  percent: 27
+  completed_plans: 22
+  percent: 36
 ---
 
 # Project State
@@ -32,14 +32,14 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 11 (rulebook-vocabulary) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-15 — Phase 11 execution started
 
 > 라우팅 정정: `phase.complete`가 12.1을 다음으로 골랐으나 12.1은 ROADMAP상 **Phase 11·12에 의존**한다
 > (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
 > 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
 
-Progress: [██████████] 95%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -107,6 +107,7 @@ Progress: [██████████] 95%
 | Phase 11 P05 | ~20min | 3 tasks | 11 files |
 | Phase 11 P04 | ~50min | 3 tasks | 14 files |
 | Phase 11 P06 | ~3시간20분(사람 확인 대기 포함) | 3 tasks | 15 files |
+| Phase 11 P07 | ~90min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -216,6 +217,10 @@ Progress: [██████████] 95%
 - [Phase ?]: 11-04 [접어넣은 todo]: Cairn은 default_stat 벽에 부딪히지 않음(무브 목록 자체가 없음) — 그래도 MoveDecl.default_stat을 str | None으로 넓혀 던전월드 defy_danger/aid_or_interfere를 원래 의도(None)로 되돌림, 11-02 편차 해소
 - [Phase ?]: 11-06: proceed()의 caused_by_seq를 declare_seq로 고정(확인·판정 사건이 없는 경로), check_summary 자리에 NO_CHECK_SUMMARY 고정 문장(SAFE-03 울타리 우회 방지), no_check 화면에 다시 쓰기 버튼 없음(D-10 결정 2)
 - [Phase ?]: 11-06 [Task 3 관문에서 발견, Rule 2]: groupTurns.isConfirmedTurn을 isVisibleTurn으로 확장(확인 또는 서사 있음) — proceed 턴이 이야기 화면에 안 보이던 결함 수정. 이 저장소 최초 프론트엔드 단위 시험(vitest) 도입
+- [Phase ?]: 11-07: 던전월드류가 「소지품」을 form="none"/none_kind="discretionary"로 실제 선언 — RULE-12를 시험 픽스처가 아니라 저장소 데이터로 실증(D-67)
+- [Phase ?]: 11-07: _format_resource_treatment()가 discretionary/absent 두 갈래를 서로 다른 처리 지침 문장으로 세 프롬프트 조립 함수의 영구 고정 블록에 싣는다(D-08) — RESOURCE_TREATMENT_LINES_LIMIT=8, 초과 시 ContextCapExceeded
+- [Phase ?]: 11-07: resource_axes 매개변수를 기본값 ()로 넓혀 classify/judge_situation/narrate/gather_turn_judgments에 추가 — 이 저장소 전역의 기존 프롬프트 조립 호출부·시험이 대부분 무변경으로 남고, 웹·CLI 실제 호출부 10곳만 rulebook.resource_axes를 명시적으로 넘긴다
+- [Phase ?]: 11-07: _format_character_state가 stat.form 여섯 값 명시적 분기로 재작성됨 — form=="none"은 건너뛴다(T-11-25). _format_scene_entities는 같은 버그를 잠재적으로 갖고 있으나 이 계획 범위 밖, WINDOWS.md에 todo로 기록
 
 ### Pending Todos
 
@@ -271,8 +276,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-16T15:14:01.825Z
-Stopped at: Completed 11-06-PLAN.md
+Last session: 2026-08-16T15:34:07.535Z
+Stopped at: Completed 11-07-PLAN.md — Phase 11 전체 계획 7/7 완료
 Traceability 갱신 완료
 Resume file: None
 
