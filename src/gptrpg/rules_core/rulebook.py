@@ -26,8 +26,10 @@ D20_ROLL_UNDER = "d20_roll_under"
 `D20_ROLL_UNDER` 항목이 없다(D-14 시험 순수성을 위해 Task 0에서 `declare-only`로
 결정됨, 11-04-PLAN.md). 이 방식을 선언한 룰북으로 실제 판정을 시도하면 조용히
 다른 계산기로 대체되지 않고 `session_actor.actor.CommandRejected`
-("알 수 없는 판정 방식")로 눈에 보이게 멈춘다 — 이 상태는
-`tests/test_session_actor.py`의 회귀 시험으로 고정되어 있다."""
+("알 수 없는 판정 방식")로 눈에 보이게 멈추고, 사건 기록에는 아무것도 안
+쌓인다 — 이 상태는
+`tests/test_session_actor.py#test_rulebook_with_no_registered_resolver_is_rejected_not_silently_substituted`
+로 고정되어 있다."""
 
 
 @dataclass(frozen=True)

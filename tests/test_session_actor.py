@@ -21,7 +21,7 @@ from gptrpg.rulebooks import RULEBOOKS
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.resolution import Modifier
-from gptrpg.rules_core.rulebook import D100_ROLL_UNDER, GradeBand, Rulebook
+from gptrpg.rules_core.rulebook import D20_ROLL_UNDER, D100_ROLL_UNDER, GradeBand, Rulebook
 from gptrpg.session_actor.actor import (
     AdvanceClock,
     AlreadyConfirmed,
@@ -330,6 +330,57 @@ async def test_rulebook_with_incomplete_grade_bands_is_rejected_not_a_raw_traceb
         assert _read_events(tmp_db_path) == []
     finally:
         del RULEBOOKS[_GAPPED_RULEBOOK_ID]
+
+
+_NO_RESOLVER_RULEBOOK_ID = "no-resolver-test-only"
+_NO_RESOLVER_RULEBOOK = Rulebook(
+    rulebook_id=_NO_RESOLVER_RULEBOOK_ID,
+    display_name="계산기 없는 판정 방식 시험 전용",
+    # D20_ROLL_UNDER는 이름만 있고 _RESOLVERS에 계산기가 없다(11-04 Task 0
+    # declare-only 결정 — Cairn의 d20 계산기는 이번 마일스톤에 안 만든다).
+    # 이 룰북은 그 상태에서 실제로 굴리려 하면 무슨 일이 일어나는지 확인하는
+    # 시험 전용 픽스처다 — Cairn 자체를 쓰지 않는 이유는 Cairn의 실제
+    # resolution_method가 나중에 바뀌어도(계산기가 생기면) 이 회귀 시험이
+    # 조용히 뜻을 잃지 않게, 계산기 부재라는 조건 자체를 이 픽스처가 직접
+    # 표현하기 위해서다.
+    resolution_method=D20_ROLL_UNDER,
+    grade_bands=(GradeBand(name="pass", counts_as_failure=False, margin_at_least=0),),
+    resource_axes=(),
+    check_trigger_mode="no_dice",
+)
+
+
+# D20_ROLL_UNDER 도크스트링(rules_core/rulebook.py)의 주장 — "계산기가 없는
+# 판정 방식으로 실제 판정을 시도하면 조용히 다른 계산기로 대체되지 않고
+# CommandRejected로 눈에 보이게 멈춘다" — 을 이 시험이 못 박는다. 이 시험이
+# 없으면 그 도크스트링은 검증되지 않은 주장일 뿐이다(11-04 Task 0
+# declare-only 승인 조건).
+async def test_rulebook_with_no_registered_resolver_is_rejected_not_silently_substituted(
+    tmp_db_path,
+):
+    RULEBOOKS[_NO_RESOLVER_RULEBOOK_ID] = _NO_RESOLVER_RULEBOOK
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            with pytest.raises(CommandRejected) as exc_info:
+                await actor.submit(
+                    ResolveCheck(
+                        move="계산기 없는 판정 방식으로 굴리기",
+                        modifiers=(),
+                        target=10,
+                        rulebook_id=_NO_RESOLVER_RULEBOOK_ID,
+                        person_id="bram",
+                        character_id="bram",
+                    )
+                )
+            assert D20_ROLL_UNDER in str(exc_info.value)
+        finally:
+            await actor.stop()
+            store.close()
+
+        assert _read_events(tmp_db_path) == []
+    finally:
+        del RULEBOOKS[_NO_RESOLVER_RULEBOOK_ID]
 
 
 async def test_caused_by_seq_must_reference_an_existing_seq_in_this_session(tmp_db_path):
