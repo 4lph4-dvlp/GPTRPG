@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 11
 current_phase_name: rulebook-vocabulary
 status: executing
-stopped_at: Completed 11-04-PLAN.md
-last_updated: "2026-08-16T11:30:35.026Z"
+stopped_at: Completed 11-06-PLAN.md
+last_updated: "2026-08-16T15:14:01.861Z"
 last_activity: 2026-08-15
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 22
-  completed_plans: 20
+  completed_plans: 21
   percent: 27
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 11 (rulebook-vocabulary) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-08-15 — Phase 11 execution started
 
@@ -39,7 +39,7 @@ Last activity: 2026-08-15 — Phase 11 execution started
 > (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
 > 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
 
-Progress: [█████████░] 91%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -106,6 +106,7 @@ Progress: [█████████░] 91%
 | Phase 11 P03 | ~25min (Task1-2) + checkpoint overnight wait | 3 tasks | 5 files |
 | Phase 11 P05 | ~20min | 3 tasks | 11 files |
 | Phase 11 P04 | ~50min | 3 tasks | 14 files |
+| Phase 11 P06 | ~3시간20분(사람 확인 대기 포함) | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -213,6 +214,8 @@ Progress: [█████████░] 91%
 - [Phase ?]: 11-04: Cairn(CC BY-SA 4.0)을 플랫폼 그릇 변경 없이 세 번째 룰북으로 등록(D-14) — named_slots(10칸 소지품) 형태를 실제 데이터로 첫 실증
 - [Phase ?]: 11-04: check_trigger_mode(declared_list/no_dice/gm_discretion) 신설(D-12) — 빈 판정 트리거 목록의 두 갈래를 룰북이 명시적으로 선택하게 강제
 - [Phase ?]: 11-04 [접어넣은 todo]: Cairn은 default_stat 벽에 부딪히지 않음(무브 목록 자체가 없음) — 그래도 MoveDecl.default_stat을 str | None으로 넓혀 던전월드 defy_danger/aid_or_interfere를 원래 의도(None)로 되돌림, 11-02 편차 해소
+- [Phase ?]: 11-06: proceed()의 caused_by_seq를 declare_seq로 고정(확인·판정 사건이 없는 경로), check_summary 자리에 NO_CHECK_SUMMARY 고정 문장(SAFE-03 울타리 우회 방지), no_check 화면에 다시 쓰기 버튼 없음(D-10 결정 2)
+- [Phase ?]: 11-06 [Task 3 관문에서 발견, Rule 2]: groupTurns.isConfirmedTurn을 isVisibleTurn으로 확장(확인 또는 서사 있음) — proceed 턴이 이야기 화면에 안 보이던 결함 수정. 이 저장소 최초 프론트엔드 단위 시험(vitest) 도입
 
 ### Pending Todos
 
@@ -268,8 +271,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-16T11:30:34.988Z
-Stopped at: Completed 11-04-PLAN.md
+Last session: 2026-08-16T15:14:01.825Z
+Stopped at: Completed 11-06-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
