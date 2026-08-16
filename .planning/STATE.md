@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 11
-current_phase_name: rulebook-vocabulary
-status: verifying
+current_phase: 12.1
+current_phase_name: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+status: planning
 stopped_at: Completed 11-07-PLAN.md — Phase 11 전체 계획 7/7 완료
-last_updated: "2026-08-16T16:28:56.626Z"
-last_activity: 2026-08-15
-last_activity_desc: Phase 11 execution started
+last_updated: "2026-08-16T19:05:31.791Z"
+last_activity: 2026-08-17
+last_activity_desc: Phase 11 complete, transitioned to Phase 12.1
 progress:
   total_phases: 11
   completed_phases: 4
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 11 (rulebook-vocabulary) — EXECUTING
-Plan: 7 of 7
-Status: Phase complete — ready for verification
-Last activity: 2026-08-15 — Phase 11 execution started
+Phase: 12.1 — 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-17 — Phase 11 complete, transitioned to Phase 12.1
 
 > 라우팅 정정: `phase.complete`가 12.1을 다음으로 골랐으나 12.1은 ROADMAP상 **Phase 11·12에 의존**한다
 > (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
@@ -45,7 +45,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 33 (M0 누적)
+- Total plans completed: 40 (M0 누적)
 - Average duration: -
 - Total execution time: 0.0 hours (v1.1 기준 — 아직 실행 없음)
 
@@ -60,6 +60,7 @@ Progress: [██████████] 100%
 | 05 (M0) | 4/6, 보류 | - | - |
 | 08 | 4 | - | - |
 | 10 | 7 | - | - |
+| 11 | 7 | - | - |
 
 **Recent Trend:**
 
