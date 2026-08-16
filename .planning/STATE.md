@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 11
 current_phase_name: rulebook-vocabulary
 status: executing
-stopped_at: Completed 11-02-PLAN.md
-last_updated: "2026-08-15T09:16:20.805Z"
+stopped_at: Completed 11-03-PLAN.md
+last_updated: "2026-08-16T10:22:51.269Z"
 last_activity: 2026-08-15
 last_activity_desc: Phase 11 execution started
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 22
-  completed_plans: 17
+  completed_plans: 18
   percent: 27
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 11 (rulebook-vocabulary) — EXECUTING
-Plan: 3 of 7
+Plan: 4 of 7
 Status: Ready to execute
 Last activity: 2026-08-15 — Phase 11 execution started
 
@@ -39,7 +39,7 @@ Last activity: 2026-08-15 — Phase 11 execution started
 > (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
 > 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
 
-Progress: [████████░░] 77%
+Progress: [████████░░] 82%
 
 ## Performance Metrics
 
@@ -103,6 +103,7 @@ Progress: [████████░░] 77%
 | Phase 10 P07 | ~20min | 3 tasks | 7 files |
 | Phase 11 P01 | ~45min | 2 tasks | 15 files |
 | Phase 11 P02 | ~35min | 3 tasks | 5 files |
+| Phase 11 P03 | ~25min (Task1-2) + checkpoint overnight wait | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -199,6 +200,9 @@ Progress: [████████░░] 77%
 - [Phase ?]: 11-02: validate_grade_bands()가 is_doubles 두 세계 x 원자 구간 스윕으로 가려짐/구멍을 등록 시점에 잡는다(QUAL-03/D-15) - grade_for_margin과 _band_matches 헬퍼를 공유해 두 판정 규칙이 구조적으로 갈라질 수 없다. 단순 겹침(DW strong_hit/weak_hit, OQ critical/success)은 정상 통과 회귀 확인
 - [Phase ?]: 11-02: validate_entity_axes/validate_move_stats + validate_registered_rulebooks가 rulebooks 패키지 임포트 시점에 개체 축/무브 축 정합성까지 함께 검사(D-01/T-11-07). _GAPPED_RULEBOOK류 런타임 RULEBOOKS 패치 시험은 이 게이트를 안 지나가 별개 방어선으로 유효
 - [Phase ?]: 11-02 [deviation, Rule 3, 사람 확인 필요]: validate_move_stats를 실제 등록에 연결하자 OpenQuest 무브 열 개의 default_stat(기술 이름)이 애초에 축으로 선언돼 있지 않았고(이미 있던 이름 그대로 축 10개 추가로 해소), 던전월드류 defy_danger/aid_or_interfere의 default_stat='상황에 맞는 능력치'(원문상 의도적 서술)가 DEX/CHA 근사치로 교체됨 - 게임 메커니즘은 안 바뀌지만(ConfirmRequest.stat이 확인 시점에 자유 선택) 룰북 설계 뉘앙스를 좁힌 판단이라 사람 확인 필요
+- [Phase ?]: 11-03: _visible_stats()가 form=="none" 축을 시트 응답 조립 단계에서 제외 — 룰북 축 선언과 개체 StatEntry.form 두 신호를 독립적으로 확인, 등록 검증 전제에 안 기댐
+- [Phase ?]: 11-03: StatusPane이 여섯 형태(numeric/clock/named_slots/tag_list/usage_die/none) 전부에 명시적 렌더 갈래를 갖춤 — clock은 ThreatClock 재사용, none은 서버가 이미 제외해 도달 불가
+- [Phase ?]: 11-03 [deviation]: 체크포인트 확인 시 실제 룰북 데이터가 numeric만 선언해 나머지 다섯 형태를 볼 화면이 없어, 저장소를 안 건드리고 서버 메모리에만 데모 캐릭터 둘을 얹어 확인 후 폐기함
 
 ### Pending Todos
 
@@ -254,8 +258,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-15T09:16:20.767Z
-Stopped at: Completed 11-02-PLAN.md
+Last session: 2026-08-16T10:22:51.232Z
+Stopped at: Completed 11-03-PLAN.md
 Traceability 갱신 완료
 Resume file: None
 
