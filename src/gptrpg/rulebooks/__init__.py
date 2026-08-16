@@ -8,6 +8,7 @@ from gptrpg.rules_core.rulebook import (
     validate_move_stats,
     validate_trigger_mode,
 )
+from gptrpg.rulebooks.cairn import CAIRN, CAIRN_EXAMPLE_ADVENTURER, CAIRN_ID
 from gptrpg.rulebooks.dungeonworld_like import (
     DUNGEONWORLD_LIKE,
     DUNGEONWORLD_LIKE_ID,
@@ -19,6 +20,7 @@ from gptrpg.rulebooks.openquest_creatures import OPENQUEST_CREATURES
 RULEBOOKS: dict[str, Rulebook] = {
     DUNGEONWORLD_LIKE_ID: DUNGEONWORLD_LIKE,
     OPENQUEST_ID: OPENQUEST,
+    CAIRN_ID: CAIRN,
 }
 
 
@@ -45,6 +47,7 @@ def get_rulebook(rulebook_id: str) -> Rulebook:
 _REGISTERED_ENTITIES_FOR_AXIS_CHECK: dict[str, tuple[Entity, ...]] = {
     DUNGEONWORLD_LIKE_ID: (EXAMPLE_SINGLE_STAT_FOE,),
     OPENQUEST_ID: OPENQUEST_CREATURES,
+    CAIRN_ID: (CAIRN_EXAMPLE_ADVENTURER,),
 }
 """등록 시점에 축 정합성을 검사할 개체 상수 — `web/characters_data.py`의
 플레이어 캐릭터 넷은 여기 없다. `rulebooks` 패키지가 `web` 패키지를

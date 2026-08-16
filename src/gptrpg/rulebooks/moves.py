@@ -9,6 +9,7 @@
 from dataclasses import dataclass
 
 from gptrpg.rulebooks import UnknownRulebook
+from gptrpg.rulebooks.cairn import CAIRN_ID
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.openquest import OPENQUEST_ID
 
@@ -169,6 +170,12 @@ OPENQUEST_MOVES: tuple[MoveDecl, ...] = (
 MOVE_CATALOGS: dict[str, tuple[MoveDecl, ...]] = {
     DUNGEONWORLD_LIKE_ID: DUNGEONWORLD_LIKE_MOVES,
     OPENQUEST_ID: OPENQUEST_MOVES,
+    # 빈 튜플이 「아직 안 채운 것」이 아니라 「이 룰북에는 목록이 없는 것이
+    # 정상」이라는 뜻이다(RULE-15) — Cairn은 진행자가 그 자리에서 판정
+    # 여부를 정하고(check_trigger_mode="gm_discretion", D-12), 고정된
+    # 무브/행동 목록이 SRD 원문에 없다. get_moves("cairn")은 예외 없이
+    # 이 빈 튜플을 그대로 돌려준다.
+    CAIRN_ID: (),
 }
 
 

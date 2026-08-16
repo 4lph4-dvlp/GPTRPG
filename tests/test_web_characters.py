@@ -70,6 +70,7 @@ def test_none_axis_excluded_from_sheet_response(web_client: TestClient) -> None:
             ResourceAxisDecl(name=hidden_axis_name, form="none", none_kind="absent"),
             ResourceAxisDecl(name=visible_axis_name, form="numeric"),
         ),
+        check_trigger_mode="no_dice",
     )
     test_character_id = "test-only-none-axis-character"
     test_entity = Entity(
@@ -107,6 +108,7 @@ def test_rulebook_with_zero_axes_returns_empty_stats(web_client: TestClient) -> 
         resolution_method=TWO_D6,
         grade_bands=(GradeBand(name="success", counts_as_failure=False),),
         resource_axes=(),
+        check_trigger_mode="no_dice",
     )
     test_character_id = "test-only-zero-axes-character"
     test_entity = Entity(

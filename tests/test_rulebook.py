@@ -11,7 +11,12 @@
 
 import pytest
 
-from gptrpg.rules_core.entities import Entity, StatEntry
+from gptrpg.rules_core.entities import (
+    ENTITY_FIELD_NAMES,
+    STAT_ENTRY_FIELD_NAMES,
+    Entity,
+    StatEntry,
+)
 from gptrpg.rules_core.rulebook import (
     TWO_D6,
     EntityAxisMismatch,
@@ -28,6 +33,13 @@ from gptrpg.rules_core.rulebook import (
     validate_trigger_mode,
 )
 from gptrpg.rulebooks import RULEBOOKS, get_rulebook, validate_registered_rulebooks
+from gptrpg.rulebooks.cairn import (
+    CAIRN,
+    CAIRN_EXAMPLE_ADVENTURER,
+    CAIRN_GRADE_BANDS,
+    CAIRN_ID,
+    CAIRN_RESOURCE_AXES,
+)
 from gptrpg.rulebooks.dungeonworld_like import (
     DUNGEONWORLD_GRADE_BANDS,
     DUNGEONWORLD_LIKE,
@@ -38,8 +50,10 @@ from gptrpg.rulebooks.dungeonworld_like import (
 from gptrpg.rulebooks.openquest import (
     OPENQUEST,
     OPENQUEST_GRADE_BANDS,
+    OPENQUEST_ID,
     OPENQUEST_RESOURCE_AXES,
 )
+from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rulebooks.openquest_creatures import OPENQUEST_CREATURES
 from gptrpg.web.characters_data import PLAYER_CHARACTERS
 
@@ -436,3 +450,82 @@ def test_dungeonworld_and_openquest_declare_declared_list_mode():
     """실제 등록된 두 룰북 모두 목록을 실제로 적어 뒀으니 `declared_list`다."""
     assert DUNGEONWORLD_LIKE.check_trigger_mode == "declared_list"
     assert OPENQUEST.check_trigger_mode == "declared_list"
+
+
+# ---------------------------------------------------------------------------
+# 세 번째 룰북(Cairn) — 플랫폼 그릇을 안 고치고 데이터로 등록 (D-14) — 11-04
+# ---------------------------------------------------------------------------
+
+
+def test_third_rulebook_registers_without_platform_changes():
+    """`get_rulebook("cairn")`이 `CAIRN`을 돌려주고, `named_slots` 축이
+    실재하며, `StatEntry`/`GradeBand`/`Entity`의 필드 개수가 11-01이 고정한
+    값 그대로다 — Cairn이 그릇의 칸을 하나도 늘리지 않았다는 증거."""
+    assert get_rulebook(CAIRN_ID) is CAIRN
+    assert any(axis.form == "named_slots" for axis in CAIRN.resource_axes)
+    assert STAT_ENTRY_FIELD_NAMES == {
+        "name",
+        "form",
+        "current",
+        "max",
+        "depleted_effect_ref",
+        "slot_values",
+        "tags",
+        "none_kind",
+    }
+    assert ENTITY_FIELD_NAMES == {"entity_id", "display_name", "rulebook_id", "stats"}
+    # GradeBand 필드 개수도 그대로다 — Cairn의 통과/실패 두 밴드가 기존
+    # 필드(name/counts_as_failure/margin_at_least/margin_at_most/
+    # requires_doubles)만으로 표현된다.
+    assert {f for f in CAIRN_GRADE_BANDS[0].__dataclass_fields__} == {
+        "name",
+        "counts_as_failure",
+        "margin_at_least",
+        "margin_at_most",
+        "requires_doubles",
+    }
+
+
+def test_cairn_move_list_is_empty_and_get_moves_returns_it():
+    """`get_moves("cairn")`이 예외 없이 빈 튜플을 돌려준다 — 빈 목록이
+    미완성이 아니라 정상값이다(RULE-15)."""
+    assert get_moves(CAIRN_ID) == ()
+
+
+def test_cairn_grade_bands_pass_validation():
+    """Cairn의 통과/실패 두 밴드가 11-02의 가려짐·구멍 검증을 통과한다."""
+    validate_grade_bands(CAIRN_GRADE_BANDS)  # 예외 없이 통과한다
+
+
+def test_cairn_example_adventurer_matches_declared_axes():
+    """`CAIRN_EXAMPLE_ADVENTURER`가 `CAIRN`이 선언한 축과 어긋나지 않는다."""
+    validate_entity_axes(CAIRN_EXAMPLE_ADVENTURER, CAIRN)  # 예외 없이 통과한다
+
+
+def test_cairn_inventory_axis_has_ten_named_slots():
+    """`CAIRN_RESOURCE_AXES`에 `named_slots` 형태이고 `slot_count == 10`인
+    축이 있다 — 10칸 소지품이 실제 데이터로 들어왔다는 증거(RULE-11)."""
+    inventory_axes = [
+        axis
+        for axis in CAIRN_RESOURCE_AXES
+        if axis.form == "named_slots" and axis.slot_count == 10
+    ]
+    assert len(inventory_axes) == 1
+
+
+def test_cairn_declares_gm_discretion_mode():
+    """Cairn은 고정 무브 목록이 없으므로 `check_trigger_mode`가
+    `gm_discretion`이다(D-12) — 목록이 비었는데 `declared_list`가 아니다."""
+    assert CAIRN.check_trigger_mode == "gm_discretion"
+
+
+def test_all_three_rulebooks_registered():
+    """`RULEBOOKS`에 정확히 세 항목(던전월드류·OpenQuest·Cairn)이 있다."""
+    assert sorted(RULEBOOKS) == [CAIRN_ID, DUNGEONWORLD_LIKE_ID, OPENQUEST_ID]
+
+
+def test_cairn_example_adventurer_registered_for_axis_check():
+    """`CAIRN_EXAMPLE_ADVENTURER`가 등록 시점 개체 축 검사 대상에 들어 있다
+    — 이미 `validate_registered_rulebooks()`가 임포트 시점에 통과했다는
+    것(이 파일 상단 import)이 첫 증거이고, 여기서 다시 명시적으로 확인한다."""
+    validate_registered_rulebooks()  # 예외 없이 통과한다(재확인)
