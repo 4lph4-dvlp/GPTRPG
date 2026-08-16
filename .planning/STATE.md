@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 12.1
-current_phase_name: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+current_phase: 12
+current_phase_name: 능력치 · 자원 변화 · 소지품
 status: planning
 stopped_at: Completed 11-07-PLAN.md — Phase 11 전체 계획 7/7 완료
 last_updated: "2026-08-16T19:05:31.791Z"
 last_activity: 2026-08-17
-last_activity_desc: Phase 11 complete, transitioned to Phase 12.1
+last_activity_desc: Phase 11 complete, transitioned to Phase 12
 progress:
   total_phases: 11
   completed_phases: 4
@@ -30,14 +30,16 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 12.1 — 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+Phase: 12 — 능력치 · 자원 변화 · 소지품
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-08-17 — Phase 11 complete, transitioned to Phase 12.1
+Last activity: 2026-08-17 — Phase 11 complete, transitioned to Phase 12
 
-> 라우팅 정정: `phase.complete`가 12.1을 다음으로 골랐으나 12.1은 ROADMAP상 **Phase 11·12에 의존**한다
-> (「담을 그릇 — 자원 축 표현」·「StatEntry 쓰기 경로」). 11·12는 아직 단계 디렉터리가 없어
-> 도구가 건너뛴 것이므로 로드맵 순서대로 11을 다음으로 되돌렸다.
+> 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
+> 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
+> (「StatEntry 쓰기 경로」)**를 적고 있다. 도구가 12를 건너뛰는 이유는 `.planning/phases/`에
+> `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
+> **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
 Progress: [██████████] 100%
 
