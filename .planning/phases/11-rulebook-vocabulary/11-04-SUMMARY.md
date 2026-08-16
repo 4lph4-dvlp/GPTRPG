@@ -13,15 +13,15 @@ requires:
 provides:
   - "src/gptrpg/rulebooks/cairn.py — 세 번째 룰북(CC BY-SA 4.0), 플랫폼 그릇 변경 없이 등록"
   - "Rulebook.check_trigger_mode(declared_list/no_dice/gm_discretion) + validate_trigger_mode — 빈 트리거 목록의 두 갈래를 룰북이 명시적으로 선택(D-12)"
-  - "D20_ROLL_UNDER 판정 방식 이름 상수 — 계산기는 아직 없고 CommandRejected로 눈에 보이게 멈춘다(declare-only)"
+  - "D20_ROLL_UNDER 판정 방식 이름 상수 — 계산기는 아직 없고 CommandRejected로 눈에 보이게 멈춘다는 것이 회귀 시험으로 못박혀 있다(declare-only)"
   - "MoveDecl.default_stat: str | None — '그때그때 고른다'는 정상값(11-02 편차 해소)"
 affects: [11-05, 11-06, 11-07, phase-12]
 
 # Actuals (#2632)
 actuals:
-  tokens: 11094
+  tokens: 11221
   tasks: 3
-  commits: 5
+  commits: 6
 
 # Tech tracking
 tech-stack:
@@ -143,6 +143,16 @@ coverage:
     verification: []
     human_judgment: true
     rationale: "이것은 '플랫폼 그릇을 안 고치고 데이터로 넣는다'는 이 계획의 전제에 대한 정직성 판단이다 — 자동 시험으로 참/거짓을 가릴 수 있는 항목이 아니라, 기록된 근거(Cairn의 MOVE_CATALOGS 항목이 빈 튜플이라는 사실)가 실제로 정직한 설명인지 사람이 확인해야 한다."
+  - id: D9
+    description: "declare-only 결정(Task 0)의 안전 근거인 '계산기가 없는 판정 방식으로 실제 판정을 시도하면 조용히 대체되지 않고 CommandRejected로 눈에 보이게 멈춘다'는 것이 회귀 시험으로 못박혀 있다 — 오케스트레이터 지적으로 발견된 간극(도크스트링은 시험이 있다고 주장했으나 실제로는 없었다) 해소"
+    verification:
+      - kind: unit
+        ref: "tests/test_session_actor.py#test_rulebook_with_no_registered_resolver_is_rejected_not_silently_substituted"
+        status: pass
+      - kind: unit
+        ref: "동일 시험이 CommandRejected 메시지에 D20_ROLL_UNDER 판정 방식 이름이 포함되는지, 그리고 거부 후 사건 기록에 아무것도 안 쌓이는지(_read_events == [])까지 확인"
+        status: pass
+    human_judgment: false
 
 # Metrics
 duration: ~50min (Task 0 체크포인트 대기 시간 제외)
@@ -163,7 +173,7 @@ status: complete
 
 ## Accomplishments
 
-- **Task 0(체크포인트, 사용자 승인 `declare-only`):** Cairn의 d20 계산기는 이번 단계에 안 만든다. `D20_ROLL_UNDER` 이름만 신설했고, 실제로 굴리려 하면 `session_actor.actor.CommandRejected`("알 수 없는 판정 방식")로 눈에 보이게 멈춘다 — 조용한 구멍이 아니라 문서화된 설계다.
+- **Task 0(체크포인트, 사용자 승인 `declare-only`):** Cairn의 d20 계산기는 이번 단계에 안 만든다. `D20_ROLL_UNDER` 이름만 신설했고, 실제로 굴리려 하면 `session_actor.actor.CommandRejected`("알 수 없는 판정 방식")로 눈에 보이게 멈춘다 — 조용한 구멍이 아니라 문서화된 설계다. **이 사실 자체가 회귀 시험(`test_rulebook_with_no_registered_resolver_is_rejected_not_silently_substituted`)으로 못박혀 있다** — 최초 제출 시 도크스트링만 이 사실을 주장하고 시험이 없었던 간극을 오케스트레이터가 지적해 이번 rework에서 추가했다(아래 Deviations 참조).
 - **D-12(빈 트리거 목록의 두 갈래):** `CheckTriggerMode`(`declared_list`/`no_dice`/`gm_discretion`) 리터럴과 `Rulebook.check_trigger_mode` 필수 필드, `InvalidTriggerMode` 예외, `validate_trigger_mode(mode, move_count)`를 신설했다. `declared_list`인데 목록이 비었거나 `no_dice`/`gm_discretion`인데 목록이 차 있으면 등록이 거부된다. 던전월드류·OpenQuest는 `declared_list`.
 - **Cairn 등록(D-14):** `src/gptrpg/rulebooks/cairn.py` 신설 — STR/DEX/WIL/Hit Protection(`numeric`) + Inventory(`named_slots`, `slot_count=10`), 통과/실패 두 `GradeBand`, `check_trigger_mode="gm_discretion"`(고정 무브 목록 없음), `CAIRN_EXAMPLE_ADVENTURER`(자체 작성 예시, SRD 유래 아님). `MOVE_CATALOGS["cairn"] = ()`로 `get_moves("cairn")`이 예외 없이 빈 튜플을 돌려준다. `git diff --stat src/gptrpg/rules_core/entities.py`가 비어 있다 — `ResourceAxisDecl`/`StatEntry`/`GradeBand`/`Entity` 어느 그릇도 칸이 안 늘었다.
 - **LICENSES.md:** OpenQuest 절과 같은 3단 구조(담고 있는 파일/필수 첨부 문구/ShareAlike 주의)로 Cairn CC BY-SA 4.0 항목을 추가했다. ShareAlike 조건이 OpenQuest의 CC BY 4.0과 다르다는 것(파생물은 같은 라이선스로만 재배포 가능)을 명시했다.
@@ -178,20 +188,21 @@ status: complete
 3. **Task 3: Cairn 라이선스 표기를 LICENSES.md에 추가한다** — `e1b1039` (docs)
 4. **접어넣은 todo: default_stat 옵셔널화** — `7fd2f03` (fix)
 5. **REQUIREMENTS.md 진행 노트 갱신** — `a7ff772` (docs)
+6. **rework: declare-only 안전 근거 회귀 시험 신설** — `a738810` (test)
 
 **Plan metadata:** 이 커밋 (SUMMARY.md 등)
 
 ## Files Created/Modified
 
 - `src/gptrpg/rulebooks/cairn.py` (신규) - Cairn SRD 선언(CC BY-SA 4.0) — `CAIRN_ID`/`CAIRN_GRADE_BANDS`/`CAIRN_RESOURCE_AXES`/`CAIRN`/`CAIRN_EXAMPLE_ADVENTURER`
-- `src/gptrpg/rules_core/rulebook.py` - `D20_ROLL_UNDER` 상수, `CheckTriggerMode` 리터럴, `Rulebook.check_trigger_mode` 필수 필드, `InvalidTriggerMode` 예외, `validate_trigger_mode()`, `validate_move_stats`가 `None`을 건너뛰도록 확장
+- `src/gptrpg/rules_core/rulebook.py` - `D20_ROLL_UNDER` 상수, `CheckTriggerMode` 리터럴, `Rulebook.check_trigger_mode` 필수 필드, `InvalidTriggerMode` 예외, `validate_trigger_mode()`, `validate_move_stats`가 `None`을 건너뛰도록 확장. `D20_ROLL_UNDER` 도크스트링이 이제 실제 회귀 시험 함수 이름을 가리킨다(rework)
 - `src/gptrpg/rulebooks/__init__.py` - `RULEBOOKS`/`_REGISTERED_ENTITIES_FOR_AXIS_CHECK`에 Cairn 추가, `validate_registered_rulebooks()`에 네 번째 검사(`validate_trigger_mode`) 연결
 - `src/gptrpg/rulebooks/moves.py` - `MOVE_CATALOGS["cairn"] = ()`, `MoveDecl.default_stat: str | None`, `defy_danger`/`aid_or_interfere`를 `None`으로 되돌림
 - `src/gptrpg/rulebooks/dungeonworld_like.py` / `openquest.py` - `Rulebook(...)`에 `check_trigger_mode="declared_list"` 추가
 - `src/gptrpg/agents/prompt_assembly.py` - `_format_moves`가 `default_stat is None`일 때 "상황에 맞게 고른다"로 렌더링
 - `LICENSES.md` - `## Cairn (CC BY-SA 4.0)` 절 신설
 - `tests/test_rulebook.py` - D-12(5건)·Cairn(7건) 시험 신설, 기존 ad-hoc `Rulebook(...)` 호출부에 `check_trigger_mode` 보강
-- `tests/test_session_actor.py` - `_GAPPED_RULEBOOK`에 `check_trigger_mode="no_dice"` 추가
+- `tests/test_session_actor.py` - `_GAPPED_RULEBOOK`에 `check_trigger_mode="no_dice"` 추가. `_NO_RESOLVER_RULEBOOK`(시험 전용, `D20_ROLL_UNDER` 선언) + `test_rulebook_with_no_registered_resolver_is_rejected_not_silently_substituted` 신설(rework) — 계산기 없는 판정 방식이 `CommandRejected`로 거부되고 사건 기록에 아무것도 안 쌓이는 것을 확인
 - `tests/test_web_characters.py` - ad-hoc `Rulebook(...)` 호출부 2곳에 `check_trigger_mode="no_dice"` 추가(계획 `<files>` 목록 밖, Rule 3)
 - `tests/test_action_classifier.py` - `test_format_moves_renders_none_default_stat_as_situational_choice` 신설
 - `.planning/todos/completed/2026-08-15-move-default-stat-optional.md` - `pending/`에서 이동, Resolved 절 추가
@@ -232,12 +243,23 @@ Cairn에는 애초에 `MoveDecl.default_stat`이라는 필드 자리 자체가 �
 
 ---
 
-**Total deviations:** 1 auto-fixed (Rule 3 - Blocking) + 1 folded-todo 실증 기록(위 참조)
+**2. [Rework - Orchestrator rejected first submission] `D20_ROLL_UNDER` 도크스트링이 존재하지 않는 시험을 있다고 주장했다**
+- **Found during:** 마감 보고 후 오케스트레이터 검증(`grep -rn "D20_ROLL_UNDER" tests/` → 0건)
+- **Issue:** `D20_ROLL_UNDER` 상수 도크스트링이 "이 상태는 `tests/test_session_actor.py`의 회귀 시험으로 고정되어 있다"고 적었지만, 실제로는 그런 시험이 없었다 — `declare-only` 결정이 안전하다는 근거의 전부(계산기 없는 판정 방식이 조용히 대체되지 않고 눈에 보이게 거부된다)가 검증되지 않은 채로 마감 보고됐다. 도크스트링의 거짓 주장은 시험이 없는 것보다 나쁘다 — 나중에 읽는 사람이 커버리지가 있다고 믿게 만든다.
+- **Fix:** `tests/test_session_actor.py`에 `_NO_RESOLVER_RULEBOOK`(시험 전용, `D20_ROLL_UNDER` 선언)과 `test_rulebook_with_no_registered_resolver_is_rejected_not_silently_substituted`를 신설 — 이 파일의 기존 `_GAPPED_RULEBOOK`/`test_rulebook_with_incomplete_grade_bands_is_rejected_not_a_raw_traceback` 관례를 그대로 따랐다. `CommandRejected`가 나고 메시지에 `D20_ROLL_UNDER` 판정 방식 이름이 담기며, 사건 기록에 아무것도 안 쌓인다는 것(`_read_events == []`)까지 확인한다. `D20_ROLL_UNDER` 도크스트링을 실제 시험 함수 이름을 가리키도록 갱신해 이제 검증 가능한 주장이 됐다.
+- **Files modified:** `tests/test_session_actor.py`, `src/gptrpg/rules_core/rulebook.py`
+- **Verification:** `uv run pytest -q` 896 passed, `uv run lint-imports` 4 kept/0 broken
+- **Committed in:** `a738810`
+- **하지 않은 것:** `D20_ROLL_UNDER` 계산기 구현(오케스트레이터가 명시적으로 금지), 도크스트링 약화로 주장을 낮추는 방식(조건은 시험을 만드는 것이었다)
+
+---
+
+**Total deviations:** 1 auto-fixed (Rule 3 - Blocking) + 1 folded-todo 실증 기록(위 참조) + 1 rework(도크스트링-시험 간극 해소)
 **Impact on plan:** 계획서 자신의 `<verify>`(`uv run pytest -q` 전체 초록)가 요구하는 최소 조건을 충족하기 위해 구조적으로 불가피했다. 범위 이탈이 아니다.
 
 ## Issues Encountered
 
-None — 세 태스크와 접어넣은 todo 모두 계획서/todo 파일의 지시를 그대로 따라 실행했고, 위 한 건의 auto-fix 외에 추가 버그는 없었다.
+None — 세 태스크와 접어넣은 todo 모두 계획서/todo 파일의 지시를 그대로 따라 실행했고, 위 두 건(auto-fix 1건 + rework 1건) 외에 추가 버그는 없었다. rework는 오케스트레이터의 정당한 지적이었다 — 첫 제출 시 도크스트링이 검증되지 않은 커버리지 주장을 담고 있었다.
 
 ## User Setup Required
 
@@ -245,7 +267,8 @@ None - 외부 서비스 설정 불필요.
 
 ## Verification Results
 
-- `uv run pytest -q` — **895 passed**, 2 warnings(기존 `starlette`/`google-genai` 사용 경고, 이 계획과 무관)
+- `uv run pytest -q` — **896 passed**, 2 warnings(기존 `starlette`/`google-genai` 사용 경고, 이 계획과 무관)
+- `uv run pytest tests/test_session_actor.py -q -k no_registered_resolver` — **1 passed** (declare-only 안전 근거 회귀 시험)
 - `uv run lint-imports` — **Contracts: 4 kept, 0 broken**, 종료 코드 0
 - `git diff --stat src/gptrpg/rules_core/entities.py` — **빈 출력** (그릇 칸이 하나도 안 늘었다)
 - `python -c "from gptrpg.rulebooks import RULEBOOKS; print(sorted(RULEBOOKS))"` → `['cairn', 'dungeonworld_like', 'openquest']`
@@ -258,12 +281,14 @@ None - 외부 서비스 설정 불필요.
 - **RULE-15**: `[ ]` In Progress로 유지 — Cairn이 빈 트리거 목록 경로를 실제 데이터로 실증했다. `no_check`가 실제로 "판정 없이 서사가 이어지는" 화면으로 가는 것은 여전히 11-06 몫이다.
 - **QUAL-03**: 이미 11-02에서 Complete — 이번 계획은 Cairn으로 회귀 확인만 추가했다(체크박스 변경 없음).
 - 다음 계획(11-05는 이미 완료됨 — STATE.md 기준 다음은 11-06)이 착수 전에 알아야 할 것: `MoveDecl.default_stat`이 이제 `None`일 수 있으므로, 이 필드를 다루는 새 코드는 `None` 갈래를 명시적으로 처리해야 한다(`prompt_assembly.py`가 이미 그 예시를 남겼다).
+- **declare-only의 안전 근거가 이제 코드로 못박혀 있다** — Cairn류(계산기 없는 판정 방식)로 실제 판정을 시도하면 `CommandRejected`로 거부되고 사건 기록에 아무것도 안 남는다는 것이 회귀 시험으로 고정됐다. 후속 계획이 실제 d20 계산기를 붙일 때 이 시험이 자연스럽게 "이제 거부가 아니라 실제 판정이 일어나야 한다"는 신호로 실패하며 알려준다.
 - 블로커 없음.
 
 ## Self-Check: PASSED
 
-- 파일 존재: `src/gptrpg/rulebooks/cairn.py`, `src/gptrpg/rules_core/rulebook.py`, `src/gptrpg/rulebooks/__init__.py`, `src/gptrpg/rulebooks/moves.py`, `LICENSES.md`, `tests/test_rulebook.py`, `.planning/todos/completed/2026-08-15-move-default-stat-optional.md` 전부 확인됨
-- 커밋 존재: `9e66374`, `f4a1fc2`, `e1b1039`, `7fd2f03`, `a7ff772` 전부 `git log --oneline --all`에서 확인됨
+- 파일 존재: `src/gptrpg/rulebooks/cairn.py`, `src/gptrpg/rules_core/rulebook.py`, `src/gptrpg/rulebooks/__init__.py`, `src/gptrpg/rulebooks/moves.py`, `LICENSES.md`, `tests/test_rulebook.py`, `tests/test_session_actor.py`, `.planning/todos/completed/2026-08-15-move-default-stat-optional.md` 전부 확인됨
+- 커밋 존재: `9e66374`, `f4a1fc2`, `e1b1039`, `7fd2f03`, `a7ff772`, `a738810` 전부 `git log --oneline --all`에서 확인됨
+- rework 시험 재확인: `uv run pytest tests/test_session_actor.py -q -k no_registered_resolver` → 1 passed
 
 ---
 *Phase: 11-rulebook-vocabulary*
