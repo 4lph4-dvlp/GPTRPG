@@ -1,0 +1,292 @@
+{
+  "ai_calls": 85,
+  "cached_prompt_tokens": 0,
+  "character_resource_ops": {},
+  "check_count": 38,
+  "clock_advances": 4,
+  "clock_segment": 4,
+  "completion_tokens": 24368,
+  "confirm_to_declare": {
+    "2": 0,
+    "18": 16,
+    "40": 38,
+    "66": 64,
+    "84": 82,
+    "113": 111,
+    "144": 142,
+    "163": 161,
+    "193": 191,
+    "209": 207,
+    "232": 230,
+    "263": 261,
+    "290": 288,
+    "313": 311,
+    "334": 332,
+    "361": 359,
+    "391": 389,
+    "422": 420,
+    "441": 439,
+    "458": 456,
+    "477": 475,
+    "493": 491,
+    "506": 504,
+    "528": 526,
+    "545": 543,
+    "576": 574,
+    "599": 597,
+    "603": 601,
+    "629": 627,
+    "673": 671,
+    "677": 675,
+    "726": 724,
+    "734": 730,
+    "788": 786,
+    "797": 795,
+    "801": 799,
+    "829": 827,
+    "876": 874
+  },
+  "confirmed_declares": {
+    "0": {
+      "confirm_seq": 2,
+      "move": "defy_danger",
+      "resolve_seq": 3,
+      "stat": "WIS"
+    },
+    "16": {
+      "confirm_seq": 18,
+      "move": "defy_danger",
+      "resolve_seq": 19,
+      "stat": "WIS"
+    },
+    "38": {
+      "confirm_seq": 40,
+      "move": "defy_danger",
+      "resolve_seq": 41,
+      "stat": "CHA"
+    },
+    "64": {
+      "confirm_seq": 66,
+      "move": "defend",
+      "resolve_seq": 67,
+      "stat": "CON"
+    },
+    "82": {
+      "confirm_seq": 84,
+      "move": "defy_danger",
+      "resolve_seq": 85,
+      "stat": "CON"
+    },
+    "111": {
+      "confirm_seq": 113,
+      "move": "defy_danger",
+      "resolve_seq": 114,
+      "stat": "STR"
+    },
+    "142": {
+      "confirm_seq": 144,
+      "move": "defy_danger",
+      "resolve_seq": 145,
+      "stat": "WIS"
+    },
+    "161": {
+      "confirm_seq": 163,
+      "move": "defy_danger",
+      "resolve_seq": 164,
+      "stat": "CHA"
+    },
+    "191": {
+      "confirm_seq": 193,
+      "move": "discern_realities",
+      "resolve_seq": 194,
+      "stat": "WIS"
+    },
+    "207": {
+      "confirm_seq": 209,
+      "move": "hack_and_slash",
+      "resolve_seq": 210,
+      "stat": "STR"
+    },
+    "230": {
+      "confirm_seq": 232,
+      "move": "defy_danger",
+      "resolve_seq": 233,
+      "stat": "CHA"
+    },
+    "261": {
+      "confirm_seq": 263,
+      "move": "aid_or_interfere",
+      "resolve_seq": 264,
+      "stat": "CHA"
+    },
+    "288": {
+      "confirm_seq": 290,
+      "move": "defy_danger",
+      "resolve_seq": 291,
+      "stat": "CHA"
+    },
+    "311": {
+      "confirm_seq": 313,
+      "move": "defy_danger",
+      "resolve_seq": 314,
+      "stat": "WIS"
+    },
+    "332": {
+      "confirm_seq": 334,
+      "move": "parley",
+      "resolve_seq": 335,
+      "stat": "CHA"
+    },
+    "359": {
+      "confirm_seq": 361,
+      "move": "aid_or_interfere",
+      "resolve_seq": 362,
+      "stat": "CHA"
+    },
+    "389": {
+      "confirm_seq": 391,
+      "move": "defy_danger",
+      "resolve_seq": 392,
+      "stat": "WIS"
+    },
+    "420": {
+      "confirm_seq": 422,
+      "move": "defend",
+      "resolve_seq": 423,
+      "stat": "CON"
+    },
+    "439": {
+      "confirm_seq": 441,
+      "move": "defy_danger",
+      "resolve_seq": 442,
+      "stat": "CHA"
+    },
+    "456": {
+      "confirm_seq": 458,
+      "move": "defy_danger",
+      "resolve_seq": 459,
+      "stat": "CON"
+    },
+    "475": {
+      "confirm_seq": 477,
+      "move": "defy_danger",
+      "resolve_seq": 478,
+      "stat": "CON"
+    },
+    "491": {
+      "confirm_seq": 493,
+      "move": "defy_danger",
+      "resolve_seq": 494,
+      "stat": "CHA"
+    },
+    "504": {
+      "confirm_seq": 506,
+      "move": "defy_danger",
+      "resolve_seq": 507,
+      "stat": "CON"
+    },
+    "526": {
+      "confirm_seq": 528,
+      "move": "parley",
+      "resolve_seq": 529,
+      "stat": "CHA"
+    },
+    "543": {
+      "confirm_seq": 545,
+      "move": "defy_danger",
+      "resolve_seq": 546,
+      "stat": "WIS"
+    },
+    "574": {
+      "confirm_seq": 576,
+      "move": "defy_danger",
+      "resolve_seq": 577,
+      "stat": "CHA"
+    },
+    "597": {
+      "confirm_seq": 599,
+      "move": "parley",
+      "resolve_seq": 600,
+      "stat": "CHA"
+    },
+    "601": {
+      "confirm_seq": 603,
+      "move": "spout_lore",
+      "resolve_seq": 604,
+      "stat": "INT"
+    },
+    "627": {
+      "confirm_seq": 629,
+      "move": "parley",
+      "resolve_seq": 630,
+      "stat": "CHA"
+    },
+    "671": {
+      "confirm_seq": 673,
+      "move": "parley",
+      "resolve_seq": 674,
+      "stat": "CHA"
+    },
+    "675": {
+      "confirm_seq": 677,
+      "move": "parley",
+      "resolve_seq": 678,
+      "stat": "CHA"
+    },
+    "724": {
+      "confirm_seq": 726,
+      "move": "spout_lore",
+      "resolve_seq": 727,
+      "stat": "INT"
+    },
+    "730": {
+      "confirm_seq": 734,
+      "move": "parley",
+      "resolve_seq": 735,
+      "stat": "CHA"
+    },
+    "786": {
+      "confirm_seq": 788,
+      "move": "spout_lore",
+      "resolve_seq": 789,
+      "stat": "INT"
+    },
+    "795": {
+      "confirm_seq": 797,
+      "move": "parley",
+      "resolve_seq": 798,
+      "stat": "CHA"
+    },
+    "799": {
+      "confirm_seq": 801,
+      "move": "defy_danger",
+      "resolve_seq": 802,
+      "stat": "WIS"
+    },
+    "827": {
+      "confirm_seq": 829,
+      "move": "defy_danger",
+      "resolve_seq": 830,
+      "stat": "CHA"
+    },
+    "874": {
+      "confirm_seq": 876,
+      "move": "defend",
+      "resolve_seq": 877,
+      "stat": "CON"
+    }
+  },
+  "declare_no_check": {},
+  "declare_owners": {},
+  "fails_since_clock": 0,
+  "failure_count": 12,
+  "last_grade": "strong_hit",
+  "last_seq": 894,
+  "narration_count": 682,
+  "occupied_by": {},
+  "prompt_tokens": 87701,
+  "resource_change_by_cause": {},
+  "session_id": "session1",
+  "total_tokens": 112069,
+  "turn_count": 47
+}

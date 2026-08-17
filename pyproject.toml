@@ -80,3 +80,6 @@ select = ["E4", "E7", "E9", "F", "TID251"]
 # 경로가 필요하다. 이 금지 목록은 `rules_core`를 순수하게 지키기 위한 것이고
 # 이 층은 그 아래가 아니다(.importlinter contract:2/4가 경계를 따로 강제한다).
 "src/gptrpg/imagery/*" = ["TID251"]
+# 일회성 운영 스크립트(픽스처 재생성 등)도 rules_core 밖이다 — cli/agents와
+# 같은 이유로 파일 경로를 직접 다뤄야 한다(12-03-PLAN.md Task 1).
+"scripts/*" = ["TID251"]
