@@ -284,7 +284,7 @@ _GAPPED_RULEBOOK = Rulebook(
     rulebook_id=_GAPPED_RULEBOOK_ID,
     display_name="갭 테스트 전용 (margin>=0만 선언, 실패 구간 없음)",
     resolution_method=D100_ROLL_UNDER,
-    grade_bands=(GradeBand(name="success", counts_as_failure=False, margin_at_least=0),),
+    grade_bands=(GradeBand(name="success", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),),
     # 이 시험 전용 룰북은 축이 없는 것이 맞다 — 「없다」를 명시하는 것이
     # D-02가 요구하는 모양이다(resource_axes는 기본값 없는 필수 필드).
     resource_axes=(),
@@ -347,7 +347,7 @@ _NO_RESOLVER_RULEBOOK = Rulebook(
     # 조용히 뜻을 잃지 않게, 계산기 부재라는 조건 자체를 이 픽스처가 직접
     # 표현하기 위해서다.
     resolution_method=D20_ROLL_UNDER,
-    grade_bands=(GradeBand(name="pass", counts_as_failure=False, margin_at_least=0),),
+    grade_bands=(GradeBand(name="pass", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),),
     resource_axes=(),
     check_trigger_mode="no_dice",
 )

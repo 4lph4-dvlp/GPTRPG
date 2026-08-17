@@ -73,12 +73,12 @@ def test_grading_declaration_order_determines_critical_over_success():
     등급 판정이 순서에 의존한다는 것을 직접 보여준다.
     """
     success_first_bands = (
-        GradeBand(name="success", counts_as_failure=False, margin_at_least=0),
+        GradeBand(name="success", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
         GradeBand(
-            name="critical", counts_as_failure=False, margin_at_least=0, requires_doubles=True
+            name="critical", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0, requires_doubles=True
         ),
-        GradeBand(name="fumble", counts_as_failure=True, margin_at_most=-1, requires_doubles=True),
-        GradeBand(name="failure", counts_as_failure=True),
+        GradeBand(name="fumble", counts_as_failure=True, succeeded=False, costs=False, margin_at_most=-1, requires_doubles=True),
+        GradeBand(name="failure", counts_as_failure=True, succeeded=False, costs=False),
     )
     band_with_normal_order = grade_for_margin(margin=0, is_doubles=True, bands=BANDS)
     band_with_success_first = grade_for_margin(margin=0, is_doubles=True, bands=success_first_bands)
@@ -88,7 +88,7 @@ def test_grading_declaration_order_determines_critical_over_success():
 
 def test_grading_no_matching_band_raises():
     """어느 밴드에도 안 맞는 선언(고의로 구멍 낸 밴드 목록)에서는 NoMatchingGradeBand가 난다."""
-    holed_bands = (GradeBand(name="only-high", counts_as_failure=False, margin_at_least=10),)
+    holed_bands = (GradeBand(name="only-high", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=10),)
     with pytest.raises(NoMatchingGradeBand):
         grade_for_margin(margin=5, is_doubles=False, bands=holed_bands)
 
@@ -130,10 +130,10 @@ def test_property_total_and_target_are_always_int(skill, modifier_value):
 # --- 수치 구간형 룰북 (성공조건 2 나머지 절반) --------------------------------
 
 NUMERIC_BAND_RULEBOOK_BANDS = (
-    GradeBand(name="3", counts_as_failure=False, margin_at_least=20),
-    GradeBand(name="2", counts_as_failure=False, margin_at_least=0),
-    GradeBand(name="1", counts_as_failure=True, margin_at_least=-20),
-    GradeBand(name="0", counts_as_failure=True),
+    GradeBand(name="3", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=20),
+    GradeBand(name="2", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
+    GradeBand(name="1", counts_as_failure=True, succeeded=False, costs=False, margin_at_least=-20),
+    GradeBand(name="0", counts_as_failure=True, succeeded=False, costs=False),
 )
 """테스트 전용 수치 구간형 등급 선언 — 이름이 숫자 문자열이고, 경계가 순수
 `margin_at_least`/`margin_at_most`만으로 표현된다. `requires_doubles`를 전혀

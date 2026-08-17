@@ -27,6 +27,7 @@ from gptrpg.rules_core.rulebook import (
     Rulebook,
     ShadowedGradeBand,
     UncoveredOutcomeGap,
+    require_band,
     validate_entity_axes,
     validate_grade_bands,
     validate_move_stats,
@@ -201,10 +202,10 @@ def test_shadowed_band_rejected():
     `ShadowedGradeBand`다 — `strong_hit`(margin>=0) 뒤의 `never`(margin>=5)는
     `strong_hit`가 이미 margin>=0을 전부 먹어서 영영 안 나온다."""
     bands = (
-        GradeBand(name="strong_hit", counts_as_failure=False, margin_at_least=0),
-        GradeBand(name="weak_hit", counts_as_failure=False, margin_at_least=-3),
-        GradeBand(name="never", counts_as_failure=False, margin_at_least=5),
-        GradeBand(name="miss", counts_as_failure=True),
+        GradeBand(name="strong_hit", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
+        GradeBand(name="weak_hit", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=-3),
+        GradeBand(name="never", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=5),
+        GradeBand(name="miss", counts_as_failure=True, succeeded=False, costs=False),
     )
     with pytest.raises(ShadowedGradeBand) as exc_info:
         validate_grade_bands(bands)
@@ -214,7 +215,7 @@ def test_shadowed_band_rejected():
 def test_hole_rejected():
     """`success`(margin>=0) 하나만 있으면 margin<0인 조합이 어느 밴드에도
     안 맞는 구멍이라 `UncoveredOutcomeGap`이다."""
-    bands = (GradeBand(name="success", counts_as_failure=False, margin_at_least=0),)
+    bands = (GradeBand(name="success", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),)
     with pytest.raises(UncoveredOutcomeGap):
         validate_grade_bands(bands)
 
@@ -229,9 +230,9 @@ def test_simple_overlap_is_legal():
     """겹치는 구간이 있어도 선언 순서로 해소되고 정수선 전체가 덮이면
     거부되지 않는다(D-15) — `strong`과 `weak`가 margin>=0에서 겹친다."""
     bands = (
-        GradeBand(name="strong", counts_as_failure=False, margin_at_least=0),
-        GradeBand(name="weak", counts_as_failure=False, margin_at_least=-3),
-        GradeBand(name="miss", counts_as_failure=True),
+        GradeBand(name="strong", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
+        GradeBand(name="weak", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=-3),
+        GradeBand(name="miss", counts_as_failure=True, succeeded=False, costs=False),
     )
     validate_grade_bands(bands)  # 예외 없이 통과한다
 
@@ -240,8 +241,8 @@ def test_touching_bands_leave_no_gap():
     """앞 밴드의 상한(`margin_at_most=-1`)과 뒤 밴드의 하한(`margin_at_least=0`)이
     정확히 맞닿으면 구멍도 가려짐도 아니다."""
     bands = (
-        GradeBand(name="fumble", counts_as_failure=True, margin_at_most=-1),
-        GradeBand(name="success", counts_as_failure=False, margin_at_least=0),
+        GradeBand(name="fumble", counts_as_failure=True, succeeded=False, costs=False, margin_at_most=-1),
+        GradeBand(name="success", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
     )
     validate_grade_bands(bands)  # 예외 없이 통과한다
 
@@ -250,18 +251,109 @@ def test_declaration_order_decides_shadowing():
     """같은 밴드 집합이라도 선언 순서를 뒤집으면 가려짐 판정이 달라진다 —
     `grade_for_margin`과 정확히 같은 「선언 순서 첫 매치」 규칙을 쓴다는 증거다."""
     catch_all_first = (
-        GradeBand(name="catch_all", counts_as_failure=True),
-        GradeBand(name="strong", counts_as_failure=False, margin_at_least=0),
+        GradeBand(name="catch_all", counts_as_failure=True, succeeded=False, costs=False),
+        GradeBand(name="strong", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
     )
     with pytest.raises(ShadowedGradeBand) as exc_info:
         validate_grade_bands(catch_all_first)
     assert exc_info.value.band_name == "strong"
 
     catch_all_last = (
-        GradeBand(name="strong", counts_as_failure=False, margin_at_least=0),
-        GradeBand(name="catch_all", counts_as_failure=True),
+        GradeBand(name="strong", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
+        GradeBand(name="catch_all", counts_as_failure=True, succeeded=False, costs=False),
     )
     validate_grade_bands(catch_all_last)  # 예외 없이 통과한다 — 순서를 바꾸면 결과가 바뀐다
+
+
+# ---------------------------------------------------------------------------
+# 등급 밴드 세 칸 독립 — 성공했나 · 대가가 붙나 · 실패로 세나 (D-13/D-14,
+# RULE-14) — 12-04
+# ---------------------------------------------------------------------------
+
+
+def test_grade_band_requires_succeeded_and_costs_with_no_default():
+    """`succeeded`/`costs`는 `counts_as_failure`와 같은 이유로 기본값이
+    없는 필수 칸이다 — 하나라도 빠뜨린 `GradeBand` 생성은 `TypeError`다."""
+    with pytest.raises(TypeError):
+        GradeBand(name="test-only", counts_as_failure=False, costs=False)  # succeeded 없음
+    with pytest.raises(TypeError):
+        GradeBand(name="test-only", counts_as_failure=False, succeeded=True)  # costs 없음
+    with pytest.raises(TypeError):
+        GradeBand(name="test-only", succeeded=True, costs=False)  # counts_as_failure 없음
+    # 셋 다 채우면 통과한다.
+    GradeBand(name="test-only", counts_as_failure=False, succeeded=True, costs=False)
+
+
+def test_succeeded_and_counts_as_failure_can_both_be_true_registration_not_rejected():
+    """`succeeded=True`이면서 `counts_as_failure=True`인 밴드를 선언해도
+    등록이 거부되지 않는다 — 「성공했는데도 상황은 나빠진다」를 쓰는
+    룰북을 표현할 수 있어야 한다는 것이 D-14가 지키려는 성질 그 자체다.
+    셋 중 어느 것도 다른 것에서 자동으로 파생되지 않는다는 직접 증거다."""
+    band = GradeBand(
+        name="pyrrhic",
+        counts_as_failure=True,
+        succeeded=True,
+        costs=True,
+        margin_at_least=0,
+    )
+    # 검증 함수(가려짐/구멍) 자체가 이 조합을 거부하지 않는다는 것도 확인한다.
+    validate_grade_bands((band, GradeBand(name="rest", counts_as_failure=True, succeeded=False, costs=False)))
+
+
+def test_dungeonworld_weak_hit_band_has_succeeded_true_costs_true_not_a_failure():
+    """`weak_hit`은 `succeeded=True, costs=True, counts_as_failure=False`다
+    — D-13이 직접 든 예이자 이 저장소가 실제로 출하하는 데이터."""
+    weak_hit = [b for b in DUNGEONWORLD_GRADE_BANDS if b.name == "weak_hit"][0]
+    assert weak_hit.succeeded is True
+    assert weak_hit.costs is True
+    assert weak_hit.counts_as_failure is False
+
+
+def test_dungeonworld_strong_hit_band_has_succeeded_true_costs_false():
+    """`strong_hit`은 이뤘고(succeeded) 대가가 없다(costs=False)."""
+    strong_hit = [b for b in DUNGEONWORLD_GRADE_BANDS if b.name == "strong_hit"][0]
+    assert strong_hit.succeeded is True
+    assert strong_hit.costs is False
+    assert strong_hit.counts_as_failure is False
+
+
+def test_dungeonworld_miss_band_has_succeeded_false_costs_true():
+    """`miss`는 못 이뤘고 대가가 붙으며 위협 시계 입력으로도 센다 — 세
+    칸이 서로 다른 값으로 각자 독립임을 보여준다."""
+    miss = [b for b in DUNGEONWORLD_GRADE_BANDS if b.name == "miss"][0]
+    assert miss.succeeded is False
+    assert miss.costs is True
+    assert miss.counts_as_failure is True
+
+
+def test_dungeonworld_counts_as_failure_values_unchanged_by_new_fields():
+    """`succeeded`/`costs` 신설이 기존 `counts_as_failure` 값을 한 글자도
+    안 바꿨다 — 기존 실패 누적·시계 동작이 이 계획 전후로 전부 같다."""
+    by_name = {b.name: b.counts_as_failure for b in DUNGEONWORLD_GRADE_BANDS}
+    assert by_name == {"strong_hit": False, "weak_hit": False, "miss": True}
+
+
+def test_openquest_counts_as_failure_values_unchanged_by_new_fields():
+    """OpenQuest도 마찬가지로 `counts_as_failure` 값이 그대로다."""
+    by_name = {b.name: b.counts_as_failure for b in OPENQUEST_GRADE_BANDS}
+    assert by_name == {
+        "critical": False,
+        "success": False,
+        "fumble": True,
+        "failure": True,
+    }
+
+
+def test_cairn_counts_as_failure_values_unchanged_by_new_fields():
+    """Cairn도 마찬가지로 `counts_as_failure` 값이 그대로다."""
+    by_name = {b.name: b.counts_as_failure for b in CAIRN_GRADE_BANDS}
+    assert by_name == {"pass": False, "fail": True}
+
+
+def test_require_band_exposes_all_three_independent_fields():
+    """이름으로 찾은 밴드에서 세 값을 전부 읽을 수 있다."""
+    band = require_band(DUNGEONWORLD_GRADE_BANDS, "weak_hit")
+    assert (band.succeeded, band.costs, band.counts_as_failure) == (True, True, False)
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +455,8 @@ def test_registration_rejects_a_shadowed_rulebook():
         display_name="가려짐 시험 전용",
         resolution_method=TWO_D6,
         grade_bands=(
-            GradeBand(name="catch_all", counts_as_failure=True),
-            GradeBand(name="strong", counts_as_failure=False, margin_at_least=0),
+            GradeBand(name="catch_all", counts_as_failure=True, succeeded=False, costs=False),
+            GradeBand(name="strong", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
         ),
         resource_axes=(),
         check_trigger_mode="no_dice",
@@ -385,7 +477,7 @@ def test_registration_rejects_a_rulebook_with_a_hole():
         rulebook_id="test-gapped-registration-only",
         display_name="구멍 시험 전용",
         resolution_method=TWO_D6,
-        grade_bands=(GradeBand(name="success", counts_as_failure=False, margin_at_least=0),),
+        grade_bands=(GradeBand(name="success", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),),
         resource_axes=(),
         check_trigger_mode="no_dice",
     )
@@ -479,12 +571,16 @@ def test_third_rulebook_registers_without_platform_changes():
         "none_kind",
     }
     assert ENTITY_FIELD_NAMES == {"entity_id", "display_name", "rulebook_id", "stats"}
-    # GradeBand 필드 개수도 그대로다 — Cairn의 통과/실패 두 밴드가 기존
-    # 필드(name/counts_as_failure/margin_at_least/margin_at_most/
-    # requires_doubles)만으로 표현된다.
+    # GradeBand 필드 집합 — 12-04가 succeeded/costs 두 칸을 더했다(D-13/
+    # D-14, RULE-14). 이 두 칸은 Cairn 전용 확장이 아니라 세 룰북 전부에
+    # 적용되는 플랫폼 그릇 변경이다 — 그래도 Cairn의 통과/실패 두 밴드가
+    # 이 일곱 필드만으로 표현된다는 것(named_slots처럼 Cairn만을 위한
+    # 새 칸이 또 필요하지 않았다는 것)은 여전히 성립한다.
     assert {f for f in CAIRN_GRADE_BANDS[0].__dataclass_fields__} == {
         "name",
         "counts_as_failure",
+        "succeeded",
+        "costs",
         "margin_at_least",
         "margin_at_most",
         "requires_doubles",

@@ -18,9 +18,26 @@ from gptrpg.rules_core.rulebook import TWO_D6, GradeBand, ResourceAxisDecl, Rule
 DUNGEONWORLD_LIKE_ID = "dungeonworld_like"
 
 DUNGEONWORLD_GRADE_BANDS: tuple[GradeBand, ...] = (
-    GradeBand(name="strong_hit", counts_as_failure=False, margin_at_least=0),
-    GradeBand(name="weak_hit", counts_as_failure=False, margin_at_least=-WEAK_HIT_BAND),
-    GradeBand(name="miss", counts_as_failure=True),
+    # succeeded/costs/counts_as_failure — D-13이 직접 든 예. strong_hit은
+    # 이루었고(succeeded) 대가가 없다(costs=False).
+    GradeBand(
+        name="strong_hit",
+        counts_as_failure=False,
+        succeeded=True,
+        costs=False,
+        margin_at_least=0,
+    ),
+    # weak_hit: 이뤘지만 대가가 붙는다(PbtA류 부분 성공, D-13/D-14가 직접
+    # 든 예) — 실패로는 안 센다(counts_as_failure=False, 기존 값 불변).
+    GradeBand(
+        name="weak_hit",
+        counts_as_failure=False,
+        succeeded=True,
+        costs=True,
+        margin_at_least=-WEAK_HIT_BAND,
+    ),
+    # miss: 못 이뤘고 대가(피해 등)가 붙으며 위협 시계 입력으로도 센다.
+    GradeBand(name="miss", counts_as_failure=True, succeeded=False, costs=True),
 )
 
 DUNGEONWORLD_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (

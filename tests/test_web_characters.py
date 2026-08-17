@@ -70,7 +70,7 @@ def test_none_axis_excluded_from_sheet_response(web_client: TestClient) -> None:
         rulebook_id=test_rulebook_id,
         display_name="시험 전용",
         resolution_method=TWO_D6,
-        grade_bands=(GradeBand(name="success", counts_as_failure=False),),
+        grade_bands=(GradeBand(name="success", counts_as_failure=False, succeeded=True, costs=False),),
         resource_axes=(
             ResourceAxisDecl(name=hidden_axis_name, form="none", none_kind="absent"),
             ResourceAxisDecl(name=visible_axis_name, form="numeric"),
@@ -134,7 +134,7 @@ def test_rulebook_with_zero_axes_returns_empty_stats(web_client: TestClient) -> 
         rulebook_id=test_rulebook_id,
         display_name="시험 전용",
         resolution_method=TWO_D6,
-        grade_bands=(GradeBand(name="success", counts_as_failure=False),),
+        grade_bands=(GradeBand(name="success", counts_as_failure=False, succeeded=True, costs=False),),
         resource_axes=(),
         check_trigger_mode="no_dice",
     )

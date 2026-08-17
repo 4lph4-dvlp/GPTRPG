@@ -26,8 +26,14 @@ CAIRN_GRADE_BANDS: tuple[GradeBand, ...] = (
     # SRD의 "1은 항상 성공, 20은 항상 실패" 규칙은 margin 구간 어휘로 표현할
     # 수 없는 주사위 눈 자체의 규칙(margin이 아니라 굴림 결과 원문을 봐야
     # 한다)이므로 이번에 담지 않는다 — 지어내 넣지 않는다.
-    GradeBand(name="pass", counts_as_failure=False, margin_at_least=0),
-    GradeBand(name="fail", counts_as_failure=True),
+    GradeBand(name="pass", counts_as_failure=False, succeeded=True, costs=False, margin_at_least=0),
+    # fail: 세이브 실패는 정의상 대가가 따른다(피해·상태 등, "세이브"라는
+    # 개념 자체의 뜻) — SRD가 그 대가의 구체적 종류를 절차로 정하지 않을
+    # 뿐이다(이 판단이 이 파일이 outcome_list를 빈 튜플로 선언하는 이유,
+    # Task 3). costs=True는 "대가가 있다"는 사실만 담고, 그 대가가
+    # 무엇인지는 재량 판정으로 간다(RULE-13 — 목록이 없는 룰북은 전부
+    # 재량 판정으로 간다).
+    GradeBand(name="fail", counts_as_failure=True, succeeded=False, costs=True),
 )
 
 CAIRN_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (

@@ -66,10 +66,40 @@ class GradeBand:
 
     `name`이 "이름 목록" 쪽을, `margin_at_least`/`margin_at_most`가 "수치 구간"
     쪽을 담당한다. `requires_doubles`가 `None`이면 두 눈이 같은지는 무관하다.
+
+    **세 칸이 각자 독립이다(D-13/D-14, RULE-14).** 이름 하나에서 세 사실을
+    전부 읽을 수 있지만, 그 셋은 서로에게서 자동으로 뽑히지 않는다:
+
+    | 칸 | 뜻 |
+    |---|---|
+    | `succeeded` | 이 등급이 시도한 일을 이루었는가 |
+    | `costs` | 이 등급에 대가가 붙는가(결과 목록을 태우는가) |
+    | `counts_as_failure` | 위협 시계가 도는 입력으로 세는가 |
+
+    **왜 자동으로 뽑지 않는가:** 「성공했는데도 상황은 나빠진다」를 쓰는
+    룰북(PbtA류의 부분 성공, 예: `weak_hit` — `succeeded=True, costs=True,
+    counts_as_failure=False`)을 담을 수 있어야 하고, 이 저장소 코드는 이미
+    `counts_as_failure`를 나머지 판단(성공 여부)과 독립적으로 선언에서 읽고
+    있다(D-14). 그래서 `succeeded=True`이면서 `counts_as_failure=True`인
+    조합도(성공했지만 그 성공이 위협 시계를 돌리는 룰북) 등록을 거부하지
+    않는다 — 셋 다 필수 칸이고 기본값이 없다("모르는 것을 조용히 기본값으로
+    넘기지 않는다"는 `StatEntry.form`과 같은 저장소 규율).
+
+    **`succeeded`/`costs`는 사건에 기록하지 않는다** — `counts_as_failure`와
+    다르다. `counts_as_failure`는 `rules_core`의 리듀서가 필요로 해서
+    `CheckResolved` 사건에 실린다(리듀서는 룰북을 모르므로 사건에 실려
+    오지 않으면 실패를 셀 수 없다). `succeeded`/`costs`를 읽는 자리
+    (`session_actor`/`web` — 결과 목록을 태울지 정하는 자리)는 이미
+    `rulebook_id`를 알고 있어 `require_band`로 선언에서 직접 읽을 수
+    있으므로, 이번에는 사건 칸을 늘리지 않는다(`EVENT_SCHEMA_VERSION`을
+    또 올리지 않는다). **나중에 접기(fold) 자체가 이 두 값을 필요로 하게
+    되면 그때가 판을 올릴 시점이다.**
     """
 
     name: str
     counts_as_failure: bool
+    succeeded: bool
+    costs: bool
     margin_at_least: int | None = None
     margin_at_most: int | None = None
     requires_doubles: bool | None = None

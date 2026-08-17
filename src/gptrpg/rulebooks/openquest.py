@@ -20,10 +20,38 @@ from gptrpg.rules_core.rulebook import (
 OPENQUEST_ID = "openquest"
 
 OPENQUEST_GRADE_BANDS: tuple[GradeBand, ...] = (
-    GradeBand(name="critical", counts_as_failure=False, margin_at_least=0, requires_doubles=True),
-    GradeBand(name="success", counts_as_failure=False, margin_at_least=0),
-    GradeBand(name="fumble", counts_as_failure=True, margin_at_most=-1, requires_doubles=True),
-    GradeBand(name="failure", counts_as_failure=True),
+    # OpenQuest SRD는 PbtA류 부분 성공 사다리를 갖지 않는다 — 굴림이
+    # 기술값 이하면 성공/초과면 실패로만 갈리고, doubles가 그 위에
+    # 크리티컬/펌블을 얹을 뿐이다(이 파일 상단 도크스트링, 출처 인용).
+    # 그래서 네 등급 전부 costs=False다: "성공했지만 뭔가 잃는다"는
+    # 결과 카테고리 선택이 이 판정 방식 자체에는 없다(그런 결과를 쓰고
+    # 싶은 룰북 콘텐츠는 outcome_list로 별도 표현한다 — Task 2/3).
+    # succeeded는 counts_as_failure의 반대다 — 이 룰북은 "성공했지만
+    # 시계는 돈다" 같은 어긋남이 SRD에 없다.
+    GradeBand(
+        name="critical",
+        counts_as_failure=False,
+        succeeded=True,
+        costs=False,
+        margin_at_least=0,
+        requires_doubles=True,
+    ),
+    GradeBand(
+        name="success",
+        counts_as_failure=False,
+        succeeded=True,
+        costs=False,
+        margin_at_least=0,
+    ),
+    GradeBand(
+        name="fumble",
+        counts_as_failure=True,
+        succeeded=False,
+        costs=False,
+        margin_at_most=-1,
+        requires_doubles=True,
+    ),
+    GradeBand(name="failure", counts_as_failure=True, succeeded=False, costs=False),
 )
 
 OPENQUEST_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
