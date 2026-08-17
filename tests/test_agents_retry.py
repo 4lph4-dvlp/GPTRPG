@@ -46,7 +46,12 @@ class _CountingFailer:
 
 
 def test_constants_match_locked_decisions() -> None:
-    assert (CLASSIFIER_TIMEOUT_S, GM_TIMEOUT_S, MAX_ATTEMPTS) == (5.0, 15.0, 2)
+    # CLASSIFIER_TIMEOUT_S는 2026-08-17에 5.0 → 15.0으로 올렸다. D-27을 뒤집은
+    # 것이 아니라 그 전제(「분류기는 경량 모델」)가 라이브 측정으로 무너진
+    # 것이다 — 5초 안에 한국어 자유 문장을 쓸 만한 품질로 분류하는 모델이
+    # 없다. 근거 표는 `invoke.CLASSIFIER_TIMEOUT_S` 도크스트링에 있다.
+    # GM_TIMEOUT_S(D-33)와 MAX_ATTEMPTS(D-28)는 그대로다.
+    assert (CLASSIFIER_TIMEOUT_S, GM_TIMEOUT_S, MAX_ATTEMPTS) == (15.0, 15.0, 2)
 
 
 def test_first_attempt_success_calls_provider_exactly_once() -> None:
