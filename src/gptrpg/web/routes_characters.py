@@ -35,9 +35,12 @@ from pydantic import BaseModel, Field
 
 from gptrpg.event_log.store import SequenceConflict
 from gptrpg.rules_core.entities import Entity, StatEntry
+from gptrpg.rules_core.reducer import GameState
+from gptrpg.rules_core.resource_change import ResourceOp, resolve_character_stats
 from gptrpg.rules_core.rulebook import Rulebook
 from gptrpg.rulebooks import get_rulebook
 from gptrpg.session_actor.actor import AlreadyOccupied, CommandRejected, OccupyCharacter
+from gptrpg.session_actor.projection import rebuild_state_from_events
 from gptrpg.web.characters_data import get_character, list_characters
 from gptrpg.web.cookie_auth import (
     COOKIE_NAME,
@@ -88,17 +91,21 @@ class CharacterSheetView(BaseModel):
     stats: list[StatEntryView]
 
 
-def _visible_stats(entity: Entity, rulebook: Rulebook) -> tuple[StatEntry, ...]:
-    """`entity.stats`에서 「안 쓴다」로 선언된 축을 제외하고 선언 순서
-    그대로 돌려준다(RULE-12 성공 기준 2).
+def _visible_stats(stats: tuple[StatEntry, ...], rulebook: Rulebook) -> tuple[StatEntry, ...]:
+    """`stats`에서 「안 쓴다」로 선언된 축을 제외하고 순서 그대로
+    돌려준다(RULE-12 성공 기준 2).
 
     두 신호를 둘 다 확인한다 — 룰북이 그 이름의 축을 `form="none"`으로
-    선언했는지, 그리고 개체 자신의 `StatEntry.form`이 `"none"`인지.
+    선언했는지, 그리고 그 상태값 자신의 `StatEntry.form`이 `"none"`인지.
     (등록 시점의 `validate_entity_axes`가 이미 둘이 어긋나면 등록 자체를
     거부하므로 정상 등록된 개체라면 두 신호는 항상 일치하지만, 이 함수는
-    그 전제에 기대지 않고 독립적으로 둘 다 본다.) `entity.stats`를 훑는
-    순서를 그대로 유지한다 — `list_characters()`가 세운 "선언 순서를
-    다시 정렬하지 않는다" 관례와 같은 이유다.
+    그 전제에 기대지 않고 독립적으로 둘 다 본다.) `stats`를 훑는 순서를
+    그대로 유지한다 — `list_characters()`가 세운 "선언 순서를 다시
+    정렬하지 않는다" 관례와 같은 이유다.
+
+    **`stats`는 시작값(`entity.stats`)이 아니라 `_current_stats`가 접어
+    만든 지금 값이다(RULE-06, D-65, 12-01)** — 마지막 단계는 여전히
+    이 "안 쓴다" 필터라는 것은 안 바뀐다.
 
     **이 제외는 서버 쪽 책임이다.** 프론트엔드가 조건부 렌더링으로 같은
     축을 숨기는 방식으로 구현하면, 이 함수를 거치지 않은 원본 데이터가
@@ -107,7 +114,7 @@ def _visible_stats(entity: Entity, rulebook: Rulebook) -> tuple[StatEntry, ...]:
     """
     axes_by_name = {axis.name: axis for axis in rulebook.resource_axes}
     visible: list[StatEntry] = []
-    for stat in entity.stats:
+    for stat in stats:
         if stat.form == "none":
             continue
         axis = axes_by_name.get(stat.name)
@@ -115,6 +122,25 @@ def _visible_stats(entity: Entity, rulebook: Rulebook) -> tuple[StatEntry, ...]:
             continue
         visible.append(stat)
     return tuple(visible)
+
+
+def _current_stats(character_id: str, entity: Entity, state: GameState) -> tuple[StatEntry, ...]:
+    """entity.stats(시작값)와 `GameState.character_resource_ops`에서 이
+    `character_id`에 해당하는 축별 이력을 뽑아 `resolve_character_stats`에
+    넘겨 지금 값을 만든다(RULE-06, D-65).
+
+    `state.character_resource_ops`의 키는 `(character_id, axis)`이고, 이
+    `character_id`는 항상 짧은 식별자("bram" 등)다 — `entity.entity_id`
+    ("player.bram")가 아니다. 세션 상태 계층 전체(`GameState.declare_owners`
+    등)가 이 형식을 쓴다 — `RecordResourceChange`도 `identity.character_id`
+    (짧은 식별자)를 그대로 싣는다.
+    """
+    ops: dict[str, tuple[ResourceOp, ...]] = {}
+    for (op_character_id, axis_name), axis_ops in state.character_resource_ops.items():
+        if op_character_id != character_id:
+            continue
+        ops[axis_name] = axis_ops
+    return resolve_character_stats(entity.stats, ops)
 
 
 class CharacterSummaryView(BaseModel):
@@ -183,22 +209,37 @@ def _portrait_url_if_present(media_dir: Path, character_id: str) -> str | None:
     "/sessions/{session_id}/characters/{character_id}",
     response_model=CharacterSheetView,
 )
-async def get_character_sheet(session_id: str, character_id: str) -> CharacterSheetView:
+async def get_character_sheet(
+    session_id: str, character_id: str, request: Request
+) -> CharacterSheetView:
     """캐릭터 시트를 읽기 전용으로 돌려준다(RIG-05).
 
     이 주소에는 `GET` 처리기 하나만 등록되어 있다 — `PUT`/`PATCH`/`DELETE`/
     `POST`를 보내면 FastAPI가 등록되지 않은 메서드로 판단해 405를 돌려준다.
     「쓰기 경로가 없다」가 이렇게 시험으로 증명 가능한 사실이 된다.
+
+    **응답이 돌려주는 값은 시작값이 아니라 지금 값이다(RULE-06, D-65,
+    12-01).** `request.app.state.store`에서 이 세션의 사건을 읽고
+    `rebuild_state_from_events`로 상태를 접은 뒤, `_current_stats`(시작값 +
+    접은 자원 변화) → `_visible_stats`(「안 쓴다」 축 제외) 순서로 통과시킨다
+    — 순서가 뒤집히면 `_visible_stats`가 이미 걸러낸 축의 변화 이력이
+    `_current_stats`에서 다시 살아날 여지가 생긴다. 이 경로에는 여전히
+    쓰기 처리기가 하나도 없다 — 사건은 다른 라우트가 쓰고, 이 라우트는
+    그 사건을 다시 접어 읽기만 한다.
     """
     entity = get_character(character_id)
     if entity is None:
         raise HTTPException(status_code=404, detail="그런 캐릭터가 없다")
     rulebook = get_rulebook(entity.rulebook_id)
+    store = request.app.state.store
+    events = store.read_events(session_id)
+    state = rebuild_state_from_events(session_id, events)
+    current_stats = _current_stats(character_id, entity, state)
     return CharacterSheetView(
         entity_id=entity.entity_id,
         display_name=entity.display_name,
         rulebook_id=entity.rulebook_id,
-        stats=[StatEntryView(**asdict(stat)) for stat in _visible_stats(entity, rulebook)],
+        stats=[StatEntryView(**asdict(stat)) for stat in _visible_stats(current_stats, rulebook)],
     )
 
 

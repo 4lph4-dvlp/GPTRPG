@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from conftest import PROJECT_ROOT
-from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, SafetyFlagged, utc_now_iso
+from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ResourceChanged, SafetyFlagged, utc_now_iso
 from gptrpg.event_log.store import EventStore
 from gptrpg.session_actor.projection import rebuild_state_from_events
 
@@ -292,9 +292,56 @@ def test_event_schema_version_was_not_bumped_for_corrupted_glyph_alone():
     쓰이고(`session_actor/actor.py`), `rules_core.reducer.py`의
     `safety_flagged` 분기는 `reason`을 아예 안 본다.
 
-    **판이 7인 것은 이후 11-06 rework(T-11-29, `ActionClassified` 사건
-    추가 — 판정이 필요했던 선언을 판정 없이 진행할 수 있던 차단 결함
-    수정)가 올린 결과다.** 10-06 시점의 판은 6이었다는 사실 자체를 이
-    시험이 여전히 문서로 남긴다 — 누가 무심코 판을 또 올리면 이 값이
-    바뀌어 이 시험이 잡는다."""
-    assert EVENT_SCHEMA_VERSION == 7
+    **10-06 시점의 판은 6이었다.** 그 이후 두 번의 판 올리기(11-06 rework의
+    `ActionClassified` -> 판 7, 12-01의 `ResourceChanged` -> 판 8)가
+    `EVENT_SCHEMA_VERSION`을 여기까지 올렸다 — 이 시험은 `corrupted_glyph`
+    하나로는 판이 안 올랐다는 그 시절 사실만 문서로 남긴다."""
+    assert EVENT_SCHEMA_VERSION >= 7
+
+
+def test_event_schema_version_is_eight():
+    """판 8 못박기(Phase 12, D-05) — `ResourceChanged`가 사건 형식에 닿은
+    현재 판이다. 누가 무심코 판을 또 올리거나 내리면 이 값이 바뀌어 이
+    시험이 잡는다."""
+    assert EVENT_SCHEMA_VERSION == 8
+
+
+def test_freshly_written_schema_8_resource_changed_event_folds_without_exception(tmp_path):
+    """새로 쓴 `resource_changed` 사건(판 8)이 접기 경로 자체를 깨지 않는다
+    — 「옛 기록이 새 코드에서 읽힌다」와 「새 사건 종류가 접기 경로를 깨지
+    않는다」 두 방향 중 후자를 확인한다(전자는 판 8 사건이 옛 실기록에 아예
+    없으므로 자동으로 성립한다 — 늘어난 것이 「새 종류」일 뿐이다)."""
+    store_path = tmp_path / "fresh-resource.db"
+    store = EventStore(store_path)
+    store.initialize()
+    try:
+        event = ResourceChanged(
+            session_id="fresh-resource-session",
+            seq=0,
+            schema_version=8,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="resource_changed",
+            character_id="bram",
+            changes=[
+                {
+                    "axis": "체력",
+                    "operation": "delta",
+                    "amount": -6,
+                    "rolls": [],
+                    "before": 20,
+                    "after": 14,
+                }
+            ],
+            category_id=None,
+            source="outcome_list",
+        )
+        store.append(event)
+        events = store.read_events("fresh-resource-session")
+    finally:
+        store.close()
+
+    assert len(events) == 1
+    state = rebuild_state_from_events("fresh-resource-session", events)
+    assert state.last_seq == 0
+    assert state.character_resource_ops[("bram", "체력")][0].amount == -6

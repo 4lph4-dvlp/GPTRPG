@@ -31,6 +31,34 @@ D20_ROLL_UNDER = "d20_roll_under"
 `tests/test_session_actor.py#test_rulebook_with_no_registered_resolver_is_rejected_not_silently_substituted`
 로 고정되어 있다."""
 
+StatUsage = Literal["add_to_dice_total", "use_as_target"]
+"""능력치가 판정 계산에 쓰이는 방식 — 판정 **방식** 이름(`TWO_D6`/
+`D100_ROLL_UNDER`/`D20_ROLL_UNDER`)과 같은 성격이다: 플랫폼 능력의 이름이지
+룰북 어휘가 아니다(D-01).
+
+- `add_to_dice_total`: 능력치 값이 굴림 합계에 더해지는 수정치가 된다(2d6
+  등급식이 쓰는 방식 — "STR이 높으면 판정 합계가 커진다").
+- `use_as_target`: 능력치 값 자체가 판정의 비교 기준값(target)이 된다(d100
+  롤언더가 쓰는 방식 — "기술값 이하가 나와야 성공").
+"""
+
+
+@dataclass(frozen=True)
+class StatModifierBand:
+    """능력치 원값 → 보정치로 바꾸는 구간표 하나(D-01의 둘째 층).
+
+    `GradeBand.margin_at_least`/`margin_at_most`와 같은 구간 모양이다 —
+    `value_at_least`가 이상, `value_at_most`가 이하, 둘 다 `None`이면 그
+    구간은 무제한이다. 능력치 원값을 그대로 수정치로 쓰지 않고 구간표로
+    바꾸는 룰북을 위한 선언이다(예: "능력치 12~13이면 +1"). 지금 저장소의
+    세 룰북은 아무도 이 구간표를 쓰지 않는다 — 능력치 값을 그대로
+    `add_to_dice_total`/`use_as_target`에 쓴다.
+    """
+
+    value_at_least: int | None
+    value_at_most: int | None
+    modifier: int
+
 
 @dataclass(frozen=True)
 class GradeBand:
@@ -67,6 +95,13 @@ class ResourceAxisDecl:
     form: ResourceAxisForm
     none_kind: NoneKind | None = None
     slot_count: int | None = None
+    stat_usage: StatUsage | None = None
+    """이 축이 판정 계산에 능력치로 쓰이는 방식(D-01). `None`이면 이
+    축은 판정에 안 쓰인다 — `resolution.build_stat_check_input`이
+    `StatNotUsableInChecks`로 거절한다."""
+    stat_modifier_bands: tuple[StatModifierBand, ...] | None = None
+    """능력치 원값 → 보정치 구간표(D-01 둘째 층). `stat_usage`가 `None`이면
+    이 칸도 채울 수 없다 — 판정에 안 쓰는 축의 구간표는 뜻이 없다."""
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -89,6 +124,16 @@ class ResourceAxisDecl:
             raise InvalidResourceAxis(
                 "form이 named_slots가 아니면 slot_count를 채울 수 없다", name=self.name
             )
+        if self.stat_modifier_bands is not None and self.stat_usage is None:
+            raise InvalidStatUsage(
+                "stat_modifier_bands가 있으면 stat_usage가 필수다", name=self.name
+            )
+        if self.form == "none" and self.stat_usage is not None:
+            raise InvalidStatUsage(
+                "form이 none인 축에는 stat_usage를 채울 수 없다 — 판정에 안 쓰는"
+                " 축이 동시에 판정 쓰임을 선언할 수 없다",
+                name=self.name,
+            )
 
 
 CheckTriggerMode = Literal["declared_list", "no_dice", "gm_discretion"]
@@ -108,6 +153,23 @@ CheckTriggerMode = Literal["declared_list", "no_dice", "gm_discretion"]
 
 
 @dataclass(frozen=True)
+class DifficultyLevelDecl:
+    """룰북이 선언하는 난이도 이름 하나 — 바깥(브라우저·CLI)이 판정에 실을
+    수 있는 닫힌 이름 목록의 항목이다(D-02).
+
+    `modifier_type`/`value`는 `resolution.Modifier`의 같은 이름 칸과 짝이
+    맞는다 — `require_difficulty`가 이름으로 이 선언을 찾으면, 호출부가
+    그 값으로 `Modifier(type=modifier_type, value=value, source=f"difficulty:{name}")`를
+    만든다. 이름이 이겨서 값이 나오는 구조는 `GradeBand.name`/`require_band`와
+    같은 "이름 목록 vs 수치" 분업이다.
+    """
+
+    name: str
+    modifier_type: str
+    value: int
+
+
+@dataclass(frozen=True)
 class Rulebook:
     """룰북 하나의 선언 전체 — 어떤 판정 방식을 쓰고 어떤 등급 밴드/자원
     축을 갖는가."""
@@ -118,12 +180,22 @@ class Rulebook:
     grade_bands: tuple[GradeBand, ...]
     resource_axes: tuple[ResourceAxisDecl, ...]
     check_trigger_mode: CheckTriggerMode
+    difficulty_levels: tuple[DifficultyLevelDecl, ...] = ()
+    """이 룰북이 판정에 받아들이는 닫힌 난이도 이름 목록(D-02). 기본값
+    빈 튜플이 「이 룰북에는 그 개념이 없다」다 — 던전월드류·Cairn처럼 난이도
+    개념이 없는 룰북은 이 칸을 채우지 않는다."""
 
     def __post_init__(self) -> None:
         names = [axis.name for axis in self.resource_axes]
         if len(names) != len(set(names)):
             raise InvalidResourceAxis(
                 "같은 이름의 자원 축이 룰북 안에 두 번 이상 선언됐다 — 이름이 겹치면"
+                " 어느 선언이 이기는지 정해지지 않는다"
+            )
+        difficulty_names = [level.name for level in self.difficulty_levels]
+        if len(difficulty_names) != len(set(difficulty_names)):
+            raise InvalidDifficultyLevels(
+                "같은 이름의 난이도가 룰북 안에 두 번 이상 선언됐다 — 이름이 겹치면"
                 " 어느 선언이 이기는지 정해지지 않는다"
             )
 
@@ -140,6 +212,21 @@ class InvalidResourceAxis(Exception):
 
     def __init__(self, reason: str, name: str | None = None) -> None:
         super().__init__(f"자원 축 선언이 유효하지 않다: {reason} (name={name!r})")
+        self.reason = reason
+        self.name = name
+
+
+class InvalidStatUsage(Exception):
+    """`ResourceAxisDecl.stat_usage`/`stat_modifier_bands`의 조합이 D-01이
+    정한 모양을 어겼을 때 던진다.
+
+    조용히 통과하면 판정에 안 쓰기로 한 축이 구간표를 갖거나, 구간표만 있고
+    쓰임 방식이 없는 어긋난 선언이 등록되어 판정 계산 시점에야 드러난다 —
+    `InvalidResourceAxis`가 세운 "조용히 넘기지 않는다" 규율을 그대로 따른다.
+    """
+
+    def __init__(self, reason: str, name: str | None = None) -> None:
+        super().__init__(f"능력치 쓰임 선언이 유효하지 않다: {reason} (name={name!r})")
         self.reason = reason
         self.name = name
 
@@ -297,6 +384,41 @@ def require_band(bands: tuple[GradeBand, ...], grade_name: str) -> GradeBand:
         if band.name == grade_name:
             return band
     raise UnknownGradeName(grade_name)
+
+
+class InvalidDifficultyLevels(Exception):
+    """`Rulebook.difficulty_levels` 선언 자체가 유효하지 않을 때 던진다
+    (예: 같은 이름이 두 번 이상 선언됨) — `InvalidResourceAxis`가 자원 축
+    이름 중복에 던지는 것과 같은 이유·같은 "조용히 넘기지 않는다" 규율이다.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"난이도 선언이 유효하지 않다: {reason}")
+        self.reason = reason
+
+
+class UnknownDifficultyLevel(Exception):
+    """룰북 선언에 없는 난이도 이름으로 `require_difficulty`를 불렀을 때
+    던진다(D-02) — `UnknownGradeName`과 같은 이유: 오타난·조작된 난이도
+    이름이 조용히 기록에 남는 경로를 막는다. 바깥(브라우저·CLI)이 판정에
+    실을 수 있는 것은 이 함수가 찾아낼 수 있는 이름뿐이다."""
+
+    def __init__(self, difficulty_name: str) -> None:
+        super().__init__(f"룰북 선언에 없는 난이도 이름: {difficulty_name!r}")
+        self.difficulty_name = difficulty_name
+
+
+def require_difficulty(rulebook: "Rulebook", name: str) -> DifficultyLevelDecl:
+    """이름으로 난이도 선언을 찾는다. 없으면 `UnknownDifficultyLevel`.
+
+    `require_band`와 같은 모양이다 — 바깥에서 받는 것은 이름뿐이고, 그
+    이름이 실제로 가리키는 수정치 값은 이 함수를 거쳐야만 나온다(D-02:
+    자유 숫자가 판정 계산에 들어갈 통로를 닫는다).
+    """
+    for level in rulebook.difficulty_levels:
+        if level.name == name:
+            return level
+    raise UnknownDifficultyLevel(name)
 
 
 class EntityAxisMismatch(Exception):

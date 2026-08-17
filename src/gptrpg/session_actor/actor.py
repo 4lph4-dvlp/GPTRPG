@@ -11,7 +11,7 @@ AdvanceClock / RecordAiCall)을 전부 여기서만 처리한다. 절차는 늘 
 import asyncio
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 from pathlib import Path
 
 from gptrpg.event_log.schema import (
@@ -25,23 +25,35 @@ from gptrpg.event_log.schema import (
     ClockAdvanced,
     ModifierRecord,
     NarrationAppended,
+    ResourceChanged,
     SafetyFlagged,
     SceneIllustrated,
     utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.dice import Roller
+from gptrpg.rules_core.entities import StatEntry
 from gptrpg.rules_core.grading import DEFAULT_TARGET
 from gptrpg.rules_core.reducer import ConfirmedDeclareRecord, GameState, apply_event
-from gptrpg.rules_core.resolution import Modifier, UnsupportedModifier, resolve_2d6
+from gptrpg.rules_core.resolution import (
+    Modifier,
+    StatNotUsableInChecks,
+    UnknownStatForCheck,
+    UnsupportedModifier,
+    build_stat_check_input,
+    resolve_2d6,
+)
 from gptrpg.rules_core.resolution_d100 import resolve_d100
+from gptrpg.rules_core.resource_change import ResourceOp
 from gptrpg.rules_core.rulebook import (
     D100_ROLL_UNDER,
     TWO_D6,
     NoMatchingGradeBand,
     Rulebook,
+    UnknownDifficultyLevel,
     UnknownGradeName,
     require_band,
+    require_difficulty,
 )
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
@@ -120,6 +132,23 @@ class ResolveCheck:
     `_prepare_resolve_check`가 한다(`_prepare_declare`의
     `if not command.player_id.strip():` 관례와 같은 형식) — 이 두 칸은
     `CheckResolved`에서 필수이므로(판 5+, D-12) 빈 채로 통과시키지 않는다."""
+    stat: str = ""
+    """이 판정에 싣는 능력치 이름(RULE-02/03, D-01). 빈 문자열이면 능력치
+    보정치 조립을 건너뛴다 — `submit roll` 같은 저수준 디버그 통로나 옛
+    호출부가 이 칸 없이도 계속 동작해야 하기 때문이다(person_id/character_id와
+    달리 이 칸은 "비면 거부"가 아니라 "비면 건너뛴다"). 채워지면
+    `build_stat_check_input`이 캐릭터가 그 이름의 능력치를 실제로 갖고
+    있는지, 그 축이 판정에 쓰이도록 선언됐는지를 검증한다 — 조용히 0으로
+    넘어가지 않는다(RULE-02 empty)."""
+    character_stats: tuple[StatEntry, ...] = ()
+    """`stat`이 가리키는 능력치 값을 찾을 캐릭터 상태값(D-01). 액터는
+    `web.characters_data`를 알 수 없으므로(층 계약) 호출부가 값으로
+    넘긴다."""
+    difficulty: str | None = None
+    """룰북이 선언한 닫힌 이름 목록에서 고른 난이도(D-02). `None`이면
+    난이도 수정치를 싣지 않는다. 값이 있으면 `require_difficulty`로
+    찾아 그 선언의 수정치를 함께 싣는다 — 룰북 선언에 없는 이름은
+    `UnknownDifficultyLevel`로 거절되어 `CommandRejected`가 된다."""
 
 
 @dataclass(frozen=True)
@@ -229,6 +258,25 @@ class VerifyProceedEligibility:
     character_id: str
 
 
+@dataclass(frozen=True)
+class RecordResourceChange:
+    """판정(또는 재량 판정)에 딸린 자원 변화를 사건으로 남기는 명령(판 8,
+    D-05/D-65/RULE-09).
+
+    `changes`가 빈 튜플이면 `CommandRejected`다 — 변화 없음은 사건을 아예
+    안 쓰는 것으로 표현한다(RULE-04/05/09 empty). 멱등성은 Phase 8
+    멱등성 창 위에 올린다 — 같은 `caused_by_seq`로 두 번 제출하면
+    `AlreadyChanged`가 두 번째를 단락시킨다(재시도가 자원을 두 번 깎지
+    않는다).
+    """
+
+    character_id: str
+    changes: tuple[ResourceOp, ...]
+    source: str
+    caused_by_seq: int | None = None
+    category_id: str | None = None
+
+
 Command = (
     DeclareAction
     | ConfirmAction
@@ -241,6 +289,7 @@ Command = (
     | RecordSafetyFlag
     | RecordActionClassification
     | VerifyProceedEligibility
+    | RecordResourceChange
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
@@ -249,6 +298,9 @@ _VALID_SAFETY_FLAG_REASONS = frozenset(
     {"think_block", "source_overlap", "character_break", "unknown_move", "corrupted_glyph"}
 )
 _VALID_SAFETY_FLAG_DISPOSITIONS = frozenset({"blocked", "flagged"})
+_VALID_RESOURCE_CHANGE_SOURCES = frozenset(
+    {"outcome_list", "discretionary_ruling", "retro_declaration"}
+)
 
 _EVENT_CLASSES: dict[str, type] = {
     "action_declared": ActionDeclared,
@@ -261,6 +313,7 @@ _EVENT_CLASSES: dict[str, type] = {
     "character_occupied": CharacterOccupied,
     "safety_flagged": SafetyFlagged,
     "action_classified": ActionClassified,
+    "resource_changed": ResourceChanged,
 }
 
 
@@ -319,6 +372,18 @@ class AlreadyResolved(CommandRejected):
     def __init__(self, resolve_seq: int) -> None:
         super().__init__("이미 판정된 확인이다")
         self.resolve_seq = resolve_seq
+
+
+class AlreadyChanged(CommandRejected):
+    """이미 같은 `caused_by_seq`로 기록된 자원 변화가 있다(판 8, Phase 8
+    멱등성 창 재사용) — 재시도가 자원을 두 번 깎지 않는다. `.resource_seq`가
+    이미 기록된 `resource_changed` 사건의 순번을 들고 있다.
+    `CommandRejected`의 하위 클래스라 기존 `except CommandRejected` 경로가
+    그대로 잡는다."""
+
+    def __init__(self, resource_seq: int) -> None:
+        super().__init__("이미 기록된 자원 변화다")
+        self.resource_seq = resource_seq
 
 
 class ProceedEligible(CommandRejected):
@@ -503,6 +568,8 @@ class SessionActor:
             return self._prepare_record_action_classification(command)
         if isinstance(command, VerifyProceedEligibility):
             return self._prepare_verify_proceed_eligibility(command)
+        if isinstance(command, RecordResourceChange):
+            return self._prepare_record_resource_change(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -638,6 +705,48 @@ class SessionActor:
         except UnknownRulebook as exc:
             raise CommandRejected(str(exc)) from exc
 
+        # RULE-02/03(D-01) — 능력치를 판정에 싣는다. `stat`이 빈 문자열이면
+        # 건너뛴다(`ResolveCheck.stat` 도크스트링 — 저수준 디버그 통로가
+        # 이 칸 없이도 계속 동작해야 한다). 채워지면 캐릭터가 그 능력치를
+        # 실제로 갖고 있는지, 그 축이 판정에 쓰이도록 선언됐는지를
+        # `build_stat_check_input`이 검증한다 — 조용히 0으로 넘어가지 않는다.
+        modifiers = command.modifiers
+        target = command.target
+        if command.stat:
+            try:
+                stat_input = build_stat_check_input(
+                    command.character_stats, command.stat, rulebook.resource_axes
+                )
+            except (UnknownStatForCheck, StatNotUsableInChecks) as exc:
+                raise CommandRejected(str(exc)) from exc
+            if stat_input.modifier is not None:
+                modifiers = (stat_input.modifier, *modifiers)
+            if stat_input.target is not None:
+                target = stat_input.target
+
+        # D-02 — 난이도는 룰북이 선언한 닫힌 이름 목록에서만 고른다. 목록에
+        # 없는 이름은 사건을 남기기 전에 거절된다(자유 숫자가 아니라 이름만
+        # 바깥에서 받는다).
+        if command.difficulty is not None:
+            try:
+                level = require_difficulty(rulebook, command.difficulty)
+            except UnknownDifficultyLevel as exc:
+                raise CommandRejected(str(exc)) from exc
+            modifiers = (
+                *modifiers,
+                Modifier(
+                    type=level.modifier_type,
+                    value=level.value,
+                    source=f"difficulty:{level.name}",
+                ),
+            )
+
+        effective_command = (
+            command
+            if modifiers is command.modifiers and target == command.target
+            else dataclass_replace(command, modifiers=modifiers, target=target)
+        )
+
         resolver = _RESOLVERS.get(rulebook.resolution_method)
         if resolver is None:
             raise CommandRejected(
@@ -646,7 +755,7 @@ class SessionActor:
             )
 
         try:
-            outcome = resolver(self._roller, command, rulebook)
+            outcome = resolver(self._roller, effective_command, rulebook)
         except UnsupportedModifier as exc:
             raise CommandRejected(str(exc)) from exc
         except AttributeError as exc:
@@ -893,6 +1002,64 @@ class SessionActor:
             raise CommandRejected("이 선언은 판정이 필요해 판정 없이 진행할 수 없다")
 
         raise ProceedEligible()
+
+    def _prepare_record_resource_change(
+        self, command: RecordResourceChange
+    ) -> tuple[str, int | None, dict]:
+        """판정에 딸린 자원 변화 기록 — 멱등성은 Phase 8 멱등성 창 위에
+        올린다(판 8, D-05/D-65).
+
+        `state.resource_change_by_cause.get(command.caused_by_seq)`가 있으면
+        `AlreadyChanged(resource_seq)`를 던진다 — 재시도가 자원을 두 번
+        깎지 않는다. `changes`가 빈 튜플이면 `CommandRejected` — 변화
+        없음은 사건을 아예 안 쓰는 것으로 표현한다(RULE-04/05/09 empty).
+        """
+        self._validate_caused_by(command.caused_by_seq)
+        if command.caused_by_seq is not None:
+            prior_seq = self.state.resource_change_by_cause.get(command.caused_by_seq)
+            if prior_seq is not None:
+                raise AlreadyChanged(prior_seq)
+
+        if not command.character_id.strip():
+            raise CommandRejected("character_id는 비어 있을 수 없다")
+        if not command.changes:
+            raise CommandRejected(
+                "changes가 비어 있으면 사건을 남기지 않는다 — 변화 없음은 사건 자체를"
+                " 안 쓰는 것으로 표현한다"
+            )
+        if command.source not in _VALID_RESOURCE_CHANGE_SOURCES:
+            raise CommandRejected(
+                f"source는 {sorted(_VALID_RESOURCE_CHANGE_SOURCES)} 중 하나여야 한다: "
+                f"{command.source!r}"
+            )
+
+        changes_payload = [
+            {
+                "axis": op.axis,
+                "operation": op.operation,
+                "amount": op.amount,
+                "rolls": list(op.rolls),
+                # `before`/`after`는 이 계층(액터)이 캐릭터 시작값에 접근할
+                # 수 없어(층 계약 — `web.characters_data`는 `session_actor`
+                # 아래가 아니다) 계산하지 못한다 — "계산 안 함"을 `None`으로
+                # 남긴다("0"과 섞이지 않는다). 캐릭터 시트가 실제 지금 값을
+                # 돌려주는 것(RULE-06)은 `resolve_character_stats`가 시작값 +
+                # 이 사건들의 이력을 접어 만드는 몫이다.
+                "before": None,
+                "after": None,
+            }
+            for op in command.changes
+        ]
+        return (
+            "resource_changed",
+            command.caused_by_seq,
+            {
+                "character_id": command.character_id,
+                "changes": changes_payload,
+                "category_id": command.category_id,
+                "source": command.source,
+            },
+        )
 
 
 class SessionRegistry:

@@ -12,6 +12,7 @@
 
 from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.grading import WEAK_HIT_BAND
+from gptrpg.rules_core.resource_change import ResourceChangeDecl
 from gptrpg.rules_core.rulebook import TWO_D6, GradeBand, ResourceAxisDecl, Rulebook
 
 DUNGEONWORLD_LIKE_ID = "dungeonworld_like"
@@ -24,14 +25,17 @@ DUNGEONWORLD_GRADE_BANDS: tuple[GradeBand, ...] = (
 
 DUNGEONWORLD_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
     # 캐릭터·적이 실제로 갖고 있는 여덟 축 그대로 — 이 단계는 numeric 형태
-    # 하나만 관통시킨다(11-01). 여섯 형태 전부는 11-03이 붙인다.
+    # 하나만 관통시킨다(11-01). 여섯 형태 전부는 11-03이 붙인다. 능력치
+    # 여섯(STR~CHA)에는 12-01이 `stat_usage="add_to_dice_total"`을 더한다
+    # (D-01) — 능력치 값이 판정 합계에 더해진다. 체력·방어구·소지품에는
+    # 더하지 않는다(판정에 쓰이는 축이 아니다).
     ResourceAxisDecl(name="체력", form="numeric"),
-    ResourceAxisDecl(name="STR", form="numeric"),
-    ResourceAxisDecl(name="DEX", form="numeric"),
-    ResourceAxisDecl(name="CON", form="numeric"),
-    ResourceAxisDecl(name="INT", form="numeric"),
-    ResourceAxisDecl(name="WIS", form="numeric"),
-    ResourceAxisDecl(name="CHA", form="numeric"),
+    ResourceAxisDecl(name="STR", form="numeric", stat_usage="add_to_dice_total"),
+    ResourceAxisDecl(name="DEX", form="numeric", stat_usage="add_to_dice_total"),
+    ResourceAxisDecl(name="CON", form="numeric", stat_usage="add_to_dice_total"),
+    ResourceAxisDecl(name="INT", form="numeric", stat_usage="add_to_dice_total"),
+    ResourceAxisDecl(name="WIS", form="numeric", stat_usage="add_to_dice_total"),
+    ResourceAxisDecl(name="CHA", form="numeric", stat_usage="add_to_dice_total"),
     ResourceAxisDecl(name="방어구", form="numeric"),
     # 소지품 — 이 룰북은 소지품을 규칙으로 세지 않는다(RULE-12, D-67, 11-07).
     # 이 파일이 이 선언을 담아도 되는 이유: 이 모듈 도크스트링이 이미
@@ -57,6 +61,14 @@ DUNGEONWORLD_LIKE = Rulebook(
     resource_axes=DUNGEONWORLD_RESOURCE_AXES,
     check_trigger_mode="declared_list",
 )
+
+DUNGEONWORLD_MISS_HP_COST = ResourceChangeDecl(axis="체력", operation="delta", amount=-6)
+"""「대가가 붙는 등급(miss)이 나오면 체력이 고정 6 깎인다」— 이 계획(12-01)이
+뚫는 탐색적 한 줄기를 위한 상수다. 자원 변화 한 줄기를 실제로 관통시키는
+것이 목적이라 지금은 이 파일 안의 상수 하나일 뿐이고, `rules_core`는 이
+이름도 「체력」이라는 축 이름도 모른다. 12-04가 이 값을 결과 목록
+(outcome_list) 항목 안으로 옮긴다 — 그때까지는 `web/routes_actions.py`가
+이 상수를 직접 참조해 자원 변화 사건을 제출한다."""
 
 # 자체 작성 예시 — 어떤 룰북 원문에서도 오지 않았다(D-18이 배제한 자체 창작
 # 미니 룰북과 혼동하지 않도록, 이 사실을 라벨로 남긴다). 그릇에 상태값

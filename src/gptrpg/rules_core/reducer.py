@@ -9,6 +9,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
 from gptrpg.rules_core.grading import Grade
+from gptrpg.rules_core.resource_change import ResourceOp
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,21 @@ class GameState:
     선언이 실제로 `no_check`로 분류됐다는 증거가 없다"는 뜻이고, 그것을
     통과시키면 이 표가 막으려는 구멍(판정이 필요한 선언을 판정 없이 진행)이
     다시 열린다."""
+    character_resource_ops: dict[tuple[str, str], tuple[ResourceOp, ...]] = field(
+        default_factory=dict
+    )
+    """(character_id, axis 이름) -> 그 축에 적용된 연산 이력 튜플(판 8+,
+    D-05/D-65/RULE-09). `resource_changed` 사건에서만 채워진다 — 이 표 +
+    캐릭터 시작값(`characters_data.py`, `rules_core` 밖)을
+    `resource_change.resolve_character_stats`에 넘긴 결과가 「지금 값」이다
+    (RULE-06). 사건 순번 순서를 보존한 튜플이라 접는 순서를 바꾸면 결과가
+    달라질 수 있는 연산에서도 순서가 기록 순서와 같다(RULE-09 ordering)."""
+    resource_change_by_cause: dict[int, int] = field(default_factory=dict)
+    """caused_by_seq(그 자원 변화를 일으킨 판정 사건의 순번) -> 그
+    `resource_changed` 사건 자신의 순번(판 8+, Phase 8 멱등성 창 재사용).
+    `SessionActor._prepare_record_resource_change`가 이 표로 재시도를
+    단락시킨다 — 같은 원인 사건으로 두 번 제출해도 자원이 두 번 깎이지
+    않는다."""
 
 
 def initial_state(session_id: str) -> GameState:
@@ -280,6 +296,36 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
             declare_no_check = dict(declare_no_check)
             declare_no_check[declare_seq] = payload["no_check"]
         return replace(state, last_seq=seq, declare_no_check=declare_no_check)
+    if event_type == "resource_changed":
+        # 자원 변화 기록(판 8, Phase 12 D-05/D-65)은 「dict 복사 → 갱신 →
+        # replace」 모양을 그대로 따른다(`character_occupied` 분기와 같은
+        # 패턴). **그래도 분기가 있어야 한다:** 이 분기가 없으면 이 종류가
+        # 하나라도 있는 세션이 폴링마다 UnknownEventType을 맞고 영구히 안
+        # 열린다(08-CONTEXT.md D-06, 이미 여러 번 난 사고 — `scene_illustrated`
+        # · `character_occupied` · `action_classified`에 이어 이번이 네 번째
+        # 사례).
+        character_id = payload["character_id"]
+        character_resource_ops = dict(state.character_resource_ops)
+        for change in payload["changes"]:
+            key = (character_id, change["axis"])
+            op = ResourceOp(
+                axis=change["axis"],
+                operation=change["operation"],
+                amount=change["amount"],
+                rolls=tuple(change.get("rolls", ())),
+            )
+            character_resource_ops[key] = character_resource_ops.get(key, ()) + (op,)
+        resource_change_by_cause = state.resource_change_by_cause
+        caused_by_seq = payload.get("caused_by_seq")
+        if caused_by_seq is not None:
+            resource_change_by_cause = dict(resource_change_by_cause)
+            resource_change_by_cause[caused_by_seq] = seq
+        return replace(
+            state,
+            last_seq=seq,
+            character_resource_ops=character_resource_ops,
+            resource_change_by_cause=resource_change_by_cause,
+        )
     raise UnknownEventType(event_type)
 
 

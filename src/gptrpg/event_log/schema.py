@@ -15,8 +15,22 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
-EVENT_SCHEMA_VERSION = 7
-"""판 6 -> 판 7: `proceed()`(웹)/CLI `no_check` 갈래의 서버 쪽 안전 검사(11-06
+EVENT_SCHEMA_VERSION = 8
+"""판 7 -> 판 8: 능력치가 판정에 실리고 판정에 딸린 자원 변화가 기록에
+남는 첫 줄기(Phase 12, D-05/D-65)가 사건 형식에 닿았다. 새 사건 종류가
+하나 늘었다 — `ResourceChanged`(캐릭터 하나의 자원 축 여러 개가 「축 ·
+동작 · 양」 세 칸짜리 항목 목록으로 한 번에 바뀌었다는 사실). `caused_by_seq`가
+그 변화를 일으킨 `check_resolved`(또는 재량 판정) 사건이다. `source`가
+그 변화가 어디서 나왔는지(룰북 결과 목록/재량 판정/역선언 중 하나)를
+가른다 — 지금은 판정 직후 서버가 결정한 고정 변화 하나뿐이지만(이 단계의
+탐색적 한 줄기), 12-04·12-06이 나머지 두 갈래를 실제로 채운다. 기존 열
+종류의 칸은 하나도 바뀌지 않았으므로 판 1~7로 쓰인 기록은 글자 그대로
+다시 읽힌다(늘어난 것이 「새 종류」일 뿐이라 옛 기록에는 그 종류의 사건이
+없다) — `rules_core/reducer.py`의 `resource_changed` 분기는 이 판 올리기와
+반드시 같은 커밋이다(08-CONTEXT.md D-06, 이미 여러 번 난 사고 — 이번이
+네 번째 사례).
+
+판 6 -> 판 7: `proceed()`(웹)/CLI `no_check` 갈래의 서버 쪽 안전 검사(11-06
 rework, T-11-29 — 판정이 필요했던 선언을 판정 없이 진행할 수 있던 차단
 결함)가 사건 형식에 닿았다. 새 사건 종류가 하나 늘었다 — `ActionClassified`
 (분류기가 이 선언에 대해 `no_check` 여부를 최종 결정했다는 운영 사실).
@@ -354,6 +368,47 @@ class ActionClassified(EventEnvelope):
     no_check: bool
 
 
+class ResourceChangeRecord(BaseModel):
+    """자원 변화 사건 안에 남는 항목 하나 — 「축 · 동작 · 양」(D-05, RULE-09).
+
+    `ModifierRecord`와 같은 `extra="forbid", frozen=True` 설정이다. `before`/
+    `after`는 이 변화가 적용되기 전/후의 값이다 — 이 계획은 `numeric` 축만
+    다루므로 항상 정수지만, 값을 아직 계산하지 않은 경로(사건을 쓰는 쪽이
+    시작값에 접근할 수 없는 경우)는 `None`으로 남긴다("계산 안 함"과 "0"이
+    섞이지 않는다).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    axis: str
+    operation: str
+    amount: int
+    rolls: list[int] = []
+    before: int | None
+    after: int | None
+
+
+class ResourceChanged(EventEnvelope):
+    """판정(또는 재량 판정)에 딸린 자원 변화 하나 — 캐릭터 하나의 자원 축
+    여러 개가 한 번에 바뀐다(판 8, D-05/D-65/RULE-04).
+
+    `caused_by_seq`가 이 변화를 일으킨 `check_resolved` 사건(또는 재량
+    판정 흐름)이다. `source`가 이 변화가 어디서 나왔는지를 가른다 —
+    `outcome_list`(룰북 결과 목록, 12-04가 실제로 채운다), `discretionary_ruling`
+    (재량 판정, 12-06), `retro_declaration`(역선언, 12-04/Cairn류). 이
+    계획(12-01)이 만드는 첫 줄기는 던전월드류의 「대가가 붙는 등급 하나」에
+    붙는 고정 변화 하나이고, `source="outcome_list"`로 남긴다 — 12-04가
+    실제 결과 목록 인프라를 놓는 뒤에도 이 이름을 그대로 쓴다(값이 아니라
+    이름이 먼저 자리를 잡는다).
+    """
+
+    event_type: Literal["resource_changed"]
+    character_id: str
+    changes: list[ResourceChangeRecord]
+    category_id: str | None = None
+    source: Literal["outcome_list", "discretionary_ruling", "retro_declaration"]
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -366,6 +421,7 @@ GameEvent = Annotated[
         CharacterOccupied,
         SafetyFlagged,
         ActionClassified,
+        ResourceChanged,
     ],
     Field(discriminator="event_type"),
 ]

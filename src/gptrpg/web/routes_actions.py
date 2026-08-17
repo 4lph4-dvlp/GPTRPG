@@ -45,10 +45,11 @@ from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, Unkno
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
-from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
+from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID, DUNGEONWORLD_MISS_HP_COST
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.grading import DEFAULT_TARGET
 from gptrpg.rules_core.resolution import Modifier
+from gptrpg.rules_core.resource_change import ResourceOp
 from gptrpg.imagery import (
     ImageryConfig,
     RenderedImage,
@@ -59,6 +60,7 @@ from gptrpg.imagery import (
 )
 from gptrpg.imagery.scene_prompt import WELL_SCENARIO_SETTING
 from gptrpg.session_actor.actor import (
+    AlreadyChanged,
     AlreadyConfirmed,
     AlreadyResolved,
     AppendNarration,
@@ -68,6 +70,7 @@ from gptrpg.session_actor.actor import (
     ProceedEligible,
     RecordActionClassification,
     RecordAiCall,
+    RecordResourceChange,
     RecordSafetyFlag,
     RecordSceneIllustration,
     ResolveCheck,
@@ -117,6 +120,13 @@ MAX_MODIFIER_LEN = 128
 """`ConfirmRequest.modifiers`의 항목 문자열 하나(`"유형:값:출처"` 형식)의
 길이 상한(08-04, QUAL-04). `_parse_modifier`가 쪼개는 세 조각(유형·값·출처
 설명)을 넉넉히 담으면서도 `MAX_RAW_TEXT_LEN`처럼 크게 잡지 않는다."""
+
+MAX_DIFFICULTY_LEN = 32
+"""`ConfirmRequest.difficulty`의 길이 상한(12-01, D-02). `MAX_ID_LEN`(64)
+보다 좁게 잡는다 — 난이도 이름은 룰북이 선언한 닫힌 목록에서 고르는
+값이라 실제로 훨씬 짧다(예: `"hard"`). `require_difficulty`가 목록에
+없는 이름을 어차피 거절하지만, 상한은 그 검증 이전에 요청 본문 크기
+자체를 제한한다."""
 
 _NO_SENTENCE = object()
 """narrate()의 첫 조각을 기다릴 때 쓰는 보초값 — `cli/turn_flow.py`의 같은
@@ -377,6 +387,26 @@ class ConfirmRequest(BaseModel):
     modifiers: list[Annotated[str, Field(max_length=MAX_MODIFIER_LEN)]] = Field(
         default_factory=list, max_length=MAX_MODIFIERS_COUNT
     )
+    difficulty: str | None = Field(default=None, max_length=MAX_DIFFICULTY_LEN)
+    """룰북이 선언한 닫힌 이름 목록에서 고른 난이도(D-02, 12-01). `None`이면
+    난이도 수정치를 안 싣는다 — 던전월드류처럼 난이도 개념이 없는 룰북은
+    이 칸을 안 보낸다. Task 3이 `target`/`modifiers`(바깥에서 받는 자유
+    숫자 통로)를 닫을 때까지는 이 칸이 그 둘과 나란히 있다."""
+
+
+class ModifierView(BaseModel):
+    type: str
+    value: int
+    source: str
+
+
+class ResourceChangeView(BaseModel):
+    axis: str
+    operation: str
+    amount: int
+    rolls: list[int] = []
+    before: int | None = None
+    after: int | None = None
 
 
 class ConfirmResponse(BaseModel):
@@ -391,6 +421,20 @@ class ConfirmResponse(BaseModel):
     """서사 생성만 실패했다는 표시다(TRUST-06, D-08) — `rolls`/`grade`/`target`은
     그대로 채워져 있다. 「굴림 실패」(오류 상태 코드, 판정 값 없음)와 구분된다.
     기본값이 있으므로 기존 응답 조립 자리를 전부 고치지 않아도 된다."""
+    modifiers: list[ModifierView] = []
+    """이 판정에 실제로 실린 수정치 전부 — `check_event.modifiers`를 그대로
+    옮긴다(D-04 검산 근거). 능력치·난이도 수정치가 여기 실린 채로 화면에
+    닿는다(12-01)."""
+    total: int | None = None
+    """판정 합계 — `CheckResolved`가 이 값을 따로 저장하지 않으므로(눈+수정치로
+    재계산해야 하는데 d100은 십/일의 자리 채택 규칙이 있어 웹 계층에서
+    다시 계산하면 `rules_core`의 계산을 중복 구현하게 된다) 이번 계획은
+    항상 `None`이다 — 후속 계획이 `CheckResolved`에 칸을 늘리면 채운다."""
+    resource_changes: list[ResourceChangeView] = []
+    """이 판정에 딸려 기록된 자원 변화(RULE-04/05/09, 12-01). 이 계획의
+    자원 변화는 판정 직후 서버가 결정한 하나뿐이다(던전월드류의 「대가가
+    붙는 등급 하나에 붙는 고정 변화 하나」) — 사람 확인 관문은 12-06이
+    이 자리에 붙인다."""
 
 
 @router.post("/sessions/{session_id}/actions/confirm", response_model=ConfirmResponse)
@@ -500,7 +544,11 @@ async def confirm(
         # `AlreadyResolved`가 액터 안에서 그 창을 최종적으로 닫는다 — 하위
         # 클래스이므로 일반 `CommandRejected`보다 먼저 잡는다.
         try:
-            # ④ 판정 — 서사 호출은 아직 시작하지 않았다.
+            # ④ 판정 — 서사 호출은 아직 시작하지 않았다. `character_stats`는
+            # 서버가 이미 불러 둔 `character.stats`를 그대로 넘긴다 —
+            # 액터는 `web.characters_data`를 모르므로(층 계약) 호출부가
+            # 값으로 넘긴다. `stat`/`difficulty`가 있으면 액터가 룰북
+            # 선언에서 보정치를 조립한다(RULE-02/03, D-01/D-02).
             resolve_seq = await actor.submit(
                 ResolveCheck(
                     move=body.move,
@@ -510,6 +558,9 @@ async def confirm(
                     caused_by_seq=confirm_seq,
                     person_id=identity.browser_id,
                     character_id=identity.character_id,
+                    stat=body.stat,
+                    character_stats=character.stats,
+                    difficulty=body.difficulty,
                 )
             )
         except AlreadyResolved as exc:
@@ -521,6 +572,46 @@ async def confirm(
 
     check_event = store.read_events(session_id, from_seq=resolve_seq)[0]
     check_summary = f"{body.move} 판정 결과 {check_event.grade} (목표 {check_event.target})"
+
+    # 자원 변화 — 이 계획의 탐색적 한 줄기는 판정 직후 서버가 결정한 고정
+    # 변화 하나뿐이다(RULE-04/05/09, D-05). 던전월드류 룰북이 선언한
+    # 「대가가 붙는 등급(counts_as_failure)이 나오면 체력이 고정 6 깎인다」
+    # (`DUNGEONWORLD_MISS_HP_COST`)를 그 등급이 나왔을 때만 제출한다.
+    # 12-06이 사람 확인 관문을 이 자리에 붙인다 — 이 계획은 서버가 곧바로
+    # 결정해서 제출한다.
+    resource_changes: list[ResourceChangeView] = []
+    if body.rulebook_id == DUNGEONWORLD_LIKE_ID and check_event.counts_as_failure:
+        try:
+            await actor.submit(
+                RecordResourceChange(
+                    character_id=identity.character_id,
+                    changes=(
+                        ResourceOp(
+                            axis=DUNGEONWORLD_MISS_HP_COST.axis,
+                            operation=DUNGEONWORLD_MISS_HP_COST.operation,
+                            amount=DUNGEONWORLD_MISS_HP_COST.amount,
+                        ),
+                    ),
+                    # `outcome_list`를 쓴다 — 12-04가 실제 결과 목록
+                    # 인프라를 놓아도 이 값은 그대로 유지된다(값보다 이름이
+                    # 먼저 자리를 잡는다, `ResourceChanged` 도크스트링 참조).
+                    source="outcome_list",
+                    caused_by_seq=resolve_seq,
+                )
+            )
+        except AlreadyChanged:
+            pass  # 재시도 — 이미 기록된 변화를 다시 깎지 않는다.
+        except CommandRejected as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except SequenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        resource_changes = [
+            ResourceChangeView(
+                axis=DUNGEONWORLD_MISS_HP_COST.axis,
+                operation=DUNGEONWORLD_MISS_HP_COST.operation,
+                amount=DUNGEONWORLD_MISS_HP_COST.amount,
+            )
+        ]
 
     try:
         choices = load_config(request.app.state.agent_config_path)
@@ -732,6 +823,11 @@ async def confirm(
             target=check_event.target,
             narration_chunk_count=chunk_index,
             narration_failed=True,
+            modifiers=[
+                ModifierView(type=m.type, value=m.value, source=m.source)
+                for m in check_event.modifiers
+            ],
+            resource_changes=resource_changes,
         )
 
     # 시계 조건 검사 배경 등록 — 관문 신호가 참일 때만 건다(ARCH-03/D-01).
@@ -780,6 +876,11 @@ async def confirm(
         grade=check_event.grade,
         target=check_event.target,
         narration_chunk_count=chunk_index,
+        modifiers=[
+            ModifierView(type=m.type, value=m.value, source=m.source)
+            for m in check_event.modifiers
+        ],
+        resource_changes=resource_changes,
     )
 
 

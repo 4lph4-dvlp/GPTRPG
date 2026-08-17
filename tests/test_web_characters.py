@@ -13,7 +13,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
-from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ActionDeclared, utc_now_iso
+from gptrpg.event_log.schema import (
+    EVENT_SCHEMA_VERSION,
+    ActionDeclared,
+    ResourceChanged,
+    utc_now_iso,
+)
 from gptrpg.event_log.store import EventStore
 from gptrpg.rulebooks import RULEBOOKS
 from gptrpg.rules_core.entities import Entity, StatEntry
@@ -597,3 +602,55 @@ async def test_concurrent_select_character_same_character_status_codes_are_200_a
             )
 
     assert {response_a.status_code, response_b.status_code} == {200, 409}
+
+
+# ---------------------------------------------------------------------------
+# 12-01 — 캐릭터 시트가 시작값이 아니라 접은 지금 값을 돌려준다(RULE-06, D-65).
+# ---------------------------------------------------------------------------
+
+
+def test_resource_changed_event_is_reflected_in_character_sheet(
+    web_app: FastAPI, tmp_db_path: Path
+) -> None:
+    """`resource_changed` 사건을 하나 넣은 세션에서 시트의 그 축 `current`가
+    `characters_data.py` 시작값과 다르다 — 사건이 있는 세션에서만 접은
+    값이 달라지고, 없는 세션(위 `test_known_character_sheet_matches_characters_data`)
+    에서는 여전히 시작값과 같다는 것과 대칭이다."""
+    entity = PLAYER_CHARACTERS["bram"]
+    starting_hp = next(stat.current for stat in entity.stats if stat.name == "체력")
+
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    store.append(
+        ResourceChanged(
+            session_id="s1",
+            seq=0,
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="resource_changed",
+            character_id="bram",
+            changes=[
+                {
+                    "axis": "체력",
+                    "operation": "delta",
+                    "amount": -6,
+                    "rolls": [],
+                    "before": starting_hp,
+                    "after": starting_hp - 6,
+                }
+            ],
+            category_id=None,
+            source="outcome_list",
+        )
+    )
+    store.close()
+
+    with TestClient(web_app) as client:
+        response = client.get("/api/sessions/s1/characters/bram")
+
+    assert response.status_code == 200
+    body = response.json()
+    hp_stat = next(stat for stat in body["stats"] if stat["name"] == "체력")
+    assert hp_stat["current"] == starting_hp - 6
+    assert hp_stat["current"] != starting_hp
