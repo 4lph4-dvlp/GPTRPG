@@ -9,6 +9,8 @@
 선언)를 담당한다.
 """
 
+import dataclasses
+
 import pytest
 
 from gptrpg.rules_core.entities import (
@@ -17,20 +19,30 @@ from gptrpg.rules_core.entities import (
     Entity,
     StatEntry,
 )
+from gptrpg.rules_core.resource_change import ResourceChangeDecl
 from gptrpg.rules_core.rulebook import (
+    NO_CHANGE_CATEGORY_ID,
     TWO_D6,
     EntityAxisMismatch,
     GradeBand,
+    InvalidOutcomeList,
     InvalidResourceAxis,
     InvalidTriggerMode,
+    OutcomeCategory,
+    OutcomeList,
     ResourceAxisDecl,
+    RetroDeclarationDecl,
     Rulebook,
     ShadowedGradeBand,
     UncoveredOutcomeGap,
+    UnknownOutcomeCategory,
+    ordered_categories,
     require_band,
+    require_outcome_category,
     validate_entity_axes,
     validate_grade_bands,
     validate_move_stats,
+    validate_outcome_list,
     validate_trigger_mode,
 )
 from gptrpg.rulebooks import RULEBOOKS, get_rulebook, validate_registered_rulebooks
@@ -354,6 +366,228 @@ def test_require_band_exposes_all_three_independent_fields():
     """이름으로 찾은 밴드에서 세 값을 전부 읽을 수 있다."""
     band = require_band(DUNGEONWORLD_GRADE_BANDS, "weak_hit")
     assert (band.succeeded, band.costs, band.counts_as_failure) == (True, True, False)
+
+
+# ---------------------------------------------------------------------------
+# 결과 카테고리 닫힌 목록 — 그릇과 등록 시점 검증 (RULE-13, D-05/D-07/D-09/
+# D-11/D-12) — 12-04
+# ---------------------------------------------------------------------------
+
+
+def _test_rulebook_with_outcome_list(
+    resource_axes: tuple[ResourceAxisDecl, ...],
+    outcome_list: OutcomeList,
+    retro_declaration: RetroDeclarationDecl | None = None,
+) -> Rulebook:
+    kwargs = {}
+    if retro_declaration is not None:
+        kwargs["retro_declaration"] = retro_declaration
+    return Rulebook(
+        rulebook_id="test-only-outcome-list",
+        display_name="결과 목록 시험 전용",
+        resolution_method=TWO_D6,
+        grade_bands=_EMPTY_BANDS,
+        resource_axes=resource_axes,
+        check_trigger_mode="no_dice",
+        outcome_list=outcome_list,
+        **kwargs,
+    )
+
+
+def test_outcome_category_has_no_narration_field():
+    """`OutcomeCategory`는 `category_id`/`changes` 두 칸뿐이다 — 서술
+    문장을 담는 필드가 없다(D-11)."""
+    category = OutcomeCategory(
+        category_id="자원을 소모시킨다",
+        changes=(ResourceChangeDecl(axis="체력", operation="delta", amount=-1),),
+    )
+    assert [f.name for f in dataclasses.fields(category)] == ["category_id", "changes"]
+
+
+def test_outcome_category_with_empty_changes_is_normal_the_no_change_item():
+    """빈 변화 목록이 정상값이다(D-09, 「이번엔 숫자가 안 변한다」)."""
+    category = OutcomeCategory(category_id=NO_CHANGE_CATEGORY_ID, changes=())
+    assert category.changes == ()
+
+
+def test_outcome_list_with_empty_categories_is_normal_and_registers():
+    """빈 목록이 정상값이고, 그것을 담은 `Rulebook`이 등록을 통과한다
+    (D-12/RULE-13)."""
+    rulebook = _test_rulebook_with_outcome_list((), OutcomeList(categories=()))
+    assert rulebook.outcome_list.categories == ()
+
+
+def test_outcome_list_with_zero_max_picks_and_nonempty_categories_raises():
+    """목록이 있는데 하나도 못 고르는 선언(`max_picks=0`)은 어긋남이다."""
+    with pytest.raises(InvalidOutcomeList):
+        OutcomeList(
+            categories=(OutcomeCategory(category_id=NO_CHANGE_CATEGORY_ID, changes=()),),
+            max_picks=0,
+        )
+
+
+def test_outcome_list_with_duplicate_category_id_raises():
+    """같은 `category_id`가 둘 있으면 `InvalidOutcomeList`다(adjacency)."""
+    with pytest.raises(InvalidOutcomeList):
+        OutcomeList(
+            categories=(
+                OutcomeCategory(category_id="같은이름", changes=()),
+                OutcomeCategory(category_id="같은이름", changes=()),
+            )
+        )
+
+
+def test_outcome_list_with_max_picks_greater_than_category_count_raises():
+    """`max_picks`가 `categories` 길이보다 크면 `InvalidOutcomeList`다 —
+    고를 수 있는 개수가 목록보다 많을 수 없다."""
+    with pytest.raises(InvalidOutcomeList):
+        OutcomeList(
+            categories=(OutcomeCategory(category_id=NO_CHANGE_CATEGORY_ID, changes=()),),
+            max_picks=2,
+        )
+
+
+def test_validate_outcome_list_rejects_unknown_axis_name():
+    """변화가 가리키는 축 이름이 룰북의 `resource_axes`에 없으면
+    `InvalidOutcomeList`다."""
+    outcome_list = OutcomeList(
+        categories=(
+            OutcomeCategory(
+                category_id="자원을 소모시킨다",
+                changes=(ResourceChangeDecl(axis="없는축", operation="delta", amount=-1),),
+            ),
+        )
+    )
+    rulebook = _test_rulebook_with_outcome_list(
+        (ResourceAxisDecl(name="체력", form="numeric"),), outcome_list
+    )
+    with pytest.raises(InvalidOutcomeList):
+        validate_outcome_list(rulebook.outcome_list, rulebook)
+
+
+def test_validate_outcome_list_rejects_none_form_axis():
+    """`form="none"`인 축을 가리키는 변화를 담은 목록이 거부된다 — 그
+    축에는 바꿀 값 자체가 없다."""
+    outcome_list = OutcomeList(
+        categories=(
+            OutcomeCategory(
+                category_id="소지품을 빼앗는다",
+                changes=(ResourceChangeDecl(axis="소지품", operation="delta", amount=-1),),
+            ),
+        )
+    )
+    rulebook = _test_rulebook_with_outcome_list(
+        (ResourceAxisDecl(name="소지품", form="none", none_kind="discretionary"),),
+        outcome_list,
+    )
+    with pytest.raises(InvalidOutcomeList):
+        validate_outcome_list(rulebook.outcome_list, rulebook)
+
+
+def test_validate_outcome_list_rejects_form_operation_mismatch():
+    """축의 `form`과 변화의 `operation`이 어긋나면(`numeric`에 `add_tag`)
+    `InvalidOutcomeList`다."""
+    outcome_list = OutcomeList(
+        categories=(
+            OutcomeCategory(
+                category_id="상태를 붙인다",
+                changes=(ResourceChangeDecl(axis="체력", operation="add_tag", amount=1),),
+            ),
+        )
+    )
+    rulebook = _test_rulebook_with_outcome_list(
+        (ResourceAxisDecl(name="체력", form="numeric"),), outcome_list
+    )
+    with pytest.raises(InvalidOutcomeList):
+        validate_outcome_list(rulebook.outcome_list, rulebook)
+
+
+def test_validate_outcome_list_passes_for_matching_axis_form_operation():
+    """축 이름·형태·동작이 전부 맞으면 예외 없이 통과한다."""
+    outcome_list = OutcomeList(
+        categories=(
+            OutcomeCategory(
+                category_id="자원을 소모시킨다",
+                changes=(ResourceChangeDecl(axis="체력", operation="delta", amount=-2),),
+            ),
+            OutcomeCategory(category_id=NO_CHANGE_CATEGORY_ID, changes=()),
+        )
+    )
+    rulebook = _test_rulebook_with_outcome_list(
+        (ResourceAxisDecl(name="체력", form="numeric"),), outcome_list
+    )
+    validate_outcome_list(rulebook.outcome_list, rulebook)  # 예외 없이 통과한다
+
+
+def test_require_outcome_category_raises_for_unknown_id():
+    """선언에 없는 식별자면 `UnknownOutcomeCategory`다 — `require_band`와
+    같은 모양."""
+    outcome_list = OutcomeList(
+        categories=(OutcomeCategory(category_id=NO_CHANGE_CATEGORY_ID, changes=()),)
+    )
+    with pytest.raises(UnknownOutcomeCategory):
+        require_outcome_category(outcome_list, "존재하지 않는 항목")
+    assert require_outcome_category(outcome_list, NO_CHANGE_CATEGORY_ID).category_id == (
+        NO_CHANGE_CATEGORY_ID
+    )
+
+
+def test_ordered_categories_ignores_pick_order_uses_declaration_order():
+    """`ordered_categories`가 고른 순서를 뒤집어 넣어도 선언 순서로 정렬된
+    같은 튜플을 돌려준다(RULE-13 ordering) — 순서를 고정하면 같은 조합은
+    항상 같은 결과다."""
+    a = OutcomeCategory(category_id="a", changes=())
+    b = OutcomeCategory(category_id="b", changes=())
+    c = OutcomeCategory(category_id="c", changes=())
+    outcome_list = OutcomeList(categories=(a, b, c), max_picks=3)
+
+    forward = ordered_categories(outcome_list, ["a", "c"])
+    reversed_pick = ordered_categories(outcome_list, ["c", "a"])
+
+    assert forward == (a, c)
+    assert reversed_pick == (a, c)
+    assert forward == reversed_pick
+
+
+def test_ordered_categories_rejects_the_same_category_picked_twice():
+    """같은 결과 카테고리를 두 번 고르면 `InvalidOutcomeList`다."""
+    a = OutcomeCategory(category_id="a", changes=())
+    outcome_list = OutcomeList(categories=(a,), max_picks=1)
+    with pytest.raises(InvalidOutcomeList):
+        ordered_categories(outcome_list, ["a", "a"])
+
+
+def test_retro_declaration_allowed_requires_cost_axis_and_operation():
+    """허용한다면 비용 축·동작을 반드시 선언해야 한다(D-16)."""
+    with pytest.raises(InvalidOutcomeList):
+        RetroDeclarationDecl(allowed=True)
+    with pytest.raises(InvalidOutcomeList):
+        RetroDeclarationDecl(allowed=True, cost_axis="Hit Protection")
+    valid = RetroDeclarationDecl(allowed=True, cost_axis="Hit Protection", operation="delta")
+    assert valid.cost_axis == "Hit Protection"
+    assert valid.operation == "delta"
+
+
+def test_retro_declaration_not_allowed_forbids_cost_axis():
+    """소급 선언을 아예 안 쓰는 룰북(`allowed=False`)이 정상값이고, 그때
+    비용 축은 채울 수 없다."""
+    RetroDeclarationDecl(allowed=False)  # 예외 없이 통과한다
+    with pytest.raises(InvalidOutcomeList):
+        RetroDeclarationDecl(allowed=False, cost_axis="Hit Protection", operation="delta")
+
+
+def test_validate_outcome_list_checks_retro_declaration_cost_axis_too():
+    """`RetroDeclarationDecl.cost_axis`도 축 이름·형태·동작 세 검증을
+    지난다 — 존재하지 않는 축을 가리키면 거부된다."""
+    rulebook = _test_rulebook_with_outcome_list(
+        (ResourceAxisDecl(name="소지품", form="named_slots", slot_count=10),),
+        OutcomeList(categories=()),
+        retro_declaration=RetroDeclarationDecl(
+            allowed=True, cost_axis="없는축", operation="fill"
+        ),
+    )
+    with pytest.raises(InvalidOutcomeList):
+        validate_outcome_list(rulebook.outcome_list, rulebook)
 
 
 # ---------------------------------------------------------------------------

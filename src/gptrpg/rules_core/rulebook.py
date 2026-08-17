@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from gptrpg.rules_core.entities import Entity, NoneKind, ResourceAxisForm
+from gptrpg.rules_core.resource_change import ResourceChangeDecl, ResourceOperation
 
 TWO_D6 = "2d6"
 """판정 **방식** 이름 — 플랫폼이 제공하는 계산 능력의 이름이지 룰북 어휘가 아니다."""
@@ -199,6 +200,104 @@ class DifficultyLevelDecl:
     value: int
 
 
+NO_CHANGE_CATEGORY_ID = "no_change"
+"""이 결과 카테고리를 고르면 아무 자원도 안 바뀐다(D-09) — 「이번엔 숫자가
+안 변한다」를 결과 목록 안의 **정상 항목**으로 표현한다. 이 항목이 없으면
+판정마다 확인 창이 떠서 장면이 계속 끊긴다 — 이 항목 하나가 확인 창을
+「정말 변할 때만」 뜨게 만든다."""
+
+
+@dataclass(frozen=True)
+class OutcomeCategory:
+    """결과 목록(RULE-13/D-11)의 항목 하나 — 「무슨 일이 일어나는 **종류**」
+    까지만 데이터다.
+
+    `category_id`는 플랫폼이 부여하는 식별자이지 룰북 어휘가 아니다
+    (`GradeBand.name`과 같은 성격의 이름 목록). `changes`가 빈 튜플인
+    항목(`category_id == NO_CHANGE_CATEGORY_ID`)은 D-09가 요구하는
+    「이번엔 숫자가 안 변한다」다.
+
+    **이 클래스에는 서술 문장을 담는 필드가 없다.** `RULEBOOK-SURVEY.md`
+    §3-C가 명시적으로 못박은 경고를 그대로 인용한다: 「무엇이 일어나는
+    종류」는 데이터가 되지만 「이 장면 이 순간에 구체적으로 어떤 문장인지」는
+    영원히 재량이다. 목록을 늘리면 언젠가 그 재량이 없어질 거라 오해하면
+    안 된다.
+    """
+
+    category_id: str
+    changes: tuple[ResourceChangeDecl, ...]
+
+
+@dataclass(frozen=True)
+class OutcomeList:
+    """룰북이 선언하는 결과 카테고리 닫힌 목록(RULE-13).
+
+    `categories`가 빈 튜플인 것은 **정상값**이다 — 미완성이 아니라 이
+    룰북에 결과 목록 개념 자체가 없다는 뜻이다(`Rulebook.check_trigger_mode`가
+    빈 무브 목록의 두 갈래를 구분하는 것과 같은 판단, D-12). 목록이 없는
+    룰북은 판정만으로 숫자가 안 변하고, 결과는 전부 재량 판정(12-06)으로
+    간다(D-07의 귀결).
+
+    `max_picks`(D-12)는 한 번에 몇 개를 고를 수 있는지를 룰북이 선언한다
+    — 하나로 못 박지도, 무제한으로 두지도 않는다. `categories`가 비어
+    있으면 `max_picks`는 뜻이 없으므로(고를 목록 자체가 없다) 검사하지
+    않는다 — `max_picks=1`(기본값)이 붙은 빈 목록도 정상값이다.
+    """
+
+    categories: tuple[OutcomeCategory, ...]
+    max_picks: int = 1
+
+    def __post_init__(self) -> None:
+        ids = [category.category_id for category in self.categories]
+        if len(ids) != len(set(ids)):
+            raise InvalidOutcomeList(
+                "같은 식별자의 결과 카테고리가 목록 안에 두 번 이상 있다 — 겹치면"
+                " 어느 쪽이 이기는지 정해지지 않는다"
+            )
+        if self.categories:
+            if self.max_picks < 1:
+                raise InvalidOutcomeList(
+                    "목록이 있는데 max_picks가 1 미만이다 — 목록이 있다면 최소"
+                    " 하나는 고를 수 있어야 한다"
+                )
+            if self.max_picks > len(self.categories):
+                raise InvalidOutcomeList(
+                    "max_picks가 categories 길이보다 크다 — 고를 수 있는 개수가"
+                    " 목록보다 많을 수 없다"
+                )
+
+
+@dataclass(frozen=True)
+class RetroDeclarationDecl:
+    """소급 선언(사후 선언형 로드아웃, D-16) 허용 여부와 그 비용이 빠지는 축.
+
+    `allowed=True`면 `cost_axis`(어느 자원 축에서 비용이 빠지는지)와
+    `operation`(그 축에 어떤 동작으로 비용이 적용되는지)을 반드시 선언해야
+    한다 — **축과 동작은 룰북이 잠그고, 실제 양은 그때그때(장면마다) 정해진다.**
+    이 두 칸은 `ResourceChangeDecl`의 같은 이름 칸을 그대로 쓴다(D-16) — 소급
+    선언 비용을 위한 새 형식을 만들지 않는다.
+
+    `allowed=False`(기본값)면 이 룰북에 소급 선언 개념 자체가 없다는 뜻이고,
+    그때는 `cost_axis`/`operation`도 채울 수 없다.
+    """
+
+    allowed: bool
+    cost_axis: str | None = None
+    operation: ResourceOperation | None = None
+
+    def __post_init__(self) -> None:
+        if self.allowed:
+            if self.cost_axis is None or self.operation is None:
+                raise InvalidOutcomeList(
+                    "소급 선언을 허용하면 cost_axis와 operation을 반드시 선언해야"
+                    " 한다 — 축과 동작은 룰북이 잠그고 양만 그때그때 정해진다(D-16)"
+                )
+        elif self.cost_axis is not None or self.operation is not None:
+            raise InvalidOutcomeList(
+                "소급 선언을 허용하지 않으면 cost_axis/operation을 채울 수 없다"
+            )
+
+
 @dataclass(frozen=True)
 class Rulebook:
     """룰북 하나의 선언 전체 — 어떤 판정 방식을 쓰고 어떤 등급 밴드/자원
@@ -214,6 +313,15 @@ class Rulebook:
     """이 룰북이 판정에 받아들이는 닫힌 난이도 이름 목록(D-02). 기본값
     빈 튜플이 「이 룰북에는 그 개념이 없다」다 — 던전월드류·Cairn처럼 난이도
     개념이 없는 룰북은 이 칸을 채우지 않는다."""
+    outcome_list: OutcomeList = OutcomeList(categories=())
+    """판정이 나빴을 때(또는 대가가 붙을 때) 고르는 결과 카테고리 닫힌
+    목록(RULE-13). 기본값(빈 목록)이 「이 룰북에는 그 개념이 없다」다 —
+    빈 목록은 미완성이 아니라 정상값이고, 그 룰북은 판정만으로 숫자가 안
+    변해 재량 판정으로 간다(D-07의 귀결) — `check_trigger_mode`가 세운
+    같은 형식의 판단이다."""
+    retro_declaration: RetroDeclarationDecl = RetroDeclarationDecl(allowed=False)
+    """소급 선언(D-16) 허용 여부. 기본값(`allowed=False`)이 「이 룰북에는
+    그 개념이 없다」다."""
 
     def __post_init__(self) -> None:
         names = [axis.name for axis in self.resource_axes]
@@ -449,6 +557,150 @@ def require_difficulty(rulebook: "Rulebook", name: str) -> DifficultyLevelDecl:
         if level.name == name:
             return level
     raise UnknownDifficultyLevel(name)
+
+
+class InvalidOutcomeList(Exception):
+    """`OutcomeList`/`RetroDeclarationDecl` 선언 자체나 룰북의 자원 축과의
+    대조가 유효하지 않을 때 던진다.
+
+    조용히 통과하면 결과 카테고리가 존재하지 않는 축이나 잘못된 형태를
+    가리킨 채로 등록되고, 그 어긋남은 실제 판정에서 자원을 바꾸려는
+    순간에야 드러난다 — `InvalidResourceAxis`/`InvalidStatUsage`가 세운
+    "조용히 넘기지 않는다" 규율을 그대로 따른다.
+    """
+
+    def __init__(
+        self,
+        reason: str,
+        rulebook_id: str | None = None,
+        category_id: str | None = None,
+        axis_name: str | None = None,
+    ) -> None:
+        super().__init__(
+            f"결과 목록 선언이 유효하지 않다: {reason} (rulebook_id={rulebook_id!r},"
+            f" category_id={category_id!r}, axis_name={axis_name!r})"
+        )
+        self.reason = reason
+        self.rulebook_id = rulebook_id
+        self.category_id = category_id
+        self.axis_name = axis_name
+
+
+class UnknownOutcomeCategory(Exception):
+    """룰북 선언에 없는 결과 카테고리 식별자로 찾으려 했을 때 던진다 —
+    `UnknownGradeName`/`UnknownDifficultyLevel`과 같은 이유: 오타난·조작된
+    식별자가 조용히 기록에 남는 경로를 막는다."""
+
+    def __init__(self, category_id: str) -> None:
+        super().__init__(f"룰북 선언에 없는 결과 카테고리 식별자: {category_id!r}")
+        self.category_id = category_id
+
+
+def require_outcome_category(outcome_list: OutcomeList, category_id: str) -> OutcomeCategory:
+    """이름으로 카테고리를 찾는다. 없으면 `UnknownOutcomeCategory` —
+    `require_band`/`require_difficulty`와 같은 모양이다."""
+    for category in outcome_list.categories:
+        if category.category_id == category_id:
+            return category
+    raise UnknownOutcomeCategory(category_id)
+
+
+def ordered_categories(
+    outcome_list: OutcomeList, picked_ids: Iterable[str]
+) -> tuple[OutcomeCategory, ...]:
+    """고른 식별자들을 고른 순서와 무관하게 **룰북 선언 순서**로 정렬해
+    돌려준다(RULE-13 ordering).
+
+    일부 동작(사용 주사위 등급을 내린다 등)은 적용 순서에 따라 결과가
+    달라진다 — 고른 순서를 그대로 쓰면 같은 조합이라도 결과가 갈릴 수
+    있다. 선언 순서로 고정하면 같은 조합은 항상 같은 결과다(재생 일치,
+    D-06과 같은 이유).
+
+    같은 식별자가 두 번 들어오면 `InvalidOutcomeList`로 거절한다 — 같은
+    항목을 두 번 적용할지 한 번만 적용할지가 정해지지 않기 때문이다.
+    목록에 없는 식별자가 들어오면 `UnknownOutcomeCategory`다.
+    """
+    picked_list = list(picked_ids)
+    if len(picked_list) != len(set(picked_list)):
+        raise InvalidOutcomeList("같은 결과 카테고리를 두 번 골랐다")
+
+    picked_set = set(picked_list)
+    ordered = tuple(
+        category for category in outcome_list.categories if category.category_id in picked_set
+    )
+    found_ids = {category.category_id for category in ordered}
+    missing = picked_set - found_ids
+    if missing:
+        raise UnknownOutcomeCategory(next(iter(sorted(missing))))
+    return ordered
+
+
+_FORM_ALLOWED_OPERATIONS: dict[ResourceAxisForm, tuple[ResourceOperation, ...]] = {
+    "numeric": ("delta",),
+    "clock": ("advance",),
+    "named_slots": ("fill", "clear"),
+    "tag_list": ("add_tag", "remove_tag"),
+    "usage_die": ("step_down", "deplete"),
+    "none": (),
+}
+"""`ResourceAxisForm` → 그 형태가 허용하는 `ResourceOperation` 목록 —
+`resource_change.ResourceOperation` 도크스트링의 형태 × 동작 대응표를
+등록 시점 검증용으로 거울처럼 옮긴 것이다. **실제 적용 시점 검증은
+`apply_resource_op`이 한다** — 두 표가 서로 다른 규칙을 가지면 등록에서
+통과한 결과 목록이 런타임에 `InvalidResourceChange`를 던지는 어긋남이
+생긴다. 동작 이름이 늘 때 이 표도 함께 갱신해야 한다."""
+
+
+def validate_outcome_list(outcome_list: OutcomeList, rulebook: Rulebook) -> None:
+    """결과 목록의 각 변화와 소급 선언 비용 축이 그 룰북의 자원 축과
+    어긋나지 않는지 검사한다 — `validate_entity_axes`/`validate_move_stats`가
+    세운 "룰북과의 대조는 별도 함수" 배치를 그대로 따른다.
+
+    변화 하나마다 세 검증을 지난다:
+    ⓐ 축 이름이 `rulebook.resource_axes`에 있는가(파이썬 `==` 완전 일치,
+       `validate_entity_axes`와 같은 비교 규약)
+    ⓑ 그 축의 `form`이 `"none"`이 아닌가 — 그 축에는 바꿀 값 자체가 없다
+    ⓒ 축의 `form`과 변화의 `operation`이 `_FORM_ALLOWED_OPERATIONS` 대응표에
+       맞는가
+
+    `RetroDeclarationDecl.cost_axis`/`.operation`도(허용된 경우) 같은 세
+    검증을 지난다.
+    """
+    axes_by_name = {axis.name: axis for axis in rulebook.resource_axes}
+
+    def _check(axis_name: str, operation: ResourceOperation) -> None:
+        axis = axes_by_name.get(axis_name)
+        if axis is None:
+            raise InvalidOutcomeList(
+                f"결과 목록이 가리키는 축 {axis_name!r}이 룰북"
+                f" {rulebook.rulebook_id!r}의 자원 축 목록에 없다",
+                rulebook_id=rulebook.rulebook_id,
+                axis_name=axis_name,
+            )
+        if axis.form == "none":
+            raise InvalidOutcomeList(
+                f"축 {axis_name!r}은 form이 none이라 바꿀 값 자체가 없다",
+                rulebook_id=rulebook.rulebook_id,
+                axis_name=axis_name,
+            )
+        allowed_ops = _FORM_ALLOWED_OPERATIONS[axis.form]
+        if operation not in allowed_ops:
+            raise InvalidOutcomeList(
+                f"축 {axis_name!r}(form={axis.form!r})은 {operation!r} 동작을 받지"
+                f" 않는다(허용: {allowed_ops})",
+                rulebook_id=rulebook.rulebook_id,
+                axis_name=axis_name,
+            )
+
+    for category in outcome_list.categories:
+        for change in category.changes:
+            _check(change.axis, change.operation)
+
+    if rulebook.retro_declaration.allowed:
+        cost_axis = rulebook.retro_declaration.cost_axis
+        operation = rulebook.retro_declaration.operation
+        assert cost_axis is not None and operation is not None  # RetroDeclarationDecl 규약
+        _check(cost_axis, operation)
 
 
 class EntityAxisMismatch(Exception):
