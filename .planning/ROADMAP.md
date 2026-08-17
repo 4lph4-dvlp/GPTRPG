@@ -430,7 +430,7 @@ RULE-10, RULE-13, RULE-14, RULE-16, QUAL-01, QUAL-02, QUAL-06, TEST-04
   8. 「자원이 얼마나 바뀌는가」의 선언 형식이 효과 표현(D7)의 첫 원자 연산으로 자랄 수 있는
      모양이다
 
-**Plans**: 1/7 plans executed (5 waves)
+**Plans**: 2/7 plans executed (5 waves)
 
 Plans:
 **Wave 1**
@@ -439,7 +439,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 12-02-PLAN.md — 양(고정·주사위) · 여섯 표현 형태별 변화 · 최대치 자르기 · 사건 순번/형식 방어 (wave 2)
+- [x] 12-02-PLAN.md — 양(고정·주사위) · 여섯 표현 형태별 변화 · 최대치 자르기 · 사건 순번/형식 방어 (wave 2)
 - [ ] 12-03-PLAN.md — 세션1 실기록 회귀 픽스처를 커밋해 CI에서 실제로 돌린다 (wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -756,7 +756,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 9. 에이전트 구조 재편 | v1.1 | 4/4 | Complete    | 2026-08-12 |
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 7/7 | Complete    | 2026-08-14 |
 | 11. 룰북 표현 어휘 확장 | v1.1 | 7/7 | Complete    | 2026-08-17 |
-| 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 1/7 | In Progress|  |
+| 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 2/7 | In Progress|  |
 | 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 0/TBD | Not started | - |
 | 13. 장면 — 오프닝과 대상 | v1.1 | 0/TBD | Not started | - |
 | 14. 기억 유지 — 관계 장부 · 문맥 압축기 · 저장소 색인 | v1.1 | 0/TBD | Not started | - |

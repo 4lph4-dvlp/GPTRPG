@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12
 current_phase_name: stats-resources-inventory
 status: executing
-stopped_at: Phase 12 Plan 1 (12-01) complete
-last_updated: "2026-08-17T05:37:04.000Z"
+stopped_at: Completed 12-02-PLAN.md (12-02)
+last_updated: "2026-08-17T06:23:37.865Z"
 last_activity: 2026-08-17
 last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 29
-  completed_plans: 22
+  completed_plans: 24
   percent: 36
 ---
 
@@ -31,8 +31,8 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12 (stats-resources-inventory) — EXECUTING
-Plan: 2 of 7
-Status: Executing Phase 12 — 12-01 complete (RULE-02/03/04/05/06/09 첫 관통, 12-02가 RULE-09의
+Plan: 3 of 7
+Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인트 승인 + Task 2·3 커밋)
 
@@ -42,7 +42,7 @@ Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인�
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [██████████] 100%
+Progress: [████████░░] 83%
 
 ## Performance Metrics
 
@@ -114,6 +114,7 @@ Progress: [██████████] 100%
 | Phase 11 P06 | ~3시간20분(사람 확인 대기 포함) | 3 tasks | 15 files |
 | Phase 11 P07 | ~90min | 3 tasks | 15 files |
 | Phase 12 P01 | ~2h30m (체크포인트 승인 대기 제외) | 3 tasks | 21 files |
+| Phase 12 P02 | ~20min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -236,6 +237,11 @@ Progress: [██████████] 100%
 - [Phase 12]: 12-01 [deviation, Rule 4 — 계획 자기모순 해소, 승인 불필요 조건에 해당]: 계획 원문은 ResolveCheck.stat 빈 문자열을 person_id/character_id처럼 거부하라고 적었으나, Task 2 자신의 <verify>가 요구하는 test_session_actor.py가 stat 없이 ResolveCheck를 부르는 기존 호출을 여러 건 갖고 있어 문자 그대로 하면 그 파일이 깨진다. 빈 stat은 "건너뛴다"로 구현(opt-in) — 웹 confirm()은 ConfirmRequest.stat이 이미 필수라 실질적으로 항상 채워진 값을 넘긴다
 - [Phase 12]: 12-01 [deviation, Rule 2 — 계획 자신의 acceptance criteria 재현 불가 문제 해소]: OpenQuest 능력치 일곱 축에 stat_usage="use_as_target" 추가(계획 원문 액션에 없음) — ConfirmRequest.stat이 여전히 필수이고 웹 캐릭터 로스터가 던전월드류뿐이라, 이것 없이는 "OpenQuest + difficulty=hard → 200"이라는 Task 3 acceptance criteria를 HTTP로 재현할 방법이 없었다. 실제 OpenQuest 플레이어 캐릭터·진짜 기술값 판정은 다음 마일스톤 몫으로 파일에 명시
 - [Phase 12]: 12-01 알려진 갭(차단 아님): ResourceChangeRecord.before/after와 ConfirmResponse.total이 항상 None — 각각 액터의 캐릭터 시작값 접근 경로(층 계약 재검토 필요)와 CheckResolved의 total 필드(스키마 변경 필요)가 없어서다. WINDOWS.md 자동 기록은 시도했으나 이 세션에서 gsd-tools 쿼리 계층이 응답 없이 조용히 실패(타임아웃/무출력) — SUMMARY.md의 "Known Stubs" 절이 1차 기록이다
+- [Phase ?]: [Phase 12] 12-02: ResourceChangeDecl.amount의 str 거절(12-01)을 _DICE_EXPR 형식 검사로 좁혔다 — 유효한 주사위식(NdM+flat)은 통과, 그 밖은 여전히 InvalidResourceChange
+- [Phase ?]: [Phase 12] 12-02: ResourceOp.amount를 int에서 int | str로 넓혔다 — named_slots(fill/clear)·tag_list(add_tag/remove_tag)가 문자열 페이로드를 실어야 해서. _require_int_amount/_require_str_amount로 형변환 없이 검증
+- [Phase ?]: [Phase 12] 12-02: clock의 최대치 자르기는 위아래 둘 다(0과 max) — numeric은 위쪽만(0 아래는 룰북 몫, D-08). clock은 max가 항상 필수라는 StatEntry 규약을 그대로 이용
+- [Phase ?]: [Phase 12] 12-02: OutOfOrderEvent 검사를 fold() 한 자리에만 뒀다 — apply_event는 건드리지 않음(두 자리에 검사를 두면 서로 다른 규칙으로 갈릴 수 있다는 _band_matches 관례)
+- [Phase ?]: [Phase 12] 12-02: CorruptEventRecord는 정확히 세 사유(칸 없음/정수 아님/알 수 없는 종류)만 잡는다 — 그 밖의 pydantic 검증 실패는 원래 ValidationError를 그대로 다시 던진다(QUAL-02 edge probe 경계를 안 넘음)
 
 ### Pending Todos
 
@@ -291,10 +297,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-17T14:37:04+09:00
-Stopped at: Phase 12 Plan 1 (12-01-PLAN.md) 실행 완료 — Task 1 체크포인트 사용자 승인 후
+Last session: 2026-08-17T06:23:37.827Z
+Stopped at: Completed 12-02-PLAN.md (12-02)
 이어받아 Task 2·Task 3 커밋까지 완료
-Resume file: .planning/phases/12-stats-resources-inventory/12-02-PLAN.md
+Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
 `resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
