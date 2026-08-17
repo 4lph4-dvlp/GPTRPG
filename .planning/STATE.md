@@ -5,8 +5,8 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12
 current_phase_name: 능력치 · 자원 변화 · 소지품
 status: planning
-stopped_at: Completed 11-07-PLAN.md — Phase 11 전체 계획 7/7 완료
-last_updated: "2026-08-16T19:05:31.791Z"
+stopped_at: Phase 12 context gathered
+last_updated: "2026-08-17T02:19:15.425Z"
 last_activity: 2026-08-17
 last_activity_desc: Phase 11 complete, transitioned to Phase 12
 progress:
@@ -280,10 +280,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-16T15:34:07.535Z
-Stopped at: Completed 11-07-PLAN.md — Phase 11 전체 계획 7/7 완료
+Last session: 2026-08-17T02:19:15.391Z
+Stopped at: Phase 12 context gathered
 Traceability 갱신 완료
-Resume file: None
+Resume file: .planning/phases/12-stats-resources-inventory/12-CONTEXT.md
 
 **다음 행동:** Phase 10(AI 출력 검증과 탈옥 방어) **논의 완료** — `10-CONTEXT.md`에 결정
 13개가 잠겼다. 다음은 `/gsd-plan-phase 10`(조사 → 계획).
