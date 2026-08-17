@@ -433,12 +433,26 @@ RULE-10, RULE-13, RULE-14, RULE-16, QUAL-01, QUAL-02, QUAL-06, TEST-04
 **Plans**: 7 plans (5 waves)
 
 Plans:
+**Wave 1**
+
 - [ ] 12-01-PLAN.md — 뼈대: 능력치 → 판정 → 자원 하나 변화 → 기록 → 시트 한 줄기 + 바깥 숫자 통로 폐쇄 (wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 12-02-PLAN.md — 양(고정·주사위) · 여섯 표현 형태별 변화 · 최대치 자르기 · 사건 순번/형식 방어 (wave 2)
 - [ ] 12-03-PLAN.md — 세션1 실기록 회귀 픽스처를 커밋해 CI에서 실제로 돌린다 (wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 12-04-PLAN.md — 등급의 세 칸(성공/대가/실패로 셈) + 결과 카테고리 닫힌 목록 선언 (wave 3)
 - [ ] 12-05-PLAN.md — AI가 파티 전원의 상태를 본다, 분류기는 못 본다 (wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 12-06-PLAN.md — 목록에서 고르기 · 자원 변화 확인 관문 · 재량 판정 · 소지품 대조 (wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 12-07-PLAN.md — 검산 표시 · 자원 변화 알림 · 확인 화면 (wave 5)
 
 > **이 단계가 가장 무겁다** — 요구사항 16개다. 쪼개지 않은 이유는 전부 같은 파일

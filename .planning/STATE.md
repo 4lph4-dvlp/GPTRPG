@@ -4,15 +4,15 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12
 current_phase_name: 능력치 · 자원 변화 · 소지품
-status: planning
+status: executing
 stopped_at: Phase 12 context gathered
-last_updated: "2026-08-17T02:19:15.425Z"
+last_updated: "2026-08-17T03:40:57.624Z"
 last_activity: 2026-08-17
 last_activity_desc: Phase 11 complete, transitioned to Phase 12
 progress:
   total_phases: 11
   completed_phases: 4
-  total_plans: 22
+  total_plans: 29
   completed_plans: 22
   percent: 36
 ---
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 12 — 능력치 · 자원 변화 · 소지품
 Plan: Not started
-Status: Ready to plan
+Status: Ready to execute
 Last activity: 2026-08-17 — Phase 11 complete, transitioned to Phase 12
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
