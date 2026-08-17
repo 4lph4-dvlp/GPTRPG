@@ -11,8 +11,17 @@
 (`shutil.copy`) — 를 그대로 따른다. 이 파일은 그 스모크를 대체하지 않고,
 ① `.gptrpg/uat9.db`(판 5)까지 넓히고 ② 판 6 양방향 확인(새로 쓴
 `safety_flagged` 사건도 같은 경로로 접힌다)을 더한다.
+
+**⑤절(12-03-PLAN.md, TEST-04)이 이 파일 끝에 더해졌다.** ①②의 시험들은
+`.gptrpg/*`가 gitignore 대상이라 CI에서 항상 건너뛰어지고, 그래서 "다음에는
+CI가 잡는다"는 TEST-04의 목적이 지금까지 달성되지 않았다. ⑤절은
+`tests/fixtures/session1_events.jsonl`(저장소에 커밋된 session1 895건
+사본)을 읽어 건너뛰기 표시 없이 항상 도는 회귀 그물을 만든다 — ①②의 로컬 스모크는
+그대로 남는다.
 """
 
+import dataclasses
+import json
 import shutil
 import sqlite3
 from pathlib import Path
@@ -20,7 +29,13 @@ from pathlib import Path
 import pytest
 
 from conftest import PROJECT_ROOT
-from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ResourceChanged, SafetyFlagged, utc_now_iso
+from gptrpg.event_log.schema import (
+    EVENT_SCHEMA_VERSION,
+    ResourceChanged,
+    SafetyFlagged,
+    parse_event,
+    utc_now_iso,
+)
 from gptrpg.event_log.store import EventStore
 from gptrpg.session_actor.projection import rebuild_state_from_events
 
@@ -304,6 +319,134 @@ def test_event_schema_version_is_eight():
     현재 판이다. 누가 무심코 판을 또 올리거나 내리면 이 값이 바뀌어 이
     시험이 잡는다."""
     assert EVENT_SCHEMA_VERSION == 8
+
+
+def _tuple_key_to_str(key: tuple) -> str:
+    """튜플 딕셔너리 키를 JSON 객체 키 문자열로 바꾼다.
+
+    **`scripts/export_session_fixture.py`의 같은 이름 함수와 반드시 같은 규칙이다**
+    (`"::"`로 이어붙임) — 커밋된 `tests/fixtures/session1_expected_state.json`이
+    바로 그 스크립트로 만들어졌으므로, 두 규칙이 갈리면 이 시험이 비교하는
+    두 값의 키 모양 자체가 달라져 무의미해진다. import 대신 여기 다시 쓴
+    이유는 `scripts/`가 설치된 패키지가 아니라 테스트 임포트 경로에 없기
+    때문이다(12-03-PLAN.md Task 2 action ②가 허용한 대안).
+    """
+    return "::".join(str(part) for part in key)
+
+
+def _json_safe(value):
+    """`dataclasses.asdict()` 결과를 커밋된 JSON과 같은 모양으로 정규화한다.
+
+    `scripts/export_session_fixture.py`의 같은 이름 함수와 동일한 규칙 —
+    튜플 키를 가진 딕셔너리만 `_tuple_key_to_str`로 문자열화하고, 나머지
+    구조는 그대로 보존한다.
+    """
+    if isinstance(value, dict):
+        converted = {}
+        for key, sub_value in value.items():
+            if isinstance(key, tuple):
+                key = _tuple_key_to_str(key)
+            converted[key] = _json_safe(sub_value)
+        return converted
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+# ---------------------------------------------------------------------------
+# ⑤ 커밋된 픽스처 — CI에서 실제로 도는 회귀 그물 (TEST-04)
+#
+# ①②의 시험들은 전부 `.gptrpg/*`가 gitignore 대상이라 CI에서 항상
+# 건너뛰어졌고, 그래서 "다음에는 CI가 잡는다"는 TEST-04의 목적이 지금까지
+# 달성되지 않았다. 이 절의 시험 넷은 `.gptrpg/events.db`가 아니라
+# `tests/fixtures/session1_events.jsonl`(저장소에 커밋된 사본)을 읽으므로
+# 건너뛰기 표시가 없다 — 로컬 파일 유무와 무관하게 항상 돈다(12-03-PLAN.md).
+# ---------------------------------------------------------------------------
+
+_FIXTURES_DIR = PROJECT_ROOT / "tests" / "fixtures"
+_SESSION1_EVENTS_JSONL = _FIXTURES_DIR / "session1_events.jsonl"
+_SESSION1_EXPECTED_STATE_JSON = _FIXTURES_DIR / "session1_expected_state.json"
+
+
+def _load_committed_session1_events() -> list:
+    """커밋된 JSONL의 895줄을 순서대로 `parse_event`로 되돌린다."""
+    lines = _SESSION1_EVENTS_JSONL.read_text(encoding="utf-8").splitlines()
+    return [parse_event(line) for line in lines if line.strip()]
+
+
+def test_committed_session1_fixture_has_895_events_all_schema_version_2():
+    """커밋된 JSONL 895줄이 전부 `parse_event`로 예외 없이 사건 객체로
+    되돌아온다 — 옛 판(2)으로 쓰인 895건이 지금 코드로 예외 없이 접힌다는
+    확인의 첫 단계다."""
+    events = _load_committed_session1_events()
+    assert len(events) == 895
+    assert all(event.schema_version == 2 for event in events)
+
+
+def test_committed_session1_fixture_folds_to_expected_state(tmp_path):
+    """커밋된 895건을 빈 `EventStore`에 새로 넣고 다시 읽어 접은 `GameState`가
+    커밋된 기대 상태 JSON과 **모든 필드에서** 같다.
+
+    이것이 이 절의 핵심 회귀 그물이다 — `.gptrpg/events.db`가 이 체크아웃에
+    있든 없든, CI를 포함한 모든 환경에서 항상 실행된다(건너뛰기 표시 없음).
+    """
+    events = _load_committed_session1_events()
+
+    store = EventStore(tmp_path / "session1-replay.db")
+    store.initialize()
+    try:
+        for event in events:
+            store.append(event)
+        replayed_events = store.read_events("session1")
+    finally:
+        store.close()
+
+    state = rebuild_state_from_events("session1", replayed_events)
+    # `json.dumps`로 한 번 더 돌린다 — dict의 int 키(예: `confirm_to_declare`의
+    # 순번)를 문자열로 정규화하는 것은 `json` 모듈 자체의 동작이고, 커밋된
+    # 기대값 파일(`scripts/export_session_fixture.py`가 `json.dump`로 만듦)도
+    # 이미 그 정규화를 거쳤다. `actual`도 같은 정규화를 거쳐야 「모든 필드에서
+    # 같다」는 비교가 키 타입 차이(0 vs "0")로 인한 거짓 회귀를 만들지 않는다.
+    actual = json.loads(json.dumps(_json_safe(dataclasses.asdict(state)), ensure_ascii=False))
+    expected = json.loads(_SESSION1_EXPECTED_STATE_JSON.read_text(encoding="utf-8"))
+
+    assert actual == expected, (
+        "session1 895건의 재생 결과가 커밋된 기대 상태와 달라졌다 — "
+        "사건 해석 규칙이 바뀌었다. 의도한 변경(계획 문서에 근거가 있는 "
+        "변경)이면 tests/fixtures/README.md의 갱신 규칙을 따라 "
+        "scripts/export_session_fixture.py를 다시 돌려 기대값을 갱신할 것. "
+        "그렇지 않다면 이것은 회귀이므로 기대값이 아니라 코드를 고쳐야 한다."
+    )
+
+
+def test_committed_session1_fixture_has_no_resource_changed_events():
+    """895건 안에 `resource_changed` 사건(판 8, 12-01이 신설)이 하나도
+    없다는 것을 명시적으로 단언한다 — 기존
+    `test_events_db_has_no_safety_flagged_events_yet`과 같은 모양이고,
+    「새 종류가 늘 뿐이라 옛 기록에는 그 종류가 없다」는 하위 호환 근거를
+    판 8에 대해 다시 못박는다."""
+    events = _load_committed_session1_events()
+    assert all(event.event_type != "resource_changed" for event in events)
+
+
+def test_committed_session1_fixture_folds_deterministically_when_folded_twice():
+    """같은 픽스처를 두 번 접은 결과가 같다 — `fold`가 부수효과 없는 순수
+    함수라는 것을 이 픽스처로도 확인한다."""
+    events = _load_committed_session1_events()
+
+    store = EventStore(":memory:")
+    store.initialize()
+    try:
+        for event in events:
+            store.append(event)
+        replayed_events = store.read_events("session1")
+    finally:
+        store.close()
+
+    state_first = rebuild_state_from_events("session1", replayed_events)
+    state_second = rebuild_state_from_events("session1", replayed_events)
+
+    assert dataclasses.asdict(state_first) == dataclasses.asdict(state_second)
 
 
 def test_freshly_written_schema_8_resource_changed_event_folds_without_exception(tmp_path):
