@@ -50,7 +50,8 @@ def _turn_ctx(*, clock_at_catastrophe: bool = False) -> TurnContext:
         )
     return TurnContext(
         scene_entities=THREAT_CAST,
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         clock_state=clock_state,
         recent_turns=("플레이어: 문을 두드린다",),
     )
@@ -62,7 +63,8 @@ def _narration_facts(**overrides) -> NarrationFacts:
         scene_summary="문이 부서지고 서늘한 바람이 흘러든다.",
         facts=("경비병이 쓰러졌다",),
         scene_entities=THREAT_CAST,
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=("플레이어: 문을 두드린다",),
         new_entities=(),
     )
@@ -83,7 +85,8 @@ def test_narration_facts_field_names_have_no_clock_state_slot():
         "scene_summary",
         "facts",
         "scene_entities",
-        "character_state",
+        "party_state",
+        "actor_character_id",
         "recent_turns",
         "new_entities",
     }

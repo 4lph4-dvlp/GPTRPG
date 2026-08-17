@@ -30,7 +30,8 @@ def _ctx(**overrides) -> TurnContext:
         scene_entities=(
             Entity(entity_id="guard-1", display_name="경비병", rulebook_id="dungeonworld_like"),
         ),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
         recent_turns=("플레이어: 문을 두드린다",),
     )

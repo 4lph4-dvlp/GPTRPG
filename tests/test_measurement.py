@@ -688,7 +688,8 @@ def test_stall_is_not_retried(fake_session_log) -> None:
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )

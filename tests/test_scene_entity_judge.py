@@ -44,7 +44,8 @@ def _narration_facts(**overrides) -> NarrationFacts:
         scene_summary="문이 부서지고 서늘한 바람이 흘러든다.",
         facts=("경비병이 쓰러졌다",),
         scene_entities=_scene_entities(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=("플레이어: 문을 두드린다",),
         new_entities=(),
     )

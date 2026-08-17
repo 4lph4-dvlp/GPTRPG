@@ -135,7 +135,8 @@ def test_each_family_has_at_least_three_korean_and_three_english_variants():
 def _blank_turn_context(recent_turns: tuple[str, ...] = ()) -> TurnContext:
     return TurnContext(
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
         recent_turns=recent_turns,
     )
@@ -147,7 +148,8 @@ def _blank_narration_facts(**overrides) -> NarrationFacts:
         scene_summary="s",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )

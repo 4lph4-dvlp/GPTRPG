@@ -29,7 +29,8 @@ from gptrpg.rulebooks.moves import get_moves
 def _ctx() -> TurnContext:
     return TurnContext(
         scene_entities=(EXAMPLE_SINGLE_STAT_FOE,),
-        character_state=EXAMPLE_SINGLE_STAT_FOE.stats,
+        party_state=(EXAMPLE_SINGLE_STAT_FOE,),
+        actor_character_id=EXAMPLE_SINGLE_STAT_FOE.entity_id,
         clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )

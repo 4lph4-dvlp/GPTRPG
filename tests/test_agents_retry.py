@@ -196,7 +196,8 @@ class _StreamThenFailProvider:
 def _blank_ctx() -> TurnContext:
     return TurnContext(
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )
@@ -208,7 +209,8 @@ def _blank_facts() -> NarrationFacts:
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )

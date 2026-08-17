@@ -13,7 +13,7 @@ from gptrpg.agents.context import NarrationFacts
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
 from gptrpg.rulebooks.threat_clocks import THREAT_CAST
-from gptrpg.rules_core.entities import StatEntry
+from gptrpg.rules_core.entities import Entity, StatEntry
 
 _CHECK_SUMMARY = "hack_and_slash 판정 결과 miss (목표 10)"
 
@@ -24,7 +24,8 @@ def _narration_facts(**overrides) -> NarrationFacts:
         scene_summary="문이 부서지고 서늘한 바람이 흘러든다.",
         facts=("경비병이 쓰러졌다",),
         scene_entities=THREAT_CAST,
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -329,8 +330,18 @@ def test_character_break_source_overlap_still_takes_priority_when_both_match():
 _RULEBOOK_DISPLAY_NAME = "던전월드 계열"
 
 
+_TEST_ACTOR_ID = "test.actor"
+
+_TEST_ACTOR = Entity(
+    entity_id=_TEST_ACTOR_ID,
+    display_name="테스트 캐릭터",
+    rulebook_id="dungeonworld_like",
+    stats=(StatEntry(name="체력", form="numeric", current=5, max=10),),
+)
+
+
 def _real_narration_facts() -> NarrationFacts:
-    """장면 대상·캐릭터 상태가 채워진 실제 `NarrationFacts` — 세션 고정
+    """장면 대상·파티 상태가 채워진 실제 `NarrationFacts` — 세션 고정
     블록이 대조 소스에서 빠졌다는 판단이 실제로 오탐을 안 낸다는 증거로
     쓴다."""
     return NarrationFacts(
@@ -338,7 +349,8 @@ def _real_narration_facts() -> NarrationFacts:
         scene_summary="문이 부서지고 서늘한 바람이 흘러든다.",
         facts=("경비병이 쓰러졌다",),
         scene_entities=THREAT_CAST,
-        character_state=(StatEntry(name="체력", form="numeric", current=5, max=10),),
+        party_state=(_TEST_ACTOR,),
+        actor_character_id=_TEST_ACTOR_ID,
         recent_turns=(),
         new_entities=(),
     )

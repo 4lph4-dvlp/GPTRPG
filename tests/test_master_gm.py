@@ -122,7 +122,8 @@ def test_narrate_yields_at_least_two_chunks_in_order() -> None:
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -299,7 +300,8 @@ def test_narrate_gives_up_and_marks_failure_when_stream_never_produces_anything(
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -332,7 +334,8 @@ def test_narrate_keeps_already_emitted_sentence_when_stream_stalls_mid_way() -> 
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -367,7 +370,8 @@ def test_narrate_marks_failure_through_delegate_shaped_provider_when_stream_neve
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -392,7 +396,8 @@ def test_narrate_keeps_already_emitted_sentence_through_delegate_shaped_provider
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -422,7 +427,8 @@ def test_narrate_does_not_call_note_result_on_successful_completion() -> None:
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -505,7 +511,8 @@ def test_narrate_through_real_delegating_nim_provider_keeps_emitted_chunk_and_ma
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -535,7 +542,8 @@ def test_narrate_clean_stream_calls_provider_stream_exactly_once() -> None:
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -595,7 +603,8 @@ def test_narrate_regenerates_once_after_a_blocked_sentence_and_calls_stream_twic
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -626,7 +635,8 @@ def test_narrate_regeneration_prompt_carries_avoid_text_and_written_so_far() -> 
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -657,7 +667,8 @@ def test_narrate_regeneration_reuses_identical_system_object() -> None:
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -734,7 +745,8 @@ def test_narrate_gives_up_with_notice_after_regeneration_also_blocks() -> None:
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -762,7 +774,8 @@ def test_narrate_give_up_failure_envelope_preserves_tokens_from_last_successful_
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -854,7 +867,8 @@ def test_narrate_never_exceeds_three_provider_stream_calls_in_a_single_turn() ->
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -895,7 +909,8 @@ def test_narrate_stream_call_count_stays_within_the_three_call_ceiling_across_al
         scene_summary="",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )

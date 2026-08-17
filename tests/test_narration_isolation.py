@@ -44,7 +44,8 @@ def _turn_ctx_with_clock_at_catastrophe():
     )
     return TurnContext(
         scene_entities=THREAT_CAST,
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         clock_state=clock_state,
         recent_turns=(),
     )
@@ -56,7 +57,8 @@ def _narration_facts(**overrides) -> NarrationFacts:
         scene_summary="문이 부서지고 서늘한 바람이 흘러든다.",
         facts=("경비병이 쓰러졌다",),
         scene_entities=THREAT_CAST,
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )

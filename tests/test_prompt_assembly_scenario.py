@@ -10,6 +10,8 @@
 찾으면 `test_narration_isolation.py`에서 "없다"는 짝을 확인할 것.
 """
 
+import pytest
+
 from gptrpg.agents import prompt_assembly
 from gptrpg.agents.context import (
     ClockJudgeContext,
@@ -26,7 +28,7 @@ from gptrpg.event_log.schema import (
     utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
-from gptrpg.rules_core.entities import StatEntry
+from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.rulebook import ResourceAxisDecl
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
@@ -201,7 +203,8 @@ def test_situation_system_does_not_leak_accumulated_failure_count(tmp_db_path):
 def _blank_turn_context() -> TurnContext:
     return TurnContext(
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
         recent_turns=(),
     )
@@ -213,7 +216,8 @@ def _blank_narration_facts(**overrides) -> NarrationFacts:
         scene_summary="s",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -553,3 +557,137 @@ def test_character_state_numeric_form_matches_pre_11_07_string():
     시험이 그대로 통과해야 하는 회귀 없음 증거."""
     stats = (StatEntry(name="체력", form="numeric", current=15, max=20),)
     assert prompt_assembly._format_character_state(stats) == "체력 15"
+
+
+# ---------------------------------------------------------------------------
+# 12-05 Task 2: 파티 전원 vs 행위자 한 명 — D-17/D-18의 핵심 그물.
+#
+# 이 계획의 함정 — `build_classifier_prompt`와 `build_situation_prompt`가
+# 예전에 같은 조립 함수 `_session_block_text`를 공유했다. 그 갈래를
+# 명시적으로 가른 것이 이 계획의 진짜 설계 지점이다. 아래 시험은 두 갈래를
+# 나란히 둔다: ⓐ 상황판단·서술은 파티 넷을 정직하게 다 받는다 ⓑ 분류기는
+# 행위자 한 명만 받는다 — 그 경계가 실제로 지켜지는지 문자열 검색으로 잡는다.
+# ---------------------------------------------------------------------------
+
+
+def _party_of_four() -> tuple[Entity, ...]:
+    """파티 넷, 각자 고유한 축 이름을 가진다 — 분류기 프롬프트 누출 시험이
+    문자열 검색으로 잡히게 만드는 픽스처(D-17)."""
+    return (
+        Entity(
+            entity_id="party.actor",
+            display_name="행위자마루",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            stats=(StatEntry(name="행위자만의축", form="numeric", current=1),),
+        ),
+        Entity(
+            entity_id="party.b",
+            display_name="구성원비",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            stats=(StatEntry(name="비만의축", form="numeric", current=2),),
+        ),
+        Entity(
+            entity_id="party.c",
+            display_name="구성원시",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            stats=(StatEntry(name="시만의축", form="numeric", current=3),),
+        ),
+        Entity(
+            entity_id="party.d",
+            display_name="구성원디",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            stats=(StatEntry(name="디만의축", form="numeric", current=4),),
+        ),
+    )
+
+
+def _turn_ctx_with_party(
+    party: tuple[Entity, ...], actor_character_id: str | None
+) -> TurnContext:
+    return TurnContext(
+        scene_entities=(),
+        party_state=party,
+        actor_character_id=actor_character_id,
+        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
+        recent_turns=(),
+    )
+
+
+def test_classifier_prompt_excludes_non_actor_party_members_names_and_axes():
+    """D-17 핵심 그물 — 분류기 프롬프트에 행위자가 아닌 세 명의 표시
+    이름·그들만 가진 축 이름이 하나도 없다. 행위자 자신의 축 이름은
+    여전히 들어 있다 — 「자기 자신도 안 받는다」가 아니다."""
+    party = _party_of_four()
+    ctx = _turn_ctx_with_party(party, "party.actor")
+    system, _messages = prompt_assembly.build_classifier_prompt(
+        rulebook_display_name="던전월드 계열",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        ctx=ctx,
+        raw_text="문을 연다",
+    )
+    combined = "\n".join(block["text"] for block in system)
+    for member in party[1:]:
+        assert member.display_name not in combined
+        assert member.stats[0].name not in combined
+    assert party[0].stats[0].name in combined
+
+
+def test_situation_and_gm_prompts_include_all_four_party_member_names():
+    """상황판단·서술 프롬프트에는 파티 넷의 표시 이름이 전부 들어 있다
+    (D-17/D-18) — 분류기와 정반대다."""
+    party = _party_of_four()
+    ctx = _turn_ctx_with_party(party, "party.actor")
+    situation_system, _messages = prompt_assembly.build_situation_prompt(
+        rulebook_display_name="던전월드 계열", ctx=ctx, check_summary="c"
+    )
+    situation_combined = "\n".join(block["text"] for block in situation_system)
+    for member in party:
+        assert member.display_name in situation_combined
+
+    facts = NarrationFacts(
+        check_summary="c",
+        scene_summary="s",
+        facts=(),
+        scene_entities=(),
+        party_state=party,
+        actor_character_id="party.actor",
+        recent_turns=(),
+        new_entities=(),
+    )
+    gm_system, _messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=facts
+    )
+    gm_combined = "\n".join(block["text"] for block in gm_system)
+    for member in party:
+        assert member.display_name in gm_combined
+
+
+@pytest.mark.parametrize("party_size", [0, 1, 2, 4])
+def test_all_three_prompts_assemble_without_exception_at_any_party_size(party_size):
+    """파티 크기 0·1·2·4 어느 경우에도 세 프롬프트 조립이 예외 없이 끝난다
+    — 한 명 전제가 되살아나면 이 시험이 즉시 빨개진다(assumption_delta_decision
+    권장 불변 시험)."""
+    party = _party_of_four()[:party_size]
+    actor_character_id = party[0].entity_id if party else None
+    ctx = _turn_ctx_with_party(party, actor_character_id)
+
+    prompt_assembly.build_classifier_prompt(
+        rulebook_display_name="던전월드 계열",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        ctx=ctx,
+        raw_text="문을 연다",
+    )
+    prompt_assembly.build_situation_prompt(
+        rulebook_display_name="던전월드 계열", ctx=ctx, check_summary="c"
+    )
+    facts = NarrationFacts(
+        check_summary="c",
+        scene_summary="s",
+        facts=(),
+        scene_entities=(),
+        party_state=party,
+        actor_character_id=actor_character_id,
+        recent_turns=(),
+        new_entities=(),
+    )
+    prompt_assembly.build_gm_prompt(rulebook_display_name="던전월드 계열", facts=facts)

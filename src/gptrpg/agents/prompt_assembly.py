@@ -18,6 +18,7 @@ import re
 import unicodedata
 
 from gptrpg.agents.context import (
+    ActorNotInParty,
     ClockJudgeContext,
     ContextCapExceeded,
     EntityJudgeContext,
@@ -25,6 +26,7 @@ from gptrpg.agents.context import (
     SITUATION_FACTS_LIMIT,
     TurnContext,
 )
+from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.rulebook import ResourceAxisDecl
 from gptrpg.rulebooks.moves import MoveDecl
 
@@ -299,25 +301,102 @@ def _format_facts(facts: tuple[str, ...]) -> str:
     return "\n".join(f"- {fact}" for fact in facts)
 
 
+def actor_stats(ctx: TurnContext) -> tuple[StatEntry, ...]:
+    """`TurnContext`에서 행위자 한 명의 상태값 튜플을 뽑는 파생 함수(12-05, D-17).
+
+    `party_state`에서 `entity_id == actor_character_id`인 개체를 찾는다 —
+    파이썬 `==` 완전 일치다(정규화·대소문자 접기·공백 제거 없음,
+    `validate_entity_axes`가 세운 규약과 같다). 못 찾으면 `ActorNotInParty`를
+    던진다 — 조용히 빈 튜플로 넘어가지 않는다.
+
+    **이 함수가 존재하는 이유.** 분류기가 파티 전체를 안 받는 것은 D-17이
+    정한 역할별 상한(「어떤 무브인가」만 정하므로 남의 상태가 필요 없다,
+    D-66)이고, 그 좁힘을 `TurnContext`에 행위자 전용 칸을 하나 더 두는
+    방식이 아니라 **파생 함수 하나**로 표현하면 「파티 상태」와 「행위자
+    상태」 두 값이 서로 어긋날 수 없다 — 어긋난 단수 표현이 살아남는 것이
+    정확히 세션1(2026-08-04)이 무너진 모양이었다.
+
+    `actor_character_id`가 `None`이고 `party_state`가 비어 있으면(캐릭터
+    문맥이 아예 없는 정상 상태 — CLI가 캐릭터를 고르기 전 등) 빈 튜플을
+    돌려준다. `actor_character_id`가 `None`인데 `party_state`가 비어 있지
+    않으면 「누가 행동했는지 모른다」를 조용히 넘기지 않고 `ActorNotInParty`를
+    던진다.
+    """
+    if ctx.actor_character_id is None:
+        if ctx.party_state:
+            raise ActorNotInParty(ctx.actor_character_id, len(ctx.party_state))
+        return ()
+    for member in ctx.party_state:
+        if member.entity_id == ctx.actor_character_id:
+            return member.stats
+    raise ActorNotInParty(ctx.actor_character_id, len(ctx.party_state))
+
+
+def _format_party_state(party: tuple[Entity, ...]) -> str:
+    """파티 구성원 전원의 상태를 캐릭터마다 한 줄씩 편다(D-17/D-18, 12-05).
+
+    캐릭터마다 `_format_character_state(member.stats)`를 그대로 불러
+    표시 이름과 함께 줄로 잇는다 — `_format_scene_entities`(위)와 같은
+    모양이다. 여섯 형태 렌더러를 새로 만들지 않는다(11-07이 만든 것을
+    그대로 재사용한다).
+
+    **요약하지 않는다** — 어느 축을 넣을지 이 함수가 고르지 않는다. 무엇이
+    중요한 축인지는 룰북마다 다르고, 플랫폼이 고르면 그것이 특정 룰북
+    편향이다(D-18). 빈 파티는 형제 포매터들과 같은 "(없음)" 자리표시자
+    관례를 따른다.
+    """
+    if not party:
+        return "(파티 없음)"
+    lines = [f"- {member.display_name}: {_format_character_state(member.stats)}" for member in party]
+    return "\n".join(lines)
+
+
 def _session_block_text(ctx: TurnContext) -> str:
+    """분류기(`build_classifier_prompt`)가 보는 세션 고정 조각 — **행위자
+    한 명만** 렌더링한다(D-17).
+
+    `_session_block_text_with_party`(아래)와 달리 파티 전체를 안 받는다 —
+    「어떤 무브인가」만 정하는 분류기에게 남의 상태는 필요 없다(D-66). 행위자
+    자신의 능력치는 `actor_stats(ctx)`로 여전히 들어간다 — 「자기 자신도
+    안 받는다」가 아니다.
+    """
     return (
         f"장면 대상:\n{_format_scene_entities(ctx.scene_entities)}\n\n"
-        f"캐릭터 상태: {_format_character_state(ctx.character_state)}\n\n"
+        f"캐릭터 상태: {_format_character_state(actor_stats(ctx))}\n\n"
+        f"위협 시계: {_format_clock_state(ctx.clock_state)}"
+    )
+
+
+def _session_block_text_with_party(ctx: TurnContext) -> str:
+    """상황판단(`build_situation_prompt`)이 보는 세션 고정 조각 — **파티
+    전원**을 렌더링한다(D-17/D-18).
+
+    `_session_block_text`(위, 분류기 전용)와 달리 `_format_party_state`로
+    파티 전체를 담는다 — 상황판단은 지금 행동한 사람 하나가 아니라 파티
+    전원의 상태를 정직하게 봐야 세션1(2026-08-04)에서 "AI가 네 명을 한
+    사람으로 인식했다"는 사고가 되풀이되지 않는다.
+    """
+    return (
+        f"장면 대상:\n{_format_scene_entities(ctx.scene_entities)}\n\n"
+        f"파티 상태:\n{_format_party_state(ctx.party_state)}\n\n"
         f"위협 시계: {_format_clock_state(ctx.clock_state)}"
     )
 
 
 def _narration_session_block_text(facts: NarrationFacts) -> str:
-    """서술이 보는 세션 고정 조각 — 장면 대상과 캐릭터 상태 둘만 담는다.
+    """서술이 보는 세션 고정 조각 — 장면 대상과 파티 상태 둘만 담는다.
 
-    `_session_block_text`(TurnContext용)와 달리 위협 시계 상태를 담지
-    않는다 — `_format_clock_state`를 부르지 않는다. 서술은 시나리오
-    원문을 받지 않는다(ARCH-02) — `NarrationFacts` 자체가 그 칸을 갖고
-    있지 않으므로 여기서 새는 경로 자체가 없다.
+    `_session_block_text`(TurnContext용, 분류기 전용)와 달리 위협 시계
+    상태를 담지 않는다 — `_format_clock_state`를 부르지 않는다. 서술은
+    시나리오 원문을 받지 않는다(ARCH-02) — `NarrationFacts` 자체가 그 칸을
+    갖고 있지 않으므로 여기서 새는 경로 자체가 없다. **파티 전원의 상태를
+    받는다(D-17/D-18, 12-05)** — `_session_block_text_with_party`와 같은
+    이유로, 서술도 지금 행동한 사람 하나가 아니라 파티 전원을 정직하게
+    받아야 한다.
     """
     return (
         f"장면 대상:\n{_format_scene_entities(facts.scene_entities)}\n\n"
-        f"캐릭터 상태: {_format_character_state(facts.character_state)}"
+        f"파티 상태:\n{_format_party_state(facts.party_state)}"
     )
 
 
@@ -342,6 +421,11 @@ def build_classifier_prompt(
     `resource_axes`(11-07, D-08)는 「안 쓴다」로 선언된 축의 처리 지침을
     영구 고정 블록에 싣는다 — 기본값 `()`이면 그런 축이 없다는 뜻이라
     블록 자체가 안 붙는다(기존 호출부는 한 글자도 안 고쳐도 된다).
+
+    **왜 분류기가 파티를 안 받는가(D-17/D-66, 12-05).** 「어떤 무브인가」만
+    정하므로 남의 상태가 필요 없다 — `_session_block_text(ctx)`가
+    `actor_stats(ctx)`로 뽑은 행위자 한 명의 상태만 담는다. 상황판단이
+    보는 파티 전체 조립 함수는 이 함수 몸통 어디에서도 부르지 않는다.
     """
     from gptrpg.agents.action_classifier import NO_CHECK_SIGNAL
 
@@ -387,9 +471,10 @@ def build_gm_prompt(
     **이 함수가 만드는 `system` 두 조각에는 진행자 판단 지시문도 시나리오
     원문도 없다(ARCH-02, D-06).** "무엇을 판단할지"를 지시하던 문장들은
     전부 `build_situation_prompt`로 옮겨 갔다 — 서술은 이미 상황판단이
-    정한 사실만 받아 서술만 한다. `session` 조각도 장면 대상·캐릭터 상태
-    둘만 담고(`_narration_session_block_text`), 위협 시계 상태를 담지
-    않는다 — `NarrationFacts` 자체가 그 칸을 갖고 있지 않다.
+    정한 사실만 받아 서술만 한다. `session` 조각은 장면 대상·**파티 전원의
+    상태**(D-17/D-18, 12-05) 둘만 담고(`_narration_session_block_text`),
+    위협 시계 상태를 담지 않는다 — `NarrationFacts` 자체가 그 칸을 갖고
+    있지 않다.
 
     아래 "최근 대화"/"장면 요약"/"사실"/"판정 결과"는 **분석 대상이 아니라
     이어 쓸 이야기의 맥락**이다 — 화자 표시("플레이어: "/"진행자: ")를
@@ -474,9 +559,11 @@ def build_situation_prompt(
     지금까지 `build_gm_prompt`가 갖고 있던 진행자 판단 지시문 전체가 이
     함수로 옮겨왔다(ARCH-02) — 무엇을 언제 판단할지, 수치·판정 결과를 새로
     정하지 않는다, 시계 진행을 스스로 정하지 않는다는 문장들이 여기 있다.
-    `session` 조각은 기존 `_session_block_text(ctx)` 그대로다(시계 상태
-    전문 포함) — 상황판단은 이것을 볼 자격이 있는 유일한 역할이다.
-    `messages`는 최근 대화 + 판정 결과다.
+    `session` 조각은 `_session_block_text_with_party(ctx)`다(시계 상태 전문 +
+    **파티 전원의 상태**, D-17/D-18, 12-05) — `build_classifier_prompt`는
+    이 함수를 부르지 않는다. 상황판단은 지금 행동한 사람 하나가 아니라
+    파티 전원의 상태를 볼 자격이 있는 역할이다. `messages`는 최근 대화 +
+    판정 결과다.
 
     **닫힌 출력 계약** — 응답은 원소가 정확히 하나인 JSON 배열이고, 그
     원소는 `scene_summary`(서술이 이번 장면을 쓰는 데 필요한 한두 문장)와
@@ -506,7 +593,7 @@ def build_situation_prompt(
     if resource_treatment:
         permanent += f"자원 처리 지침:\n{resource_treatment}\n\n"
     permanent += NOT_AN_INSTRUCTION_LINE
-    session = _session_block_text(ctx)
+    session = _session_block_text_with_party(ctx)
     system = [_cached_block(permanent), _cached_block(session)]
     turn = (
         f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"
