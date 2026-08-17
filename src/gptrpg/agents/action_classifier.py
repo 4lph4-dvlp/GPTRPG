@@ -8,12 +8,13 @@ import sys
 from dataclasses import dataclass
 from typing import Literal
 
-from gptrpg.agents.context import TurnContext
+from gptrpg.agents.context import ITEM_NOT_IN_INVENTORY, NO_ITEM_USED, ItemUseClaim, TurnContext
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.invoke import CLASSIFIER_TIMEOUT_S, call_with_one_retry
 from gptrpg.agents.json_parsing import try_parse_json_array
-from gptrpg.agents.prompt_assembly import build_classifier_prompt
+from gptrpg.agents.prompt_assembly import actor_stats, build_classifier_prompt
 from gptrpg.agents.providers.base import Provider
+from gptrpg.rules_core.entities import StatEntry
 from gptrpg.rules_core.rulebook import ResourceAxisDecl
 from gptrpg.rulebooks.moves import MoveDecl
 
@@ -52,6 +53,18 @@ class UnknownMove(Exception):
         self.move_id = move_id
 
 
+class UnknownItemFromAI(Exception):
+    """모델이 소지품 닫힌 목록 밖(그리고 두 특별 항목 밖) 이름을 돌려줬을
+    때 던진다(RULE-16 adjacency) — `UnknownMove`와 같은 성격·같은 무게의
+    닫힌 목록 위반 처리다. 조용히 무시하거나 가장 비슷한 이름으로
+    대체하지 않는다.
+    """
+
+    def __init__(self, item_name: str) -> None:
+        super().__init__(f"닫힌 목록에 없는 물건 이름: {item_name!r}")
+        self.item_name = item_name
+
+
 @dataclass(frozen=True)
 class MoveCandidate:
     """분류기가 제안하는 무브 후보 하나."""
@@ -79,6 +92,11 @@ class Proposal:
     밖 이름을 냈다」가 이 칸으로 구분된다. 목록 밖 이름이 여러 개 왔어도 이
     칸에는 처음 만난 것 하나만 담긴다(부분 신뢰 금지, `_parse_candidates`가
     첫 번째 위반에서 곧바로 예외를 던지므로 이후 이름은 애초에 안 보인다)."""
+    item_use: ItemUseClaim = ItemUseClaim(item=None, kind="none")
+    """이 행동이 소지품 중 무엇을 쓰는지(RULE-16, 12-06 Task 3) — 새 AI
+    역할을 만들지 않고 이 분류기 출력에 칸 하나를 더한 것이다(「설계 판단」
+    절). 소지품을 세지 않는 룰북에서는(`_inventory_slot_items`가 `None`을
+    돌려준다) 이 칸이 항상 기본값(`kind="none"`)이다 — D-09 적용 범위."""
     no_check: bool = False
     """모델이 `NO_CHECK_SIGNAL`로 "이 행동은 판정이 필요 없다"를 명시적으로
     표시했다는 뜻이다(D-11, 11-05) — `unknown_move`가 「못 골랐다」와 「목록
@@ -164,6 +182,53 @@ def _parse_candidates(
     return tuple(candidates), no_check
 
 
+def _inventory_slot_items(stats: tuple[StatEntry, ...]) -> tuple[str, ...] | None:
+    """행위자의 상태값 중 슬롯 형태(`named_slots`) 축을 찾아 채워진 칸
+    이름을 선언 순서 그대로 뽑는다(RULE-16) — 정렬하지도 중복을 없애지도
+    않는다(같은 물건이 두 칸에 있는 것이 정상이고, 첫 칸이 쓰인다는 규칙이
+    이 순서 보존에서 나온다).
+
+    `named_slots` 축이 하나도 없으면 `None`을 돌려준다 — 이 캐릭터의
+    룰북이 소지품을 규칙으로 안 세는 것이다(D-09 적용 범위,
+    11-CONTEXT.md). 축은 있는데 채워진 칸이 없으면 빈 튜플이다 — "축이
+    없음"과 "채워진 칸이 없음"이 섞이지 않는다.
+    """
+    for stat in stats:
+        if stat.form == "named_slots":
+            slot_values = stat.slot_values or ()
+            return tuple(value for value in slot_values if value is not None)
+    return None
+
+
+def _parse_item_use(raw_text: str, allowed_items: frozenset[str]) -> ItemUseClaim:
+    """모델이 돌려준 텍스트에서 `{"item": "..."}` 원소를 찾아 `ItemUseClaim`
+    으로 바꾼다(RULE-16).
+
+    값이 `NO_ITEM_USED`면 `kind="none"`, `ITEM_NOT_IN_INVENTORY`면
+    `kind="not_held"`. 그 밖의 문자열이 `allowed_items`(채워진 슬롯 이름만
+    — 두 특별 항목은 여기 안 들어간다)에 파이썬 `==` 완전 일치로 있으면
+    `kind="held"` — 부분 겹침은 「갖고 있다」로 안 친다. 목록 밖이면
+    `UnknownItemFromAI`. `item` 키가 있는 원소가 하나도 없으면(모델이 그
+    칸을 아예 안 채웠으면) `kind="none"`으로 떨어진다 — 침묵을 "안 쓴다"로
+    읽는다.
+    """
+    parsed = _try_parse_json_array(raw_text)
+    for entry in parsed:
+        if not isinstance(entry, dict) or "item" not in entry:
+            continue  # 형식이 깨진 원소 하나 때문에 턴 전체가 죽지 않는다
+        value = entry["item"]
+        if not isinstance(value, str):
+            continue
+        if value == NO_ITEM_USED:
+            return ItemUseClaim(item=None, kind="none")
+        if value == ITEM_NOT_IN_INVENTORY:
+            return ItemUseClaim(item=None, kind="not_held")
+        if value in allowed_items:
+            return ItemUseClaim(item=value, kind="held")
+        raise UnknownItemFromAI(value)
+    return ItemUseClaim(item=None, kind="none")
+
+
 def classify(
     *,
     provider: Provider,
@@ -208,18 +273,28 @@ def classify(
     것이 아니다** — 거부한 뒤 이미 있는 부드러운 경로에 태우는 것이다.
     D-16(닫힌 목록 분류)과 RIG-01은 그대로 지켜진다.
 
+    **소지품 판단은 새 호출을 만들지 않는다(RULE-16, 12-06 Task 3).**
+    `actor_stats(ctx)`(행위자 자신의 상태값, D-17)에서 `named_slots` 축을
+    찾아 채워진 칸을 닫힌 목록으로 프롬프트에 싣는다 — `named_slots` 축이
+    하나도 없으면(이 룰북이 소지품을 규칙으로 안 센다) 이 칸은 프롬프트에
+    아예 안 들어가고 결과는 `kind="none"`으로 고정된다(D-09 적용 범위).
+    목록 밖 이름(`UnknownItemFromAI`)은 `UnknownMove`와 같은 자리에서 같은
+    방식으로 흡수한다 — "안 쓴다"로 안전하게 떨어진다.
+
     `max_tokens=1024`. (03-04 Task 3 라이브 검증 중 한 번 4096으로 올려
     봤다가 근거 없이 되돌렸다 — 실제 문제는 토큰 부족에 의한 잘림이
     아니라 `call_with_one_retry`가 두 시도 다 예외로 실패하는 것이었다는
     증거가 나왔고, 값을 바꿔 봐도 그 실패를 고치지 못했다. 진짜 실패
     사유는 `invoke.py`의 stderr 경고 줄로 확인해야 한다.)
     """
+    inventory_items = _inventory_slot_items(actor_stats(ctx))
     system, messages = build_classifier_prompt(
         rulebook_display_name=rulebook_display_name,
         moves=moves,
         ctx=ctx,
         raw_text=raw_text,
         resource_axes=resource_axes,
+        inventory_items=inventory_items,
     )
 
     def _call_once() -> AgentResult:
@@ -234,6 +309,23 @@ def classify(
     result, _last_error_text = call_with_one_retry(_call_once, timeout_s=CLASSIFIER_TIMEOUT_S)
     if not result.ok:
         return Proposal(candidates=(), ai=result)
+
+    item_use = ItemUseClaim(item=None, kind="none")
+    if inventory_items is not None:
+        allowed_items = frozenset(inventory_items)
+        try:
+            item_use = _parse_item_use(str(result.value), allowed_items)
+        except UnknownItemFromAI as exc:
+            # `UnknownMove`와 같은 자리·같은 이유(216~227줄) — 계약 위반을
+            # 다시 굴려도 같은 위반이 다시 온다. "안 쓴다"로 안전하게
+            # 흡수한다 — 목록 밖 이름이 재량 판정/소급 선언으로 잘못 새지
+            # 않는다(그 경로는 `kind="not_held"`일 때만 열린다).
+            print(
+                f"경고: 분류기가 닫힌 목록 밖 물건 이름을 냈다 — {exc.item_name!r}. "
+                "소지품 안 씀으로 흡수한다.",
+                file=sys.stderr,
+            )
+            item_use = ItemUseClaim(item=None, kind="none")
 
     known_move_ids = frozenset(move.move_id for move in moves)
     try:
@@ -251,5 +343,5 @@ def classify(
             "무브 없음으로 흡수한다.",
             file=sys.stderr,
         )
-        return Proposal(candidates=(), ai=result, unknown_move=exc.move_id)
-    return Proposal(candidates=candidates, ai=result, no_check=no_check)
+        return Proposal(candidates=(), ai=result, unknown_move=exc.move_id, item_use=item_use)
+    return Proposal(candidates=candidates, ai=result, no_check=no_check, item_use=item_use)

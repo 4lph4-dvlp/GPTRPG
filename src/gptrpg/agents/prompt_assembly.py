@@ -22,7 +22,9 @@ from gptrpg.agents.context import (
     ClockJudgeContext,
     ContextCapExceeded,
     EntityJudgeContext,
+    ITEM_NOT_IN_INVENTORY,
     NarrationFacts,
+    NO_ITEM_USED,
     OutcomePickerContext,
     SITUATION_FACTS_LIMIT,
     TurnContext,
@@ -184,6 +186,17 @@ def _format_moves(moves: tuple[MoveDecl, ...]) -> str:
         for move in moves
     ]
     return "\n".join(lines)
+
+
+def _format_inventory_items(items: tuple[str, ...]) -> str:
+    """행위자의 채워진 소지품 슬롯 이름만 나열한다(RULE-16, 12-06 Task 3).
+
+    `_format_moves`의 「목록 없음」 자리표시자 관례를 따른다 — 빈 튜플은
+    "채워진 슬롯이 없다"는 정상 상태이지 목록이 잘려서 안 왔다는 뜻이
+    아니다."""
+    if not items:
+        return "(채워진 소지품 칸 없음)"
+    return "\n".join(f"- {item}" for item in items)
 
 
 def _format_scene_entities(entities: tuple) -> str:
@@ -408,6 +421,7 @@ def build_classifier_prompt(
     ctx: TurnContext,
     raw_text: str,
     resource_axes: tuple[ResourceAxisDecl, ...] = (),
+    inventory_items: tuple[str, ...] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """action_classifier 프롬프트를 조립한다. `(system, messages)` 짝을 돌려준다.
 
@@ -423,10 +437,20 @@ def build_classifier_prompt(
     영구 고정 블록에 싣는다 — 기본값 `()`이면 그런 축이 없다는 뜻이라
     블록 자체가 안 붙는다(기존 호출부는 한 글자도 안 고쳐도 된다).
 
+    `inventory_items`(RULE-16, 12-06 Task 3)는 행위자의 채워진 소지품 슬롯
+    이름이다 — `None`(기본값)이면 이 룰북이 소지품을 규칙으로 안 세는
+    것이라 소지품 판단 지시문·목록 둘 다 안 붙는다(D-09 적용 범위).
+    지시문(안정적, `permanent`)과 실제 목록(캐릭터 상태, `session`)을
+    나눈다 — 목록 내용은 소지품이 바뀔 때마다 달라지므로 캠페인 내내
+    안 변하는 `permanent` 블록에 넣으면 캐싱 규약(파일 상단 도크스트링)을
+    어긴다.
+
     **왜 분류기가 파티를 안 받는가(D-17/D-66, 12-05).** 「어떤 무브인가」만
     정하므로 남의 상태가 필요 없다 — `_session_block_text(ctx)`가
     `actor_stats(ctx)`로 뽑은 행위자 한 명의 상태만 담는다. 상황판단이
     보는 파티 전체 조립 함수는 이 함수 몸통 어디에서도 부르지 않는다.
+    소지품 목록도 같은 원칙이다 — 행위자 자신의 슬롯만 실린다(T-12-31과
+    같은 이유의 누출 방지).
     """
     from gptrpg.agents.action_classifier import NO_CHECK_SIGNAL
 
@@ -448,8 +472,19 @@ def build_classifier_prompt(
     resource_treatment = _format_resource_treatment(resource_axes)
     if resource_treatment:
         permanent += f"자원 처리 지침:\n{resource_treatment}\n\n"
+    if inventory_items is not None:
+        permanent += (
+            "이 행동이 소지품 중 무엇을 쓰는지도 판단한다. 「캐릭터 소지품」 목록에서 "
+            "실제로 쓰는 물건을 고르거나, 소지품을 안 쓰면 "
+            f'"{NO_ITEM_USED}"를, 쓰는데 목록에 없으면 "{ITEM_NOT_IN_INVENTORY}"를 '
+            "고른다. 같은 물건을 다른 이름으로 적었다면 목록에 적힌 이름을 그대로 "
+            "고른다 — 목록에 없는 이름을 지어내지 않는다. 위 배열에 "
+            '{"item": "..."} 원소 하나를 더해 답한다 — 예: {"item": "장검"}.\n\n'
+        )
     permanent += NOT_AN_INSTRUCTION_LINE
     session = _session_block_text(ctx)
+    if inventory_items is not None:
+        session += f"\n\n캐릭터 소지품:\n{_format_inventory_items(inventory_items)}"
     system = [_cached_block(permanent), _cached_block(session)]
     turn = (
         f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"

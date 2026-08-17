@@ -38,9 +38,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
-from gptrpg.agents.context import NO_CHECK_SUMMARY
+from gptrpg.agents.context import ItemUseClaim, NO_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
+from gptrpg.agents.prompt_assembly import actor_stats
 from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, UnknownProvider
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore, SequenceConflict
@@ -278,6 +279,26 @@ class DeclareRequest(BaseModel):
     rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
 
 
+class ItemUseView(BaseModel):
+    """분류기가 낸 「이 행동이 소지품 중 무엇을 쓰는가」 판단(RULE-16,
+    12-06 Task 3) — `agents.context.ItemUseClaim`을 그대로 옮긴다."""
+
+    kind: str
+    item: str | None = None
+
+
+class RetroDeclarationView(BaseModel):
+    """소지품에 없는 것을 쓰겠다고 했을 때(`item_use.kind == "not_held"`)
+    이 룰북이 소급 선언을 허용하는지와, 허용하면 그 비용 축·동작(D-16) —
+    축과 동작은 룰북이 잠그고 양만 사람이 정한다. `available=False`
+    (기본값)면 이 턴에는 소급 선언 여지가 없다(소지품을 쓴다는 판단이
+    아예 없었거나, 룰북이 소급 선언을 허용하지 않는다)."""
+
+    available: bool = False
+    axis: str | None = None
+    operation: str | None = None
+
+
 class DeclareResponse(BaseModel):
     declare_seq: int
     tier: str
@@ -289,6 +310,8 @@ class DeclareResponse(BaseModel):
     바뀌어도 이 파일을 안 고치기 위해서가 아니라, 값 자체가 `Proposal.tier`
     한 곳에서만 정의돼야 한다는 규율을 지키기 위해서다."""
     candidates: list[MoveCandidateView]
+    item_use: ItemUseView = ItemUseView(kind="none")
+    retro_declaration: RetroDeclarationView = RetroDeclarationView()
 
 
 @router.post("/sessions/{session_id}/actions/declare", response_model=DeclareResponse)
@@ -426,8 +449,42 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
             )
         )
 
+    # 소지품 판단(RULE-16, 12-06 Task 3) — 코드가 다시 대조한다. `kind=
+    # "held"`이면 그 문자열이 실제로 슬롯에 있는지 파이썬 `==`로 다시
+    # 확인한다(`_prepare_confirm`의 이중 소유권 검사와 같은 신중함).
+    # `actor_stats(ctx)`가 분류기가 실제로 본 것과 같은 값이다(`ctx`는
+    # `party_state`에서 접은 지금 값을 담고 있다) — `character.stats`
+    # (시작값)를 다시 쓰지 않는다.
+    item_use = proposal.item_use
+    if item_use.kind == "held":
+        held_names: set[str] = set()
+        for stat in actor_stats(ctx):
+            if stat.form == "named_slots":
+                held_names.update(v for v in (stat.slot_values or ()) if v is not None)
+        if item_use.item not in held_names:
+            print(
+                "경고: 분류기가 「갖고 있다」고 한 물건이 재확인에서 실제 슬롯에 없다 "
+                "— 소급 판단으로 낮춘다",
+                file=sys.stderr,
+            )
+            item_use = ItemUseClaim(item=None, kind="not_held")
+
+    retro_view = RetroDeclarationView()
+    if item_use.kind == "not_held" and rulebook.retro_declaration.allowed:
+        # RULE-16, D-16 — 축과 동작은 룰북이 잠그고 양만 그때그때
+        # 정해진다. 실제 양은 `POST .../confirm-resource-change`의
+        # `retro_declaration_amount`가 지나며(12-06 Task 2가 놓은 재량
+        # 확인 경로), 새 형식을 만들지 않는다.
+        retro_view = RetroDeclarationView(
+            available=True,
+            axis=rulebook.retro_declaration.cost_axis,
+            operation=rulebook.retro_declaration.operation,
+        )
+
     return DeclareResponse(
         declare_seq=declare_seq,
+        item_use=ItemUseView(kind=item_use.kind, item=item_use.item),
+        retro_declaration=retro_view,
         tier=proposal.tier,
         candidates=[MoveCandidateView(move=c.move, stat=c.stat) for c in proposal.candidates],
     )
@@ -1089,6 +1146,15 @@ class ConfirmResourceChangeRequest(BaseModel):
     """룰북에 결과 목록이 없을 때만(`ConfirmResponse.discretionary.available`)
     뜻이 있다 — `category_ids`와 이 칸은 서로 배타적이지 않지만(같은 요청
     안에서 함께 적용될 수 있다), 정상 사용에서는 한쪽만 채워진다."""
+    retro_declaration_amount: int | None = Field(
+        default=None, ge=-MAX_DISCRETIONARY_AMOUNT, le=MAX_DISCRETIONARY_AMOUNT
+    )
+    """소지품에 없는 것을 쓰겠다고 했을 때의 소급 선언 양(RULE-16, D-16) —
+    `DeclareResponse.retro_declaration.available`이 참일 때만 뜻이 있다.
+    축·동작은 이 칸에 없다 — 룰북이 이미 잠갔다(`Rulebook.
+    retro_declaration.cost_axis`/`.operation`), 양만 사람이 정한다. 같은
+    입력 실수 방어 상한(`MAX_DISCRETIONARY_AMOUNT`)을 재사용한다 — 새
+    상한을 만들지 않는다."""
 
 
 class ConfirmResourceChangeResponse(BaseModel):
@@ -1176,6 +1242,24 @@ async def confirm_resource_change(
         except InvalidOutcomeList as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         decls.append(discretionary_decl)
+
+    if body.retro_declaration_amount is not None:
+        # RULE-16, D-16 — 축과 동작은 룰북이 이미 잠갔다(`retro_declaration
+        # .cost_axis`/`.operation`). 양만 이 요청이 정한다. 룰북이 소급
+        # 선언을 허용하지 않으면(`allowed=False`) 이 칸을 채워 봐야 소용
+        # 없다 — 목록 밖 카테고리와 같은 무게로 거절한다.
+        if not rulebook.retro_declaration.allowed:
+            raise HTTPException(status_code=400, detail="이 룰북은 소급 선언을 허용하지 않는다")
+        source = "retro_declaration"
+        assert rulebook.retro_declaration.cost_axis is not None  # RetroDeclarationDecl 규약
+        assert rulebook.retro_declaration.operation is not None
+        decls.append(
+            ResourceChangeDecl(
+                axis=rulebook.retro_declaration.cost_axis,
+                operation=rulebook.retro_declaration.operation,
+                amount=body.retro_declaration_amount,
+            )
+        )
 
     if not decls:
         raise HTTPException(status_code=400, detail="적용할 자원 변화가 없다")

@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from conftest import FakeProvider
 from conftest import select_character as _select_character_at
 from gptrpg.agents import prompt_assembly
-from gptrpg.agents.context import NO_CHECK_SUMMARY
+from gptrpg.agents.context import ITEM_NOT_IN_INVENTORY, NO_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.event_log.schema import (
@@ -30,9 +30,11 @@ from gptrpg.event_log.schema import (
 )
 from gptrpg.event_log.store import EventStore
 from gptrpg.imagery import imagery_config_from_env
+from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.rulebook import NO_CHANGE_CATEGORY_ID
 from gptrpg.turn.context import build_turn_context
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments
+from gptrpg.web import routes_actions as routes_actions_module
 from gptrpg.web.app import create_app
 from gptrpg.web.characters_data import PLAYER_CHARACTERS
 from gptrpg.web.cookie_auth import sign_cookie, verify_cookie
@@ -2140,3 +2142,100 @@ def test_confirm_resource_change_discretionary_amount_over_max_returns_422(
         )
 
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# 12-06 Task 3: 소지품 대조(RULE-16) — declare() 응답의 item_use/retro_declaration.
+# ---------------------------------------------------------------------------
+
+
+def _cairn_style_entity(*, entity_id: str, slot_values: tuple) -> Entity:
+    return Entity(
+        entity_id=entity_id,
+        display_name="시험용 캐릭터",
+        rulebook_id="cairn",
+        stats=(
+            StatEntry(name="STR", form="numeric", current=10),
+            StatEntry(name="Inventory", form="named_slots", slot_values=slot_values),
+        ),
+    )
+
+
+def test_declare_item_not_held_opens_retro_declaration_when_rulebook_allows(
+    web_client_with_fake_provider, monkeypatch
+) -> None:
+    """소지품에 없는 것을 쓰겠다고 하면(`kind="not_held"`) 재량 판정 경로로
+    간다 — Cairn처럼 소급 선언을 허용하는 룰북은 그 비용 축·동작을 응답에
+    함께 싣는다(RULE-16, D-16). `get_character`를 갈아 끼워 named_slots
+    소지품을 가진 캐릭터를 임시로 만든다 — 저장소의 기존 플레이어 캐릭터는
+    전부 던전월드류(소지품 `form="none"`)라 이 경로를 자연스럽게 못 탄다."""
+    entity = _cairn_style_entity(entity_id="bram", slot_values=(None,) * 10)
+    monkeypatch.setattr(routes_actions_module, "get_character", lambda character_id: entity)
+
+    classifier = FakeProvider(
+        complete_value=json.dumps(
+            [{"move": "아무 시도", "stat": "STR"}, {"item": ITEM_NOT_IN_INVENTORY}]
+        )
+    )
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/declare",
+            json=_declare_body(rulebook_id="cairn"),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["item_use"] == {"kind": "not_held", "item": None}
+    assert body["retro_declaration"] == {
+        "available": True,
+        "axis": "Inventory",
+        "operation": "fill",
+    }
+
+
+def test_declare_item_use_skipped_entirely_for_rulebook_without_named_slots(
+    web_client_with_fake_provider,
+) -> None:
+    """소지품을 규칙으로 안 세는 룰북(던전월드류, `소지품` 축이
+    `form="none"`)에서는 소지품 판단 경로를 아예 안 탄다 — 물건 하나마다
+    턴이 끊기지 않는다(11-CONTEXT D-09)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        response = _declare(client)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["item_use"] == {"kind": "none", "item": None}
+    assert body["retro_declaration"] == {"available": False, "axis": None, "operation": None}
+    permanent_text, session_text = (
+        block.get("text", "") for block in classifier.calls[0][0]
+    )
+    # 11-07의 「안 쓰는 축 처리 지침」과는 다른 문구다 — 이 자리는 소지품
+    # 판단 지시문(RULE-16, 12-06 Task 3) 자체가 없는지만 확인한다.
+    assert "이 행동이 소지품 중 무엇을 쓰는지" not in permanent_text
+    assert "캐릭터 소지품:" not in session_text
+
+
+def test_declare_item_held_and_actually_present_is_not_downgraded(
+    web_client_with_fake_provider, monkeypatch
+) -> None:
+    """분류기가 「갖고 있다」고 골랐고 실제로 슬롯에 있으면(이중 대조 통과)
+    `retro_declaration`이 안 열린다 — 재량 판정은 「없다」일 때만 연다."""
+    entity = _cairn_style_entity(entity_id="bram", slot_values=("장검", None, None))
+    monkeypatch.setattr(routes_actions_module, "get_character", lambda character_id: entity)
+
+    classifier = FakeProvider(
+        complete_value=json.dumps([{"move": "아무 시도", "stat": "STR"}, {"item": "장검"}])
+    )
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/declare",
+            json=_declare_body(rulebook_id="cairn"),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["item_use"] == {"kind": "held", "item": "장검"}
+    assert body["retro_declaration"]["available"] is False

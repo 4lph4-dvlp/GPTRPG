@@ -16,12 +16,22 @@ from gptrpg.agents.action_classifier import (
     NO_CHECK_SIGNAL,
     MoveCandidate,
     Proposal,
+    UnknownItemFromAI,
     UnknownMove,
+    _inventory_slot_items,
+    _parse_item_use,
     classify,
 )
-from gptrpg.agents.context import ClockState, TurnContext
+from gptrpg.agents.context import (
+    ITEM_NOT_IN_INVENTORY,
+    NO_ITEM_USED,
+    ClockState,
+    ItemUseClaim,
+    TurnContext,
+)
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.prompt_assembly import _format_moves, build_classifier_prompt
+from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID, EXAMPLE_SINGLE_STAT_FOE
 from gptrpg.rulebooks.moves import get_moves
 
@@ -414,7 +424,9 @@ def test_classify_unknown_move_does_not_increase_provider_call_count(fake_provid
 
 def test_proposal_field_names_have_no_confidence_slot():
     field_names = frozenset(f.name for f in fields(Proposal))
-    assert field_names == frozenset({"candidates", "ai", "unknown_move", "no_check"})
+    assert field_names == frozenset(
+        {"candidates", "ai", "unknown_move", "no_check", "item_use"}
+    )
     for name in field_names:
         assert "confidence" not in name
         assert "score" not in name
@@ -558,3 +570,166 @@ def test_format_moves_renders_none_default_stat_as_situational_choice():
     assert "None" not in rendered
 
 
+
+
+# ---------------------------------------------------------------------------
+# 12-06 Task 3: 소지품 대조(RULE-16) — _inventory_slot_items
+# ---------------------------------------------------------------------------
+
+
+def test_inventory_slot_items_returns_none_when_no_named_slots_axis():
+    """소지품을 규칙으로 안 세는 룰북(던전월드류 예시 개체는 named_slots
+    축이 아예 없다) — 대조할 목록 자체가 없다는 것이 `None`으로 나타난다."""
+    assert _inventory_slot_items(EXAMPLE_SINGLE_STAT_FOE.stats) is None
+
+
+def test_inventory_slot_items_returns_empty_tuple_when_all_slots_empty():
+    stats = (StatEntry(name="Inventory", form="named_slots", slot_values=(None, None, None)),)
+    assert _inventory_slot_items(stats) == ()
+
+
+def test_inventory_slot_items_preserves_declaration_order_and_duplicates():
+    """같은 물건이 두 칸에 있어도 정렬·중복 제거를 하지 않는다 — 선언
+    순서 그대로가 "첫 칸이 쓰인다" 규칙의 근거다."""
+    stats = (
+        StatEntry(
+            name="Inventory",
+            form="named_slots",
+            slot_values=("횃불", "장검", "횃불", None),
+        ),
+    )
+    assert _inventory_slot_items(stats) == ("횃불", "장검", "횃불")
+
+
+# ---------------------------------------------------------------------------
+# 12-06 Task 3: _parse_item_use — 닫힌 목록 대조
+# ---------------------------------------------------------------------------
+
+
+def test_parse_item_use_exact_match_yields_held():
+    raw = json.dumps([{"item": "장검"}])
+    claim = _parse_item_use(raw, frozenset({"장검", "랜턴"}))
+    assert claim == ItemUseClaim(item="장검", kind="held")
+
+
+def test_parse_item_use_no_item_used_marker_yields_none_kind():
+    raw = json.dumps([{"item": NO_ITEM_USED}])
+    claim = _parse_item_use(raw, frozenset({"장검"}))
+    assert claim == ItemUseClaim(item=None, kind="none")
+
+
+def test_parse_item_use_not_in_inventory_marker_yields_not_held():
+    raw = json.dumps([{"item": ITEM_NOT_IN_INVENTORY}])
+    claim = _parse_item_use(raw, frozenset({"장검"}))
+    assert claim == ItemUseClaim(item=None, kind="not_held")
+
+
+def test_parse_item_use_no_item_key_present_defaults_to_none_kind():
+    raw = json.dumps([{"move": "hack_and_slash", "stat": "STR"}])
+    claim = _parse_item_use(raw, frozenset({"장검"}))
+    assert claim == ItemUseClaim(item=None, kind="none")
+
+
+def test_parse_item_use_partial_name_overlap_raises_unknown_item():
+    """슬롯에는 "낡고 녹슨 장검"이 있고 모델이 "장검"만 돌려주면 완전
+    일치가 아니므로 `UnknownItemFromAI`다 — 「갖고 있다」로 안 친다."""
+    raw = json.dumps([{"item": "장검"}])
+    with pytest.raises(UnknownItemFromAI) as excinfo:
+        _parse_item_use(raw, frozenset({"낡고 녹슨 장검"}))
+    assert excinfo.value.item_name == "장검"
+
+
+# ---------------------------------------------------------------------------
+# 12-06 Task 3: classify() — 소지품 대조 통합
+# ---------------------------------------------------------------------------
+
+
+def _named_slots_actor(slot_values: tuple) -> Entity:
+    return Entity(
+        entity_id="test.adventurer",
+        display_name="시험용 모험가",
+        rulebook_id="cairn",
+        stats=(
+            StatEntry(name="STR", form="numeric", current=10),
+            StatEntry(name="Inventory", form="named_slots", slot_values=slot_values),
+        ),
+    )
+
+
+def _ctx_for(entity: Entity) -> TurnContext:
+    return TurnContext(
+        scene_entities=(entity,),
+        party_state=(entity,),
+        actor_character_id=entity.entity_id,
+        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
+        recent_turns=(),
+    )
+
+
+def test_classify_partial_item_name_overlap_is_absorbed_to_none_kind(fake_provider):
+    actor = _named_slots_actor(("낡고 녹슨 장검", None, None))
+    fake_provider.complete_value = json.dumps(
+        [{"move": "parley", "stat": "CHA"}, {"item": "장검"}]
+    )
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx_for(actor),
+        raw_text="장검을 휘두른다",
+        moves=moves,
+        rulebook_display_name="Cairn",
+    )
+    assert proposal.item_use.kind == "none"
+    assert proposal.item_use.item is None
+
+
+def test_classify_empty_inventory_character_completes_without_exception(fake_provider):
+    actor = _named_slots_actor((None, None, None))
+    fake_provider.complete_value = json.dumps([{"item": ITEM_NOT_IN_INVENTORY}])
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx_for(actor),
+        raw_text="가방을 뒤진다",
+        moves=moves,
+        rulebook_display_name="Cairn",
+    )
+    assert proposal.item_use.kind in ("none", "not_held")
+
+
+def test_classify_rulebook_without_named_slots_axis_skips_item_use_entirely(fake_provider):
+    """소지품을 세지 않는 룰북(던전월드류, `form="none"`)에서는 프롬프트에
+    소지품 지시문이 없고 결과가 항상 `kind="none"`이다(11-CONTEXT D-09)."""
+    fake_provider.complete_value = json.dumps([{"move": "hack_and_slash", "stat": "STR"}])
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),  # EXAMPLE_SINGLE_STAT_FOE — named_slots 축이 없다
+        raw_text="문을 두드린다",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.item_use == ItemUseClaim(item=None, kind="none")
+    permanent_text, session_text = (block["text"] for block in fake_provider.calls[0][0])
+    assert "소지품" not in permanent_text
+    assert "소지품" not in session_text
+
+
+def test_classify_holds_exact_match_item_from_filled_slots(fake_provider):
+    actor = _named_slots_actor(("장검", None, None))
+    fake_provider.complete_value = json.dumps(
+        [{"move": "hack_and_slash", "stat": "STR"}, {"item": "장검"}]
+    )
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx_for(actor),
+        raw_text="장검을 휘두른다",
+        moves=moves,
+        rulebook_display_name="Cairn",
+    )
+    assert proposal.item_use == ItemUseClaim(item="장검", kind="held")

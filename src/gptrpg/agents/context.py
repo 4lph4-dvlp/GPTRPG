@@ -13,6 +13,7 @@ ROADMAP 성공조건 4, 설계 문서 §3.8이 세운 규율 — AI가 저장소
 """
 
 from dataclasses import dataclass, fields
+from typing import Literal
 
 from gptrpg.rules_core.entities import Entity, StatEntry
 
@@ -320,3 +321,32 @@ class OutcomePickerContext:
             raise ContextCapExceeded(
                 "recent_turns", len(self.recent_turns), OUTCOME_PICKER_RECENT_TURNS_LIMIT
             )
+
+
+NO_ITEM_USED = "이 행동은 소지품을 안 쓴다"
+"""분류기가 「이번 행동은 소지품을 쓰지 않는다」를 표시하는 특별
+항목(RULE-16, 12-06 Task 3) — `action_classifier.NO_CHECK_SIGNAL`과 같은
+성격의 예약 문자열이다. 지시문과 파서(`_parse_item_use`)가 이 상수를
+공유해 문구가 갈리는 사고를 코드로 막는다."""
+
+ITEM_NOT_IN_INVENTORY = "쓰는데 목록에 없다"
+"""분류기가 「이 행동에 물건이 필요한데 소지품 목록에 없다」를 표시하는
+특별 항목(RULE-16, D-15) — `kind="not_held"`로 이어져 재량 판정(또는
+소급 선언)으로 간다."""
+
+
+@dataclass(frozen=True)
+class ItemUseClaim:
+    """분류기가 낸 「이 행동이 소지품 중 무엇을 쓰는가」 판단 하나(RULE-16,
+    12-06 Task 3).
+
+    `kind="none"`이면 이 행동은 소지품을 안 쓴다(또는 이 룰북이 소지품을
+    규칙으로 안 세어 판단 자체가 성립하지 않는다, D-09 적용 범위) —
+    `item`은 그때 `None`이다. `kind="held"`면 `item`이 그 캐릭터의
+    채워진 슬롯에서 파이썬 `==` 완전 일치로 고른 문자열이다. `kind=
+    "not_held"`면 이 행동에 물건이 필요한데 목록에 없다는 뜻이고, `item`은
+    `None`이다(어떤 물건을 원했는지는 담지 않는다 — 재량 판정/소급 선언은
+    「무엇을 원했는가」가 아니라 「없다」는 사실만 필요로 한다)."""
+
+    item: str | None
+    kind: Literal["none", "held", "not_held"]
