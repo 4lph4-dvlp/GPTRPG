@@ -21,10 +21,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError, confirmAction, declareAction, proceed } from "../api/client.ts";
-import type { DeclareResponse, MoveCandidate } from "../api/types.ts";
+import type { DeclareResponse, ModifierView, MoveCandidate } from "../api/types.ts";
+import { CheckBreakdown } from "../components/CheckBreakdown.tsx";
 import { MAX_RAW_TEXT_LEN } from "../config.ts";
 import { COPY, moveLabel, statLabel } from "../labels.ts";
 import type { Turn } from "../session/groupTurns.ts";
+
+/** `resolve()`가 만든 방금 판정의 검산 재료(D-04) — `CheckBreakdown`에
+ * 그대로 넘긴다. `ConfirmResponse.rolls`가 `null`이 아닐 때만(=판정이 실제로
+ * 있었을 때만) 만들어진다. */
+interface CheckBreakdownData {
+  rolls: number[];
+  modifiers: ModifierView[];
+  target: number | null;
+}
 
 const NEAR_BOTTOM_PX = 48;
 
@@ -59,6 +69,8 @@ export function ChatPane({
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
   const [proposal, setProposal] = useState<DeclareResponse | null>(null);
+  // D-04 — 방금 판정의 검산 표시. 판정이 없는 턴(no_check/unclear)에는 안 켠다.
+  const [breakdown, setBreakdown] = useState<CheckBreakdownData | null>(null);
 
   const listRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
@@ -92,6 +104,7 @@ export function ChatPane({
     }
     setBusy(true);
     setProposal(null);
+    setBreakdown(null);
     setStatus({ text: COPY.classifying, error: false });
     try {
       const response = await declareAction(sessionId, characterId, characterId, rawText);
@@ -134,6 +147,17 @@ export function ChatPane({
         setStatus({ text: COPY.narrationFailed, error: true });
       } else {
         setStatus(null);
+      }
+      // D-04 — 판정이 실제로 있었을 때만(굴릴 필요 없는 행동에는 rolls가
+      // 없다) 검산 표시를 켠다. `total`은 서버 값을 안 쓴다(항상 null,
+      // `ConfirmResponse.total` 참조) — `CheckBreakdown`이 rolls/modifiers로
+      // 직접 다시 더한다.
+      if (response.rolls !== null) {
+        setBreakdown({
+          rolls: response.rolls,
+          modifiers: response.modifiers ?? [],
+          target: response.target,
+        });
       }
     } catch (error) {
       // 서사 실패는 이제 200이지만, 다른 실패(403·409·503 등)는 여전히
@@ -278,6 +302,14 @@ export function ChatPane({
               </>
             )}
           </div>
+        ) : null}
+
+        {breakdown !== null ? (
+          <CheckBreakdown
+            rolls={breakdown.rolls}
+            modifiers={breakdown.modifiers}
+            target={breakdown.target}
+          />
         ) : null}
 
         <form

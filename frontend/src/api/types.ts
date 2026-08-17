@@ -180,6 +180,18 @@ export interface DeclareResponse {
   candidates: MoveCandidate[];
 }
 
+/**
+ * 판정에 실제로 실린 수정치 하나(`routes_actions.py::ModifierView`,
+ * D-04 검산 근거). `source`는 `stat:STR`/`difficulty:hard` 같은 내부
+ * 문자열 그대로 온다 — 화면은 이 값을 그대로 찍지 않고
+ * `labels.ts::modifierSourceLabel`을 거친다.
+ */
+export interface ModifierView {
+  type: string;
+  value: number;
+  source: string;
+}
+
 export interface ConfirmResponse {
   confirmed: boolean;
   confirm_seq: number;
@@ -194,6 +206,19 @@ export interface ConfirmResponse {
    * 칸을 화면이 직접 읽어야 실패가 조용히 사라지지 않는다.
    */
   narration_failed: boolean;
+  /**
+   * 이 판정에 실제로 실린 수정치 전부(D-04). 서버가 기본값 `[]`를 갖고
+   * 보내므로 선택 칸으로 둔다 — 판정이 없는 응답(`confirmed: false`)에는
+   * 안 실린다.
+   */
+  modifiers?: ModifierView[];
+  /**
+   * 판정 합계 — `CheckResolved`가 이 값을 저장하지 않아 서버는 항상
+   * `null`을 보낸다(12-01 알려진 갭). 화면은 이 칸을 신뢰하지 않고
+   * `rolls`/`modifiers`에서 직접 다시 더한다(`CheckBreakdown.tsx`) — 그
+   * 계산 자체가 검산 대상이므로 서버 값을 기다리지 않는다.
+   */
+  total?: number | null;
 }
 
 export interface ProceedResponse {

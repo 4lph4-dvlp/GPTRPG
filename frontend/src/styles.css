@@ -697,6 +697,62 @@ details.record > summary::-webkit-details-marker {
   white-space: nowrap;
 }
 
+/* --- 판정 검산 표시(D-04) ------------------------------------------------- */
+
+.breakdown {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--ink-700);
+}
+
+.breakdown__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-sm);
+}
+
+.breakdown__dice {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.breakdown__mod {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown__mod-sign {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.breakdown__mod-source {
+  color: var(--text-dim);
+}
+
+.breakdown__eq {
+  color: var(--text-faint);
+}
+
+.breakdown__total {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown__target {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 .stamp--strong {
   color: var(--strong);
   background: rgba(86, 185, 138, 0.1);

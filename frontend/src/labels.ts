@@ -87,6 +87,21 @@ export function statLabel(name: string): string {
 }
 
 /**
+ * 판정 수정치의 출처 문자열(`ModifierView.source`)을 사람 말로 옮긴다(D-04).
+ * 능력치 출처(`stat:STR` 형식, `rules_core/resolution.py::build_stat_check_input`)만
+ * `statLabel`로 옮기고, 옮길 규칙이 없는 출처(예: `difficulty:hard`)는 조용히
+ * 숨기지 않고 원문 그대로 보인다.
+ */
+const MODIFIER_SOURCE_STAT_PREFIX = "stat:";
+
+export function modifierSourceLabel(source: string): string {
+  if (source.startsWith(MODIFIER_SOURCE_STAT_PREFIX)) {
+    return statLabel(source.slice(MODIFIER_SOURCE_STAT_PREFIX.length));
+  }
+  return source;
+}
+
+/**
  * 04-UI-SPEC.md의 Copywriting Contract 문구 — 문구는 그 표가 권위다.
  * 화면을 새로 짜면서 문구까지 바꾸지 않았다.
  */
@@ -110,4 +125,6 @@ export const COPY = {
   noResourceAxes: "이 룰북은 세는 수치를 쓰지 않아요",
   emptySlot: "빈 칸",
   usageDieSpent: "다 씀",
+  /** D-04 — 판정 검산 표시(`CheckBreakdown.tsx`). */
+  checkTarget: "목표",
 } as const;
