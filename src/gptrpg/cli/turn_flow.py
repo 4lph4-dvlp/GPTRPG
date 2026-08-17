@@ -24,19 +24,30 @@ from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore
 from gptrpg.rulebooks import get_rulebook
 from gptrpg.rulebooks.moves import get_moves
+from gptrpg.rules_core.resource_change import ResourceOp, roll_amount
+from gptrpg.rules_core.rulebook import (
+    GradeBand,
+    OutcomeList,
+    UnknownGradeName,
+    ordered_categories,
+    require_band,
+)
 from gptrpg.session_actor.actor import (
+    AlreadyChanged,
     AppendNarration,
     ConfirmAction,
     DeclareAction,
     ProceedEligible,
     RecordActionClassification,
     RecordAiCall,
+    RecordResourceChange,
     RecordSafetyFlag,
     ResolveCheck,
     SessionActor,
     SessionRegistry,
     VerifyProceedEligibility,
 )
+from gptrpg.session_actor.live_roller import LiveRoller
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
@@ -47,6 +58,14 @@ _NO_SENTENCE = object()
 """narrate()의 첫 조각을 기다릴 때 쓰는 보초값. `chunk_sentences`는 빈
 문자열을 절대 내보내지 않으므로 이 값과의 신원 비교로 "아직 하나도 안
 나왔다"를 안전하게 구분할 수 있다."""
+
+_NO_CHECK_GRADE_BAND = GradeBand(
+    name="__no_check__", counts_as_failure=False, succeeded=True, costs=False
+)
+"""`_proceed_without_check`가 `gather_turn_judgments`에 넘기는
+자리표시자(12-06) — `web/routes_actions.py`의 같은 이름 상수와 같은
+이유·같은 값이다. 판정이 없는 경로에는 태울 결과 목록이 없고,
+`costs=False`가 `pick_outcome`의 조기 반환을 걸어 모델을 아예 안 부른다."""
 
 
 async def _submit_narration_chunk(
@@ -250,6 +269,7 @@ async def _proceed_without_check(
     situation_judge_choice = _resolve_role_choice(args, "situation_judge")
     entity_judge_choice = _resolve_role_choice(args, "scene_entity_judge")
     clock_judge_choice = _resolve_role_choice(args, "clock_judge")
+    outcome_judge_choice = _resolve_role_choice(args, "outcome_picker")
     try:
         situation_provider = resolve_provider(
             "situation_judge", {"situation_judge": situation_judge_choice}, os.environ
@@ -260,6 +280,9 @@ async def _proceed_without_check(
         clock_provider = resolve_provider(
             "clock_judge", {"clock_judge": clock_judge_choice}, os.environ
         )
+        outcome_provider = resolve_provider(
+            "outcome_picker", {"outcome_picker": outcome_judge_choice}, os.environ
+        )
         judgments = await gather_turn_judgments(
             situation_provider=situation_provider,
             situation_model=situation_judge_choice.model,
@@ -267,9 +290,15 @@ async def _proceed_without_check(
             entity_model=entity_judge_choice.model,
             clock_provider=clock_provider,
             clock_model=clock_judge_choice.model,
+            outcome_provider=outcome_provider,
+            outcome_model=outcome_judge_choice.model,
             ctx=ctx,
             check_summary=NO_CHECK_SUMMARY,
             rulebook_display_name=rulebook.display_name,
+            # 판정 자체가 없는 경로다(D-10 ②갈래) — 결과 목록도 재량 판정도
+            # 성립하지 않는다(`web/routes_actions.py`의 `proceed()`와 같은 이유).
+            outcome_list=OutcomeList(categories=()),
+            grade_band=_NO_CHECK_GRADE_BAND,
             resource_axes=rulebook.resource_axes,
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성)이 실패해도 진행을 막지 않는다
@@ -313,6 +342,18 @@ async def _proceed_without_check(
             completion_tokens=judgments.clock.ai.completion_tokens,
             cached_prompt_tokens=judgments.clock.ai.cached_prompt_tokens,
             latency_ms=judgments.clock.ai.elapsed_ms,
+            caused_by_seq=declare_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="outcome_picker",
+            model=outcome_judge_choice.model,
+            provider=outcome_judge_choice.provider,
+            prompt_tokens=judgments.outcome.ai.prompt_tokens,
+            completion_tokens=judgments.outcome.ai.completion_tokens,
+            cached_prompt_tokens=judgments.outcome.ai.cached_prompt_tokens,
+            latency_ms=judgments.outcome.ai.elapsed_ms,
             caused_by_seq=declare_seq,
         )
     )
@@ -571,6 +612,18 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
 
     check_summary = f"{picked.move} 판정 결과 {check_event.grade} (목표 {check_event.target})"
 
+    # 이 등급의 밴드(D-13/D-14) — `costs`가 결과 목록을 태울지 정한다.
+    # `check_event.grade`는 `_prepare_resolve_check`가 이미 룰북 선언에서
+    # 뽑은 이름이므로(`web/routes_actions.py`의 `confirm()`과 같은 근거) 여기서
+    # `UnknownGradeName`이 나는 것은 룰북 데이터 자체가 등록 뒤에 바뀐
+    # 경우뿐이다 — 조용히 넘기지 않되, 이미 판정 결과 줄은 화면에 찍혔으므로
+    # (D-08과 같은 이유) 여기서부터 사람이 읽을 오류로 끝맺는다.
+    try:
+        grade_band = require_band(rulebook.grade_bands, check_event.grade)
+    except UnknownGradeName as exc:
+        print(f"오류: {exc}", file=sys.stderr)
+        return 1
+
     # `TurnContext`를 다시 접는다(CR-02 리뷰 발견) — 웹 경로
     # (`web/routes_actions.py`의 `confirm()`, 455~461줄)와 정확히 같은 이유다:
     # `ResolveCheck` 처리 중 실패 횟수 자동 진행(fail-counter auto-advance)이
@@ -600,6 +653,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     situation_judge_choice = _resolve_role_choice(args, "situation_judge")
     entity_judge_choice = _resolve_role_choice(args, "scene_entity_judge")
     clock_judge_choice = _resolve_role_choice(args, "clock_judge")
+    outcome_judge_choice = _resolve_role_choice(args, "outcome_picker")
     try:
         situation_provider = resolve_provider(
             "situation_judge", {"situation_judge": situation_judge_choice}, os.environ
@@ -610,6 +664,9 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         clock_provider = resolve_provider(
             "clock_judge", {"clock_judge": clock_judge_choice}, os.environ
         )
+        outcome_provider = resolve_provider(
+            "outcome_picker", {"outcome_picker": outcome_judge_choice}, os.environ
+        )
         judgments = await gather_turn_judgments(
             situation_provider=situation_provider,
             situation_model=situation_judge_choice.model,
@@ -617,14 +674,18 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             entity_model=entity_judge_choice.model,
             clock_provider=clock_provider,
             clock_model=clock_judge_choice.model,
+            outcome_provider=outcome_provider,
+            outcome_model=outcome_judge_choice.model,
             ctx=ctx,
             check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
+            outcome_list=rulebook.outcome_list,
+            grade_band=grade_band,
             resource_axes=rulebook.resource_axes,
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성)이 실패해도 턴을 막지 않는다
         print(
-            f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
+            f"경고: 상황판단/장면 신규 대상/시계 신호/결과 선택 판단이 실패했다 (seq {resolve_seq}) — {exc}",
             file=sys.stderr,
         )
         judgments = empty_turn_judgments()
@@ -672,6 +733,74 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             caused_by_seq=confirm_seq,
         )
     )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="outcome_picker",
+            model=outcome_judge_choice.model,
+            provider=outcome_judge_choice.provider,
+            prompt_tokens=judgments.outcome.ai.prompt_tokens,
+            completion_tokens=judgments.outcome.ai.completion_tokens,
+            cached_prompt_tokens=judgments.outcome.ai.cached_prompt_tokens,
+            latency_ms=judgments.outcome.ai.elapsed_ms,
+            caused_by_seq=confirm_seq,
+        )
+    )
+
+    # 자원 변화 확인 관문(12-06, D-09/D-10) — 웹의
+    # `POST .../confirm-resource-change`와 같은 뜻을 명령줄 방식으로 밟는다.
+    # 새 HTTP 왕복을 만들지 않는다 — CLI는 이미 액터에 직접 접근하는
+    # 단일 프로세스이므로, 웹이 하는 「코드가 다시 대조 -> 사람 확인 ->
+    # 서버가 다시 굴려 적용」을 이 함수 안에서 그대로 한다. **확인 없이
+    # 자원이 깎이는 경로가 CLI에만 열려 있으면 안 된다**(10-05 관례,
+    # 이 계획의 웹·CLI 짝 수정 원칙).
+    if judgments.outcome.category_ids:
+        try:
+            picked_categories = ordered_categories(rulebook.outcome_list, judgments.outcome.category_ids)
+        except Exception as exc:  # noqa: BLE001 - T-12-27, 목록 밖 결과가 와도 턴을 막지 않는다
+            print(
+                f"경고: outcome_picker가 닫힌 목록과 어긋난 결과를 냈다 (seq {resolve_seq}) — {exc}",
+                file=sys.stderr,
+            )
+            picked_categories = ()
+        pending_changes = [
+            change for category in picked_categories for change in category.changes
+        ]
+        if pending_changes:
+            print("자원 변화 제안:")
+            for change in pending_changes:
+                print(f"  - {change.axis} {change.operation} {change.amount}")
+            print("[Enter=확인 / n=아니오]")
+            answer = input().strip().lower()
+            if answer not in ("n", "no"):
+                roller = LiveRoller()
+                ops = tuple(
+                    ResourceOp(axis=decl.axis, operation=decl.operation, amount=rolled, rolls=rolls)
+                    for decl in pending_changes
+                    for rolled, rolls in (roll_amount(roller, decl.amount),)
+                )
+                try:
+                    await actor.submit(
+                        RecordResourceChange(
+                            character_id=args.player,
+                            changes=ops,
+                            source="outcome_list",
+                            caused_by_seq=resolve_seq,
+                        )
+                    )
+                except AlreadyChanged:
+                    pass  # 재시도 — 이미 기록된 변화를 다시 깎지 않는다.
+            else:
+                print("자원 변화를 적용하지 않습니다.")
+    elif not rulebook.outcome_list.categories and grade_band.costs:
+        # RULE-10 — 결과 목록이 없어도 재량 판정 여지가 있다는 것만
+        # 안내한다. 실제 제안(축·동작·양)을 만드는 AI 호출은 이 계획의
+        # 파일 범위(agents/*를 안 건드린다) 밖이라 만들지 않는다 — 알려진
+        # 갭(차단 아님, SUMMARY.md 참조).
+        eligible_axes = [axis.name for axis in rulebook.resource_axes if axis.form != "none"]
+        print(
+            "안내: 이 룰북은 결과 목록이 없어 재량 판정 여지가 있습니다 "
+            f"(가능한 축: {', '.join(eligible_axes) if eligible_axes else '없음'})."
+        )
 
     facts = build_narration_facts(ctx=ctx, check_summary=check_summary, judgments=judgments)
 

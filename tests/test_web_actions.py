@@ -9,6 +9,7 @@
 import asyncio
 import json
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
@@ -18,14 +19,23 @@ from gptrpg.agents import prompt_assembly
 from gptrpg.agents.context import NO_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.prompt_assembly import fence_player_text
-from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ResourceChanged, utc_now_iso
+from gptrpg.event_log.schema import (
+    EVENT_SCHEMA_VERSION,
+    ActionConfirmed,
+    ActionDeclared,
+    CharacterOccupied,
+    CheckResolved,
+    ResourceChanged,
+    utc_now_iso,
+)
 from gptrpg.event_log.store import EventStore
 from gptrpg.imagery import imagery_config_from_env
+from gptrpg.rules_core.rulebook import NO_CHANGE_CATEGORY_ID
 from gptrpg.turn.context import build_turn_context
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments
 from gptrpg.web.app import create_app
 from gptrpg.web.characters_data import PLAYER_CHARACTERS
-from gptrpg.web.cookie_auth import verify_cookie
+from gptrpg.web.cookie_auth import sign_cookie, verify_cookie
 from gptrpg.web.routes_actions import _current_party_state
 from gptrpg.web.routes_characters import COOKIE_NAME
 
@@ -1632,3 +1642,501 @@ def test_party_state_axis_value_matches_character_sheet_response(
     sheet_hp = next(stat["current"] for stat in response.json()["stats"] if stat["name"] == "체력")
 
     assert bram_party_hp == sheet_hp == folded_hp
+
+
+# ---------------------------------------------------------------------------
+# 12-06 Task 2: 숫자가 실제로 변할 때만 뜨는 확인 관문 + 재량 판정 신호.
+#
+# 실제 confirm()을 다이스에 맡기지 않는다 — 12-05가 세운 결정론적 시험
+# 관례(위 두 시험)와 같은 이유다. `_seed_confirmed_check`가 declare/confirm/
+# check_resolved 세 사건을 직접 저장소에 넣어 등급을 고정하고, `confirm()`
+# 호출은 같은 move/stat로 그 확인·판정을 재사용(D-09)하게 만든다 — 액터가
+# 굴림 방식을 몰라도(Cairn류) 이 경로는 성립한다.
+# ---------------------------------------------------------------------------
+
+
+def _seed_occupied_and_confirmed_check(
+    store: EventStore,
+    session_id: str,
+    *,
+    character_id: str,
+    browser_id: str,
+    move: str,
+    stat: str,
+    grade: str,
+    counts_as_failure: bool,
+    target: int = 10,
+) -> tuple[int, int, int]:
+    """점유·선언·확인·판정 네 사건을 **액터를 거치지 않고** 저장소에 직접
+    심는다 — `SessionActor.state`는 생성 시점(`get_or_create`가 처음
+    불릴 때)에 딱 한 번 `rebuild_state`로 접히고, 그 뒤로는 저장소를 다시
+    읽지 않는다. `select-character`가 이 세션의 첫 요청이면 그 호출이
+    바로 액터를 만들어 버리므로, 그보다 **먼저** 전부 심어야 `confirm()`이
+    이 사건들을 실제로 접어 「이미 확인·판정된 선언」(D-09 재사용 경로)으로
+    본다. 신원은 `_cookie_for`로 별도 발급한다 — `select-character` 호출
+    자체가 액터를 만드는 부작용을 이 시험에서는 피한다."""
+    occupy_seq = store.next_seq(session_id)
+    store.append(
+        CharacterOccupied(
+            session_id=session_id,
+            seq=occupy_seq,
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="character_occupied",
+            character_id=character_id,
+            browser_id=browser_id,
+        )
+    )
+    declare_seq = store.next_seq(session_id)
+    store.append(
+        ActionDeclared(
+            session_id=session_id,
+            seq=declare_seq,
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="action_declared",
+            player_id=character_id,
+            character_id=character_id,
+            raw_text="시험용 선언",
+        )
+    )
+    confirm_seq = store.next_seq(session_id)
+    store.append(
+        ActionConfirmed(
+            session_id=session_id,
+            seq=confirm_seq,
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=declare_seq,
+            recorded_at=utc_now_iso(),
+            event_type="action_confirmed",
+            player_id=character_id,
+            character_id=character_id,
+            move=move,
+            stat=stat,
+            system_suggestion={"move": move, "stat": stat},
+            player_confirmed=True,
+        )
+    )
+    resolve_seq = store.next_seq(session_id)
+    store.append(
+        CheckResolved(
+            session_id=session_id,
+            seq=resolve_seq,
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=confirm_seq,
+            recorded_at=utc_now_iso(),
+            event_type="check_resolved",
+            move=move,
+            rolls=[3, 4],
+            modifiers=[],
+            target=target,
+            grade=grade,
+            counts_as_failure=counts_as_failure,
+            person_id=character_id,
+            character_id=character_id,
+        )
+    )
+    return declare_seq, confirm_seq, resolve_seq
+
+
+def _cookie_for(app: FastAPI, *, session_id: str, character_id: str, browser_id: str) -> str:
+    """`select-character`를 거치지 않고(액터를 만드는 부작용을 피해) 같은
+    모양의 서명 쿠키를 직접 만든다 — `cookie_auth.sign_cookie`가 생산
+    코드와 같은 서명기다(생산과 다른 서명기를 쓰면 서명이 실제로 맞는지를
+    시험이 못 잡는다는 이 저장소의 기존 규율은, 여기서는 "생산 코드가 쓰는
+    바로 그 함수를 그대로 부른다"로 지킨다)."""
+    return sign_cookie(
+        {"session_id": session_id, "browser_id": browser_id, "character_id": character_id},
+        secret=app.state.cookie_secret,
+    )
+
+
+def test_confirm_surfaces_pending_resource_change_from_closed_list_pick_without_applying_it(
+    tmp_db_path, tmp_path
+) -> None:
+    """AI가 닫힌 목록에서 「대상을 다치게 한다」를 고르면 confirm() 응답에
+    「변할 예정」이 실리지만, 이 시점에는 아직 `resource_changed` 사건이
+    안 쌓인다(D-09) — 실제 적용은 `confirm-resource-change`의 몫이다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "hack_and_slash", "stat": "STR"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    outcome = FakeProvider(complete_value=json.dumps(["대상을 다치게 한다"]))
+    web_app = create_app(
+        db_path=tmp_db_path,
+        imagery_config=imagery_config_from_env({"GPTRPG_IMAGERY_DIR": str(tmp_path / "media")}),
+    )
+
+    def _resolver(role, choices, env):
+        return {
+            "action_classifier": classifier,
+            "master_gm": gm,
+            "outcome_picker": outcome,
+        }.get(role, classifier)
+
+    web_app.state.provider_resolver = _resolver
+
+    seed_store = EventStore(tmp_db_path)
+    seed_store.initialize()
+    declare_seq, _confirm_seq, _resolve_seq = _seed_occupied_and_confirmed_check(
+        seed_store,
+        SESSION_ID,
+        character_id="bram",
+        browser_id="browser-1",
+        move="hack_and_slash",
+        stat="STR",
+        grade="miss",
+        counts_as_failure=True,
+    )
+    seed_store.close()
+
+    with TestClient(web_app) as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            _cookie_for(web_app, session_id=SESSION_ID, character_id="bram", browser_id="browser-1"),
+        )
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(
+                declare_seq,
+                move="hack_and_slash",
+                stat="STR",
+                suggestion_move="hack_and_slash",
+                suggestion_stat="STR",
+            ),
+        )
+        resource_events = _events_of_type(client, "resource_changed")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["pending_resource_changes"] == [
+        {
+            "category_id": "대상을 다치게 한다",
+            "axis": "체력",
+            "operation": "delta",
+            "amount_decl": -6,
+            "source": "outcome_list",
+        }
+    ]
+    assert body["discretionary"] == {"available": False, "axes": []}
+    assert resource_events == []
+
+
+def test_confirm_no_change_pick_yields_empty_pending_resource_changes(
+    tmp_db_path, tmp_path
+) -> None:
+    """AI가 「이번엔 숫자가 안 변한다」를 고르면 `pending_resource_changes`가
+    빈 목록이다(D-09) — 확인 창이 뜰 이유가 없다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "hack_and_slash", "stat": "STR"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    outcome = FakeProvider(complete_value=json.dumps([NO_CHANGE_CATEGORY_ID]))
+    web_app = create_app(
+        db_path=tmp_db_path,
+        imagery_config=imagery_config_from_env({"GPTRPG_IMAGERY_DIR": str(tmp_path / "media")}),
+    )
+
+    def _resolver(role, choices, env):
+        return {
+            "action_classifier": classifier,
+            "master_gm": gm,
+            "outcome_picker": outcome,
+        }.get(role, classifier)
+
+    web_app.state.provider_resolver = _resolver
+
+    seed_store = EventStore(tmp_db_path)
+    seed_store.initialize()
+    declare_seq, _confirm_seq, _resolve_seq = _seed_occupied_and_confirmed_check(
+        seed_store,
+        SESSION_ID,
+        character_id="bram",
+        browser_id="browser-1",
+        move="hack_and_slash",
+        stat="STR",
+        grade="miss",
+        counts_as_failure=True,
+    )
+    seed_store.close()
+
+    with TestClient(web_app) as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            _cookie_for(web_app, session_id=SESSION_ID, character_id="bram", browser_id="browser-1"),
+        )
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(
+                declare_seq,
+                move="hack_and_slash",
+                stat="STR",
+                suggestion_move="hack_and_slash",
+                suggestion_stat="STR",
+            ),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["pending_resource_changes"] == []
+
+
+def test_confirm_discretionary_available_when_outcome_list_empty_and_grade_costs(
+    tmp_db_path, tmp_path
+) -> None:
+    """룰북에 결과 목록이 없어도(Cairn, RULE-13 empty) 대가가 붙는 등급이면
+    응답의 `discretionary.available`가 참이고 그 축 목록이 룰북이 선언한
+    자원 축 이름과 같다(RULE-10). Cairn은 판정 방식(d20 롤언더)에 등록된
+    계산기가 없지만(11-04 Task 0), 확인 재사용 경로(D-09)는 판정을 다시
+    굴리지 않으므로 이 시험에 영향이 없다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "아무 시도", "stat": "STR"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    web_app = create_app(
+        db_path=tmp_db_path,
+        imagery_config=imagery_config_from_env({"GPTRPG_IMAGERY_DIR": str(tmp_path / "media")}),
+    )
+
+    def _resolver(role, choices, env):
+        return {"action_classifier": classifier, "master_gm": gm}.get(role, classifier)
+
+    web_app.state.provider_resolver = _resolver
+
+    seed_store = EventStore(tmp_db_path)
+    seed_store.initialize()
+    declare_seq, _confirm_seq, _resolve_seq = _seed_occupied_and_confirmed_check(
+        seed_store,
+        SESSION_ID,
+        character_id="bram",
+        browser_id="browser-1",
+        move="아무 시도",
+        stat="STR",
+        grade="fail",
+        counts_as_failure=True,
+    )
+    seed_store.close()
+
+    with TestClient(web_app) as client:
+        client.cookies.set(
+            COOKIE_NAME,
+            _cookie_for(web_app, session_id=SESSION_ID, character_id="bram", browser_id="browser-1"),
+        )
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(
+                declare_seq,
+                move="아무 시도",
+                stat="STR",
+                suggestion_move="아무 시도",
+                suggestion_stat="STR",
+                rulebook_id="cairn",
+            ),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["pending_resource_changes"] == []
+    assert body["discretionary"]["available"] is True
+    assert set(body["discretionary"]["axes"]) == {"STR", "DEX", "WIL", "Hit Protection", "Inventory"}
+
+
+# ---------------------------------------------------------------------------
+# 12-06 Task 2: `POST /confirm-resource-change` — 실제 적용 관문.
+# ---------------------------------------------------------------------------
+
+
+def _confirm_resource_change_body(caused_by_seq: int, **overrides) -> dict:
+    body = {
+        "character_id": "bram",
+        "caused_by_seq": caused_by_seq,
+        "category_ids": [],
+        "confirmed": True,
+        "rulebook_id": "dungeonworld_like",
+    }
+    body.update(overrides)
+    return body
+
+
+def test_confirm_resource_change_identity_mismatch_returns_403_and_no_new_events(
+    web_client_with_fake_provider,
+) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+        events_before = len(_events(client))
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(
+                declare_seq, character_id="nari", category_ids=["대상을 다치게 한다"]
+            ),
+        )
+        events_after = len(_events(client))
+
+    assert response.status_code == 403
+    assert events_after == events_before
+
+
+def test_confirm_resource_change_rejected_applies_nothing(web_client_with_fake_provider) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(
+                declare_seq, confirmed=False, category_ids=["대상을 다치게 한다"]
+            ),
+        )
+        resource_events = _events_of_type(client, "resource_changed")
+
+    assert response.status_code == 200
+    assert response.json() == {"applied": False, "resource_changes": []}
+    assert resource_events == []
+
+
+def test_confirm_resource_change_applies_rulebook_declared_amount_not_a_client_number(
+    web_client_with_fake_provider,
+) -> None:
+    """요청 본문에는 변화량 숫자를 실을 자리 자체가 없다 —
+    `extra="forbid"`가 그런 여분 칸을 거절한다. 실제로 적용되는 값(체력
+    delta -6)은 룰북 선언(`DUNGEONWORLD_OUTCOME_LIST`)에서만 나온다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+
+        smuggled = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(
+                declare_seq, category_ids=["대상을 다치게 한다"], amount=9999
+            ),
+        )
+        assert smuggled.status_code == 422
+
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(declare_seq, category_ids=["대상을 다치게 한다"]),
+        )
+        resource_events = _events_of_type(client, "resource_changed")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["applied"] is True
+    assert body["resource_changes"] == [
+        {"axis": "체력", "operation": "delta", "amount": -6, "rolls": [], "before": None, "after": None}
+    ]
+    assert len(resource_events) == 1
+    assert resource_events[0]["changes"][0]["amount"] == -6
+
+
+def test_confirm_resource_change_unknown_category_returns_400_and_no_new_events(
+    web_client_with_fake_provider,
+) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+        events_before = len(_events(client))
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(declare_seq, category_ids=["닫힌_목록_밖"]),
+        )
+        events_after = len(_events(client))
+
+    assert response.status_code == 400
+    assert events_after == events_before
+
+
+def test_confirm_resource_change_same_caused_by_seq_twice_records_exactly_one_event_with_same_roll(
+    web_client_with_fake_provider,
+) -> None:
+    """같은 `caused_by_seq`로 두 번 확인해도 `resource_changed` 사건이
+    정확히 하나이고, 두 번째 응답이 재시도로 다시 굴린 값이 아니라 **첫
+    번째에 실제로 적용된 값**을 그대로 돌려준다(T-12-03) — 주사위식
+    (「자원을 소모시킨다」, -1d4)으로 시험해야 "재굴림 아님"이 증명된다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+        body = _confirm_resource_change_body(declare_seq, category_ids=["자원을 소모시킨다"])
+
+        first = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change", json=body
+        )
+        second = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change", json=body
+        )
+        resource_events = _events_of_type(client, "resource_changed")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["resource_changes"] == second.json()["resource_changes"]
+    assert len(resource_events) == 1
+
+
+def test_confirm_resource_change_discretionary_applies_within_declared_axis(
+    web_client_with_fake_provider,
+) -> None:
+    """재량 제안(RULE-10)이 이 룰북(Cairn)의 자원 축 이름을 가리키고 형태·
+    동작이 맞으면 적용된다 — `source="discretionary_ruling"`으로 사건에
+    남는다(재량 판정과 결과 목록을 사건만 보고도 구분할 수 있다)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(
+                declare_seq,
+                rulebook_id="cairn",
+                discretionary={"axis": "STR", "operation": "delta", "amount": -3},
+            ),
+        )
+        resource_events = _events_of_type(client, "resource_changed")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["applied"] is True
+    assert body["resource_changes"] == [
+        {"axis": "STR", "operation": "delta", "amount": -3, "rolls": [], "before": None, "after": None}
+    ]
+    assert len(resource_events) == 1
+    assert resource_events[0]["source"] == "discretionary_ruling"
+
+
+def test_confirm_resource_change_discretionary_rejects_axis_outside_rulebook(
+    web_client_with_fake_provider,
+) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+        events_before = len(_events(client))
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(
+                declare_seq,
+                rulebook_id="cairn",
+                discretionary={"axis": "없는축", "operation": "delta", "amount": 1},
+            ),
+        )
+        events_after = len(_events(client))
+
+    assert response.status_code == 400
+    assert events_after == events_before
+
+
+def test_confirm_resource_change_discretionary_amount_over_max_returns_422(
+    web_client_with_fake_provider,
+) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(
+                declare_seq,
+                rulebook_id="cairn",
+                discretionary={"axis": "STR", "operation": "delta", "amount": 999},
+            ),
+        )
+
+    assert response.status_code == 422

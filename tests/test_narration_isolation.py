@@ -19,6 +19,7 @@ from gptrpg.agents.clock_judge import ClockSignal
 from gptrpg.agents.context import ClockState, NarrationFacts
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import chunk_sentences, narrate
+from gptrpg.agents.outcome_picker import OutcomePick
 from gptrpg.agents.scene_entity_judge import EntityJudgment
 from gptrpg.agents.situation_judge import SituationJudgment
 from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST
@@ -150,6 +151,7 @@ def test_situation_summary_can_carry_scenario_text_verbatim_into_narration_messa
         situation=situation_judgment,
         entity=EntityJudgment(entities=(), ai=empty_ai),
         clock=ClockSignal(should_check=False, why="", ai=empty_ai),
+        outcome=OutcomePick(category_ids=(), ai=empty_ai),
     )
 
     ctx = _turn_ctx_with_clock_at_catastrophe()

@@ -45,14 +45,27 @@ from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, Unkno
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
-from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE, DUNGEONWORLD_LIKE_ID
+from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.entities import Entity
-from gptrpg.rules_core.resource_change import ResourceOp, resolve_character_stats
+from gptrpg.rules_core.resource_change import (
+    ResourceChangeDecl,
+    ResourceOp,
+    resolve_character_stats,
+    roll_amount,
+)
 from gptrpg.rules_core.rulebook import (
+    GradeBand,
+    InvalidOutcomeList,
+    OutcomeCategory,
+    OutcomeList,
     UnknownDifficultyLevel,
+    UnknownGradeName,
+    UnknownOutcomeCategory,
+    ordered_categories,
+    require_band,
     require_difficulty,
-    require_outcome_category,
+    validate_outcome_list,
 )
 from gptrpg.imagery import (
     ImageryConfig,
@@ -81,6 +94,7 @@ from gptrpg.session_actor.actor import (
     VerifyProceedEligibility,
 )
 from gptrpg.session_actor.actor import SessionActor
+from gptrpg.session_actor.live_roller import LiveRoller
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
@@ -93,6 +107,15 @@ _CHARACTER_NAMES: dict[str, str] = {c.character_id: c.display_name for c in list
 """character_id -> display_name, `build_turn_context`의 `character_names`로
 그대로 넘긴다 — 최근 대화에서 "플레이어: "만 찍히면 네 명의 발화가 전부
 한 사람 것처럼 뭉뚱그려진다(2026-08-04 실전에서 발견, T-05-16급)."""
+
+_NO_CHECK_GRADE_BAND = GradeBand(
+    name="__no_check__", counts_as_failure=False, succeeded=True, costs=False
+)
+"""`proceed()`가 `gather_turn_judgments`에 넘기는 자리표시자(12-06) — 이
+경로에는 애초에 판정이 없으므로(D-10 ②갈래, RULE-15) 태울 결과 목록도
+없다. `costs=False`이므로 `pick_outcome`이 이 밴드를 받아도 모델을 아예
+안 부른다(0회 호출) — `Rulebook.grade_bands`에 실제로 등록된 이름이 아니라
+이 파일 안에서만 쓰는 값이다."""
 
 router = APIRouter()
 
@@ -157,6 +180,23 @@ MAX_DIFFICULTY_LEN = 32
 값이라 실제로 훨씬 짧다(예: `"hard"`). `require_difficulty`가 목록에
 없는 이름을 어차피 거절하지만, 상한은 그 검증 이전에 요청 본문 크기
 자체를 제한한다."""
+
+MAX_PICKED_CATEGORIES = 10
+"""`ConfirmResourceChangeRequest.category_ids` 길이 상한(12-06, T-12-30).
+`Rulebook.outcome_list.max_picks`가 룰북마다 이미 실제 상한을 두지만
+(`ordered_categories`가 그 값을 안 보고도 같은 식별자 중복은 걸러낸다),
+요청 본문 자체의 크기를 룰북 조회 이전에 제한하는 것이 이 상수의 목적이다
+— 이 저장소가 실제로 선언한 어떤 결과 목록보다도 넉넉하다."""
+
+MAX_DISCRETIONARY_AMOUNT = 20
+"""재량 판정 제안(`DiscretionaryProposal.amount`)의 절댓값 상한(RULE-10,
+T-12-28). **룰북 규칙이 아니라 입력 실수 방어다** — `resolution_d100.
+MAX_BONUS_DICE_MAGNITUDE`(20)와 `resource_change.MAX_DICE_COUNT`(20)가 이미
+세운 것과 같은 방어선의 값을 그대로 재사용한다. 이 저장소가 선언한 자원
+축의 실제 값 범위(예: 체력 20)를 넘는 재량 제안은 사람이 실수로 눌렀을 때
+자원을 통째로 날릴 수 있다 — 「룰북이 정할 일을 플랫폼이 정하는 것
+아닌가」라는 반론이 가능한 자리이지만, 이 값이 없으면 확인 화면 한 번의
+실수가 캐릭터를 통째로 무력화할 수 있다."""
 
 _NO_SENTENCE = object()
 """narrate()의 첫 조각을 기다릴 때 쓰는 보초값 — `cli/turn_flow.py`의 같은
@@ -436,6 +476,33 @@ class ResourceChangeView(BaseModel):
     after: int | None = None
 
 
+class PendingResourceChangeView(BaseModel):
+    """이번 판정으로 「변할 예정」인 자원 변화 하나 — 아직 적용되지 않았다
+    (12-06, D-09). `amount_decl`은 룰북 선언 그대로다(`int` 고정값 또는
+    `str` 주사위식) — 주사위 양은 아직 안 굴린다(확인 전에 굴리면 「확인
+    안 했는데 눈이 소비되는」 일이 생긴다). 실제로 굴린 값·눈은
+    `POST .../confirm-resource-change`의 응답(`ResourceChangeView`)에만
+    실린다."""
+
+    category_id: str
+    axis: str
+    operation: str
+    amount_decl: int | str
+    source: str
+
+
+class DiscretionaryProposalView(BaseModel):
+    """룰북에 결과 목록 선언이 없을 때(RULE-13 empty) 재량 판정이 열려
+    있음을 알리는 자리(RULE-10). `axes`는 이 룰북이 선언한 자원 축 이름
+    중 재량 제안이 가리킬 수 있는 것들이다 — 축은 룰북이 잠그고, 실제
+    제안(축·동작·양)은 `POST .../confirm-resource-change`의
+    `discretionary` 칸으로 보낸다. `available=False`(기본값)면 이 턴에는
+    재량 판정 여지가 없다는 뜻이다."""
+
+    available: bool = False
+    axes: list[str] = []
+
+
 class ConfirmResponse(BaseModel):
     confirmed: bool
     confirm_seq: int
@@ -457,11 +524,72 @@ class ConfirmResponse(BaseModel):
     재계산해야 하는데 d100은 십/일의 자리 채택 규칙이 있어 웹 계층에서
     다시 계산하면 `rules_core`의 계산을 중복 구현하게 된다) 이번 계획은
     항상 `None`이다 — 후속 계획이 `CheckResolved`에 칸을 늘리면 채운다."""
-    resource_changes: list[ResourceChangeView] = []
-    """이 판정에 딸려 기록된 자원 변화(RULE-04/05/09, 12-01). 이 계획의
-    자원 변화는 판정 직후 서버가 결정한 하나뿐이다(던전월드류의 「대가가
-    붙는 등급 하나에 붙는 고정 변화 하나」) — 사람 확인 관문은 12-06이
-    이 자리에 붙인다."""
+    pending_resource_changes: list[PendingResourceChangeView] = []
+    """AI가 룰북의 닫힌 결과 목록에서 고른 항목이 가리키는 자원 변화 —
+    **아직 사건이 안 쌓였다**(12-06, D-09). 고른 항목의 변화 목록이 비어
+    있으면(`NO_CHANGE_CATEGORY_ID`만 골랐거나 목록 자체가 없거나 대가가
+    안 붙는 등급) 이 칸은 빈 목록이고, 화면은 확인을 안 띄운다 — 판정마다
+    확인 창이 뜨는 것을 이 한 줄이 막는다. 12-01~12-05가 `confirm()` 안에서
+    곧바로 적용하던 「탐색적 한 줄기」는 이 계획이 대체했다 — 실제 적용은
+    `POST .../confirm-resource-change`로 사람이 확인한 뒤에만 일어난다."""
+    discretionary: DiscretionaryProposalView = DiscretionaryProposalView()
+    """룰북에 결과 목록이 없어도(RULE-13 empty) 재량 판정으로 자원이 변할
+    수 있다는 신호(RULE-10). 결과 목록이 있는 룰북에서는 항상
+    `available=False`다."""
+
+
+def _pending_resource_changes(
+    *, rulebook, grade_band, outcome, resolve_seq: int
+) -> tuple[list[PendingResourceChangeView], DiscretionaryProposalView]:
+    """AI가 고른 카테고리(`judgments.outcome`)를 코드가 다시 대조해
+    「변할 예정」 목록을 만든다(RULE-13, D-11, T-12-27).
+
+    `ordered_categories`가 룰북 선언 순서로 다시 정렬하며 목록 밖 식별자·
+    중복 선택을 다시 검사한다 — `pick_outcome`이 이미 파싱 단계에서 한
+    검사를 소비하는 쪽에서 한 번 더 하는 것이다(`_prepare_confirm`의
+    이중 소유권 검사와 같은 신중함). 여기서 걸리면(정상 경로라면 절대
+    일어나지 않는다 — `gather_turn_judgments`를 감싸는 `try`가 AI 계약
+    위반을 이미 흡수했다) 빈 목록으로 조용히 떨어진다 — 이미 굴린
+    주사위를 버리지 않는다는 원칙이 여기서도 그대로다.
+
+    RULE-10(재량 판정) — 이 룰북이 결과 목록 자체를 선언하지 않았고
+    (`RULE-13 empty`) 이 등급에 대가가 붙으면(`grade_band.costs`), 응답에
+    재량 판정 신호를 싣는다. 실제 축·동작·양 제안은 이 함수가 만들지
+    않는다 — `outcome_picker`는 결과 목록이 비어 있으면 애초에 모델을
+    안 부른다(Task 1의 커밋된 계약, 0회 호출). 사람이 `discretionary.axes`
+    (이 룰북이 선언한 축 이름)에서 골라 `confirm-resource-change`의
+    `discretionary` 칸으로 직접 제안하면, 그 라우트가 축·형태·동작·상한
+    셋을 서버에서 다시 검사한다.
+    """
+    pending: list[PendingResourceChangeView] = []
+    if outcome.category_ids:
+        try:
+            picked_categories = ordered_categories(rulebook.outcome_list, outcome.category_ids)
+        except (UnknownOutcomeCategory, InvalidOutcomeList) as exc:
+            print(
+                f"경고: outcome_picker가 닫힌 목록과 어긋난 결과를 냈다 (seq {resolve_seq}) — {exc}",
+                file=sys.stderr,
+            )
+            picked_categories = ()
+        for category in picked_categories:
+            for change in category.changes:
+                pending.append(
+                    PendingResourceChangeView(
+                        category_id=category.category_id,
+                        axis=change.axis,
+                        operation=change.operation,
+                        amount_decl=change.amount,
+                        source="outcome_list",
+                    )
+                )
+
+    discretionary = DiscretionaryProposalView()
+    if not pending and not rulebook.outcome_list.categories and grade_band.costs:
+        discretionary = DiscretionaryProposalView(
+            available=True,
+            axes=[axis.name for axis in rulebook.resource_axes if axis.form != "none"],
+        )
+    return pending, discretionary
 
 
 @router.post("/sessions/{session_id}/actions/confirm", response_model=ConfirmResponse)
@@ -610,53 +738,14 @@ async def confirm(
     check_event = store.read_events(session_id, from_seq=resolve_seq)[0]
     check_summary = f"{body.move} 판정 결과 {check_event.grade} (목표 {check_event.target})"
 
-    # 자원 변화 — 이 계획의 탐색적 한 줄기는 판정 직후 서버가 결정한 고정
-    # 변화 하나뿐이다(RULE-04/05/09, D-05). 던전월드류 룰북이 선언한
-    # 「대가가 붙는 등급(counts_as_failure)이 나오면 체력이 고정 6 깎인다」를
-    # 그 등급이 나왔을 때만 제출한다. 12-01은 이 값을 파일 수준 임시 상수
-    # (`DUNGEONWORLD_MISS_HP_COST`)로 뒀었지만, 12-04가 실제 결과 목록
-    # 그릇(`Rulebook.outcome_list`)을 놓으면서 "대상을 다치게 한다" 항목
-    # 안으로 흡수했다 — 값(축·동작·양)은 안 바뀌었다, 자리만 옮겼다.
-    # `require_outcome_category`로 이름 조회하는 것은 `require_difficulty`와
-    # 같은 모양이다. 12-06이 사람 확인 관문 + 실제 목록에서 고르는 경로를
-    # 이 자리에 붙인다 — 이 계획은 여전히 서버가 이 항목 하나로 곧바로
-    # 결정해서 제출한다(범위는 12-01 그대로, 소스만 바뀌었다).
-    resource_changes: list[ResourceChangeView] = []
-    if body.rulebook_id == DUNGEONWORLD_LIKE_ID and check_event.counts_as_failure:
-        miss_cost = require_outcome_category(
-            DUNGEONWORLD_LIKE.outcome_list, "대상을 다치게 한다"
-        ).changes[0]
-        try:
-            await actor.submit(
-                RecordResourceChange(
-                    character_id=identity.character_id,
-                    changes=(
-                        ResourceOp(
-                            axis=miss_cost.axis,
-                            operation=miss_cost.operation,
-                            amount=miss_cost.amount,
-                        ),
-                    ),
-                    # `outcome_list`를 쓴다 — 12-04가 실제 결과 목록
-                    # 인프라를 놓아도 이 값은 그대로 유지된다(값보다 이름이
-                    # 먼저 자리를 잡는다, `ResourceChanged` 도크스트링 참조).
-                    source="outcome_list",
-                    caused_by_seq=resolve_seq,
-                )
-            )
-        except AlreadyChanged:
-            pass  # 재시도 — 이미 기록된 변화를 다시 깎지 않는다.
-        except CommandRejected as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except SequenceConflict as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        resource_changes = [
-            ResourceChangeView(
-                axis=miss_cost.axis,
-                operation=miss_cost.operation,
-                amount=miss_cost.amount,
-            )
-        ]
+    # 이 등급의 밴드(D-13/D-14) — `costs`가 결과 목록을 태울지 정한다.
+    # `check_event.grade`는 `_prepare_resolve_check`가 이미 룰북 선언에서
+    # 뽑은 이름이므로 여기서 `UnknownGradeName`이 나는 것은 룰북 데이터
+    # 자체가 등록 뒤에 바뀐 경우뿐이다 — 그래도 조용히 넘기지 않는다.
+    try:
+        grade_band = require_band(rulebook.grade_bands, check_event.grade)
+    except UnknownGradeName as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         choices = load_config(request.app.state.agent_config_path)
@@ -673,10 +762,6 @@ async def confirm(
     ) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    # 자원이 깎인 뒤 이 자리에서 다시 접는다 — 위에서 RecordResourceChange가
-    # 이미 제출됐을 수 있으므로(553~591줄), 진행자·상황판단이 보는 파티
-    # 상태가 시작값이 아니라 깎인 지금 값이어야 한다(RULE-06과 같은 경로,
-    # 12-05).
     ctx = build_turn_context(
         store,
         session_id,
@@ -686,23 +771,27 @@ async def confirm(
         character_names=_CHARACTER_NAMES,
     )
 
-    # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
-    # 병렬로 부른다(09-RESEARCH.md Pitfall 3이 지목한 정확한 구간, ARCH-04).
-    # `choices`를 재사용하고 `load_config`를 다시 부르지 않는다 —
-    # `situation_judge`/`scene_entity_judge`/`clock_judge`가 설정 파일에
-    # 없어도 `ROLE_FALLBACKS`가 이미 다른 역할의 선택을 물려줬다. 이 구간
-    # 전체를 `try`로 감싸 실패 시 stderr 한 줄만 남기고 빈 판단으로 계속
-    # 간다 — 판단 실패가 확인 요청을 막지 않는다(D-05, ARCH-05). **제공자
-    # 구성(`provider_resolver` 호출) 자체도 이 `try` 안에 있다(CR-01 리뷰
-    # 발견)** — `master_gm` 제공자 구성(440~453줄)과 달리 여기 세 역할은
-    # 구성 실패가 판단 *호출* 실패와 똑같은 방식으로 처리돼야 한다: 이미
-    # 굴린 주사위(`ResolveCheck`)를 버리지 않고 빈 판단으로 계속 간다.
-    # `choices[...]` 사전 조회는 예외를 던지지 않는다(위 ROLE_FALLBACKS
-    # 설명)므로 `try` 밖에 남긴다 — `RecordAiCall`이 성공/실패 어느 쪽에서도
-    # `*.model`/`*.provider`를 읽어야 하기 때문이다.
+    # 상황판단·장면 신규 대상 판단·시계 신호 관문·결과 선택(12-06)을
+    # narrate() 호출 **전**에 병렬로 부른다(09-RESEARCH.md Pitfall 3이
+    # 지목한 정확한 구간, ARCH-04). `choices`를 재사용하고 `load_config`를
+    # 다시 부르지 않는다 — `situation_judge`/`scene_entity_judge`/
+    # `clock_judge`/`outcome_picker`가 설정 파일에 없어도 `ROLE_FALLBACKS`가
+    # 이미 다른 역할의 선택을 물려줬다. 이 구간 전체를 `try`로 감싸 실패 시
+    # stderr 한 줄만 남기고 빈 판단으로 계속 간다 — 판단 실패가 확인
+    # 요청을 막지 않는다(D-05, ARCH-05). `pick_outcome`이 던지는
+    # `UnknownOutcomeCategoryFromAI`(T-12-27, AI 계약 위반)도 이 `try`가
+    # 흡수한다 — 이미 굴린 주사위(`ResolveCheck`)를 버리지 않는다는 원칙이
+    # 판단의 실패 사유를 가리지 않는다. **제공자 구성(`provider_resolver`
+    # 호출) 자체도 이 `try` 안에 있다(CR-01 리뷰 발견)** — `master_gm`
+    # 제공자 구성과 달리 여기 네 역할은 구성 실패가 판단 *호출* 실패와
+    # 똑같은 방식으로 처리돼야 한다. `choices[...]` 사전 조회는 예외를
+    # 던지지 않는다(위 ROLE_FALLBACKS 설명)므로 `try` 밖에 남긴다 —
+    # `RecordAiCall`이 성공/실패 어느 쪽에서도 `*.model`/`*.provider`를
+    # 읽어야 하기 때문이다.
     situation_judge_choice = choices["situation_judge"]
     entity_judge_choice = choices["scene_entity_judge"]
     clock_judge_choice = choices["clock_judge"]
+    outcome_judge_choice = choices["outcome_picker"]
     try:
         situation_provider: Provider = request.app.state.provider_resolver(
             "situation_judge", choices, os.environ
@@ -713,6 +802,9 @@ async def confirm(
         clock_provider: Provider = request.app.state.provider_resolver(
             "clock_judge", choices, os.environ
         )
+        outcome_provider: Provider = request.app.state.provider_resolver(
+            "outcome_picker", choices, os.environ
+        )
         judgments = await gather_turn_judgments(
             situation_provider=situation_provider,
             situation_model=situation_judge_choice.model,
@@ -720,14 +812,18 @@ async def confirm(
             entity_model=entity_judge_choice.model,
             clock_provider=clock_provider,
             clock_model=clock_judge_choice.model,
+            outcome_provider=outcome_provider,
+            outcome_model=outcome_judge_choice.model,
             ctx=ctx,
             check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
+            outcome_list=rulebook.outcome_list,
+            grade_band=grade_band,
             resource_axes=rulebook.resource_axes,
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성) 실패가 확인 요청을 막지 않는다
         print(
-            f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (seq {resolve_seq}) — {exc}",
+            f"경고: 상황판단/장면 신규 대상/시계 신호/결과 선택 판단이 실패했다 (seq {resolve_seq}) — {exc}",
             file=sys.stderr,
         )
         judgments = empty_turn_judgments()
@@ -775,6 +871,22 @@ async def confirm(
             latency_ms=judgments.clock.ai.elapsed_ms,
             caused_by_seq=confirm_seq,
         )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="outcome_picker",
+            model=outcome_judge_choice.model,
+            provider=outcome_judge_choice.provider,
+            prompt_tokens=judgments.outcome.ai.prompt_tokens,
+            completion_tokens=judgments.outcome.ai.completion_tokens,
+            cached_prompt_tokens=judgments.outcome.ai.cached_prompt_tokens,
+            latency_ms=judgments.outcome.ai.elapsed_ms,
+            caused_by_seq=confirm_seq,
+        )
+    )
+
+    pending_resource_changes, discretionary = _pending_resource_changes(
+        rulebook=rulebook, grade_band=grade_band, outcome=judgments.outcome, resolve_seq=resolve_seq
     )
 
     facts = build_narration_facts(ctx=ctx, check_summary=check_summary, judgments=judgments)
@@ -877,7 +989,8 @@ async def confirm(
                 ModifierView(type=m.type, value=m.value, source=m.source)
                 for m in check_event.modifiers
             ],
-            resource_changes=resource_changes,
+            pending_resource_changes=pending_resource_changes,
+            discretionary=discretionary,
         )
 
     # 시계 조건 검사 배경 등록 — 관문 신호가 참일 때만 건다(ARCH-03/D-01).
@@ -930,7 +1043,192 @@ async def confirm(
             ModifierView(type=m.type, value=m.value, source=m.source)
             for m in check_event.modifiers
         ],
-        resource_changes=resource_changes,
+        pending_resource_changes=pending_resource_changes,
+        discretionary=discretionary,
+    )
+
+
+class DiscretionaryProposal(BaseModel):
+    """재량 판정 제안 하나 — 축은 룰북이 선언한 이름 중에서, 동작은 플랫폼
+    여덟 개 중 하나, 양은 정수(RULE-10). 서버가 이 라우트 안에서 다시
+    검사한다(ⓐ 축이 이 룰북에 있는가 ⓑ 축의 form과 동작이 맞는가 ⓒ 양이
+    `MAX_DISCRETIONARY_AMOUNT` 안인가) — 사람이 확인을 눌렀다고 해서 보낸
+    값을 그대로 믿지 않는다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    axis: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    operation: str = Field(min_length=1, max_length=32)
+    amount: int = Field(ge=-MAX_DISCRETIONARY_AMOUNT, le=MAX_DISCRETIONARY_AMOUNT)
+
+
+class ConfirmResourceChangeRequest(BaseModel):
+    """숫자가 실제로 변할 때만 뜨는 확인 관문의 요청(12-06, D-09/D-10).
+
+    **요청은 어느 항목을 골랐는지(식별자)만 말한다.** 변화량 숫자는 이
+    본문 어디에도 없다 — 적용되는 값은 서버가 룰북 선언에서 다시 만든다
+    (D-02와 같은 근거, T-12-26). `category_ids`는 `ConfirmResponse.
+    pending_resource_changes`에 실렸던 카테고리 식별자를 그대로 되돌려
+    보내는 것이 정상 사용이지만, 서버는 그 목록을 다시 신뢰하지 않고
+    `ordered_categories`로 다시 대조한다(T-12-27). `extra="forbid"`가
+    오타·조작으로 생긴 여분 칸을 거절한다(`ConfirmRequest`와 같은 관례).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    caused_by_seq: int = Field(ge=0)
+    """이 자원 변화를 일으킨 원인 사건 순번 — 보통 그 판정의 `resolve_seq`다.
+    Phase 8 멱등성 창(`GameState.resource_change_by_cause`)이 이 값으로
+    재시도를 단락시킨다(같은 값으로 두 번 오면 두 번째는 첫 번째 사건을
+    재사용한다, T-12-03)."""
+    category_ids: list[str] = Field(default_factory=list, max_length=MAX_PICKED_CATEGORIES)
+    confirmed: bool
+    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
+    discretionary: DiscretionaryProposal | None = None
+    """룰북에 결과 목록이 없을 때만(`ConfirmResponse.discretionary.available`)
+    뜻이 있다 — `category_ids`와 이 칸은 서로 배타적이지 않지만(같은 요청
+    안에서 함께 적용될 수 있다), 정상 사용에서는 한쪽만 채워진다."""
+
+
+class ConfirmResourceChangeResponse(BaseModel):
+    applied: bool
+    resource_changes: list[ResourceChangeView] = []
+
+
+@router.post(
+    "/sessions/{session_id}/actions/confirm-resource-change",
+    response_model=ConfirmResourceChangeResponse,
+)
+async def confirm_resource_change(
+    session_id: str, request: Request, body: ConfirmResourceChangeRequest
+) -> ConfirmResourceChangeResponse:
+    """숫자가 실제로 변할 때만 뜨는 확인 관문 — 그 캐릭터를 잡은 사람만
+    누를 수 있고, 확인해야만 자원이 깎인다(12-06, D-09/D-10).
+
+    **맨 앞이 신원 대조다(TRUST-02, D-10)** — `confirm()`의 그 자리와
+    글자 그대로 같은 모양이다. 새 권한 개념을 만들지 않는다.
+
+    거부(`confirmed=False`)면 검증 없이 즉시 끝난다 — 사건이 하나도
+    안 쌓인다. 확인이면 ⓐ `category_ids`를 `ordered_categories`로 룰북
+    선언 순서와 다시 대조하고(목록 밖 식별자·중복 선택은 400) ⓑ
+    `discretionary`가 있으면 `validate_outcome_list`(등록 시점 검증 함수를
+    재사용)로 축·형태·동작을 다시 검사한다. 두 출처를 합쳐도 적용할 변화가
+    하나도 없으면(예: `category_ids`가 빈 목록이고 `discretionary`도 없음)
+    400이다.
+
+    **변화를 서버가 다시 만든다.** 요청 본문의 숫자는 어디에도 쓰이지
+    않는다 — 골라진 `ResourceChangeDecl`을 `roll_amount`(`LiveRoller`)로
+    실제 양·눈으로 바꾼 뒤에야 `RecordResourceChange`를 제출한다. 제출은
+    `confirm()`이 이미 세운 삼중 `try/except`(`AlreadyChanged` → 재사용
+    · `CommandRejected` → 400 · `SequenceConflict` → 409) 모양을 그대로
+    쓴다 — 재시도가 두 번 깎지 않는다.
+    """
+    identity = read_identity(request, session_id)
+    if identity is None or identity.character_id != body.character_id:
+        print("경고: 신원 검증 실패 — confirm-resource-change 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+
+    if not body.confirmed:
+        return ConfirmResourceChangeResponse(applied=False)
+
+    if len(body.category_ids) != len(set(body.category_ids)):
+        raise HTTPException(status_code=400, detail="같은 결과 카테고리를 두 번 보냈다")
+
+    try:
+        rulebook = get_rulebook(body.rulebook_id)
+    except UnknownRulebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    decls: list[ResourceChangeDecl] = []
+    source = "outcome_list"
+    if body.category_ids:
+        try:
+            picked_categories = ordered_categories(rulebook.outcome_list, body.category_ids)
+        except (UnknownOutcomeCategory, InvalidOutcomeList) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        for category in picked_categories:
+            decls.extend(category.changes)
+
+    if body.discretionary is not None:
+        source = "discretionary_ruling"
+        discretionary_decl = ResourceChangeDecl(
+            axis=body.discretionary.axis,
+            operation=body.discretionary.operation,
+            amount=body.discretionary.amount,
+        )
+        try:
+            # `validate_outcome_list`(등록 시점 검증 함수)를 재사용해 이
+            # 제안 하나짜리 임시 결과 목록을 검사한다 — 축 존재·`form !=
+            # "none"`·form-operation 대응 세 검증을 새로 안 만든다. 그 함수가
+            # 접근하는 `_FORM_ALLOWED_OPERATIONS`는 `rulebook.py`의 비공개
+            # 표라서 이 파일이 직접 참조하지 않는다.
+            validate_outcome_list(
+                OutcomeList(
+                    categories=(
+                        OutcomeCategory(
+                            category_id="_discretionary_ruling", changes=(discretionary_decl,)
+                        ),
+                    )
+                ),
+                rulebook,
+            )
+        except InvalidOutcomeList as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        decls.append(discretionary_decl)
+
+    if not decls:
+        raise HTTPException(status_code=400, detail="적용할 자원 변화가 없다")
+
+    store = request.app.state.store
+    registry = request.app.state.registry
+    actor = registry.get_or_create(session_id)
+
+    roller = LiveRoller()
+    ops = tuple(
+        ResourceOp(axis=decl.axis, operation=decl.operation, amount=rolled_amount, rolls=rolls)
+        for decl in decls
+        for rolled_amount, rolls in (roll_amount(roller, decl.amount),)
+    )
+
+    try:
+        await actor.submit(
+            RecordResourceChange(
+                character_id=identity.character_id,
+                changes=ops,
+                source=source,
+                caused_by_seq=body.caused_by_seq,
+            )
+        )
+    except AlreadyChanged as exc:
+        # 재시도 — 이미 기록된 변화를 다시 깎지 않는다. 응답은 방금 다시
+        # 굴린(그러나 안 쓴) 값이 아니라 **실제로 기록된** 사건을 되읽어
+        # 채운다 — 그렇지 않으면 두 번째 요청의 응답이 첫 번째 요청이 실제로
+        # 적용한 값과 다른 숫자를 보여준다.
+        resource_event = store.read_events(session_id, from_seq=exc.resource_seq)[0]
+        return ConfirmResourceChangeResponse(
+            applied=True,
+            resource_changes=[
+                ResourceChangeView(
+                    axis=change.axis,
+                    operation=change.operation,
+                    amount=change.amount,
+                    rolls=change.rolls,
+                )
+                for change in resource_event.changes
+            ],
+        )
+    except CommandRejected as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return ConfirmResourceChangeResponse(
+        applied=True,
+        resource_changes=[
+            ResourceChangeView(axis=op.axis, operation=op.operation, amount=op.amount, rolls=list(op.rolls))
+            for op in ops
+        ],
     )
 
 
@@ -1047,6 +1345,7 @@ async def proceed(
     situation_judge_choice = choices["situation_judge"]
     entity_judge_choice = choices["scene_entity_judge"]
     clock_judge_choice = choices["clock_judge"]
+    outcome_judge_choice = choices["outcome_picker"]
     try:
         situation_provider: Provider = request.app.state.provider_resolver(
             "situation_judge", choices, os.environ
@@ -1057,6 +1356,9 @@ async def proceed(
         clock_provider: Provider = request.app.state.provider_resolver(
             "clock_judge", choices, os.environ
         )
+        outcome_provider: Provider = request.app.state.provider_resolver(
+            "outcome_picker", choices, os.environ
+        )
         judgments = await gather_turn_judgments(
             situation_provider=situation_provider,
             situation_model=situation_judge_choice.model,
@@ -1064,14 +1366,21 @@ async def proceed(
             entity_model=entity_judge_choice.model,
             clock_provider=clock_provider,
             clock_model=clock_judge_choice.model,
+            outcome_provider=outcome_provider,
+            outcome_model=outcome_judge_choice.model,
             ctx=ctx,
             check_summary=NO_CHECK_SUMMARY,
             rulebook_display_name=rulebook.display_name,
+            # 판정 자체가 없는 경로다(D-10 ②갈래) — 결과 목록도 재량 판정도
+            # 성립하지 않는다. `_NO_CHECK_GRADE_BAND.costs=False`가
+            # `pick_outcome`의 조기 반환을 걸어 모델을 아예 안 부른다.
+            outcome_list=OutcomeList(categories=()),
+            grade_band=_NO_CHECK_GRADE_BAND,
             resource_axes=rulebook.resource_axes,
         )
     except Exception as exc:  # noqa: BLE001 - D-05, 판단(및 그 제공자 구성) 실패가 진행 요청을 막지 않는다
         print(
-            f"경고: 상황판단/장면 신규 대상/시계 신호 판단이 실패했다 (declare_seq {body.declare_seq}) — {exc}",
+            f"경고: 상황판단/장면 신규 대상/시계 신호/결과 선택 판단이 실패했다 (declare_seq {body.declare_seq}) — {exc}",
             file=sys.stderr,
         )
         judgments = empty_turn_judgments()
@@ -1113,6 +1422,18 @@ async def proceed(
             completion_tokens=judgments.clock.ai.completion_tokens,
             cached_prompt_tokens=judgments.clock.ai.cached_prompt_tokens,
             latency_ms=judgments.clock.ai.elapsed_ms,
+            caused_by_seq=body.declare_seq,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="outcome_picker",
+            model=outcome_judge_choice.model,
+            provider=outcome_judge_choice.provider,
+            prompt_tokens=judgments.outcome.ai.prompt_tokens,
+            completion_tokens=judgments.outcome.ai.completion_tokens,
+            cached_prompt_tokens=judgments.outcome.ai.cached_prompt_tokens,
+            latency_ms=judgments.outcome.ai.elapsed_ms,
             caused_by_seq=body.declare_seq,
         )
     )

@@ -64,9 +64,9 @@ def _read_events(db: str, session: str):
 
 
 class _MultiRoleProvider:
-    """`--provider fake --model fake-model`이 다섯 역할(action_classifier/
-    situation_judge/scene_entity_judge/master_gm/clock_judge) 전부에 같은
-    제공자 이름을 쓰게 만드는 대역 하나가 필요하다.
+    """`--provider fake --model fake-model`이 여섯 역할(action_classifier/
+    situation_judge/scene_entity_judge/master_gm/clock_judge/outcome_picker)
+    전부에 같은 제공자 이름을 쓰게 만드는 대역 하나가 필요하다.
 
     09-02부터는 `situation_judge`와 `clock_judge`(관문)가 `asyncio.gather`로
     **동시에** 돈다(ARCH-04) — 09-03부터는 `scene_entity_judge`도 같은
@@ -89,6 +89,7 @@ class _MultiRoleProvider:
         entity_value: str = "[]",
         signal_value: str = _SIGNAL_CHECK_JSON,
         condition_value: str = _VERDICT_ADVANCE_JSON,
+        outcome_value: str = "[]",
         stream_text: str = "문이 요란하게 부서진다. 안에서 서늘한 바람이 흘러나온다.",
         clock_judge_always_raises: bool = False,
     ) -> None:
@@ -97,9 +98,11 @@ class _MultiRoleProvider:
         self.entity_value = entity_value
         self.signal_value = signal_value
         self.condition_value = condition_value
+        self.outcome_value = outcome_value
         self.stream_text = stream_text
         self.clock_judge_always_raises = clock_judge_always_raises
         self.complete_calls = 0
+        self.deep_judgment_calls = 0
         self._lock = threading.Lock()
         self._last_result: AgentResult | None = None
 
@@ -130,10 +133,20 @@ class _MultiRoleProvider:
                 ok=True, value=self.signal_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
             )
         if "위협 시계 조건 판단자" in combined_system:
+            with self._lock:
+                self.deep_judgment_calls += 1
             if self.clock_judge_always_raises:
                 raise RuntimeError("clock judge 대역이 일부러 실패한다")
             return AgentResult(
                 ok=True, value=self.condition_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
+            )
+        if "결과 선택 판단자" in combined_system:
+            # 12-06: outcome_picker 역할. 던전월드류 `miss`/`weak_hit` 등급이
+            # `costs=True`라 이 판단이 실제로 불린다 — 빈 배열(기본값)은
+            # 「이번엔 숫자가 안 변한다」로 안전하게 떨어진다(아무 카테고리도
+            # 안 고르면 이 CLI 계열 시험이 새로 `input()`을 요구하지 않는다).
+            return AgentResult(
+                ok=True, value=self.outcome_value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
             )
         raise AssertionError(f"알 수 없는 역할의 프롬프트: {combined_system[:120]!r}")
 
@@ -247,8 +260,15 @@ def test_signal_skip_never_calls_deep_judgment_provider(tmp_db_path, monkeypatch
     assert exit_code == 0
 
     # ① action_classifier + ② situation_judge + ③ scene_entity_judge +
-    # ④ clock_judge 관문(신호=skip) 네 번만 불렸다 — ⑤ 깊은 판단 호출은 없다.
-    assert provider.complete_calls == 4
+    # ④ clock_judge 관문(신호=skip) 네 번은 항상 불린다. ⑤ outcome_picker는
+    # 이번 판정 등급에 대가가 붙을 때만 불린다(Task 1의 0회 호출 계약) —
+    # 이 시험은 실제 다이스(LiveRoller)로 굴리므로 등급이 매번 다를 수 있어
+    # 정확한 총합 대신 상한·하한으로 확인한다. **이 시험이 실제로 지키려는
+    # 성질은 깊은 판단(⑥)이 한 번도 안 불린다는 것이다** — 그건
+    # `deep_judgment_calls`로 직접 잰다(12-06 리뷰에서 총합 assert가 실제
+    # 다이스에 따라 흔들리는 것을 발견해 고쳤다).
+    assert 4 <= provider.complete_calls <= 5
+    assert provider.deep_judgment_calls == 0
 
     events = _read_events(db, "s1")
     clock_advanced = [event for event in events if event.event_type == "clock_advanced"]

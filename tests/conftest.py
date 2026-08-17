@@ -523,6 +523,7 @@ def web_client_with_fake_provider(
         situation_judge: FakeProvider | None = None,
         scene_entity_judge: FakeProvider | None = None,
         clock_judge: FakeProvider | None = None,
+        outcome_picker: FakeProvider | None = None,
     ) -> TestClient:
         config_path = tmp_path / "agents.json"
         config_path.write_text(
@@ -543,12 +544,15 @@ def web_client_with_fake_provider(
             providers["scene_entity_judge"] = scene_entity_judge
         if clock_judge is not None:
             providers["clock_judge"] = clock_judge
+        if outcome_picker is not None:
+            providers["outcome_picker"] = outcome_picker
 
         def _resolver(role: str, choices, env):
-            """등록되지 않은 역할(`situation_judge`/`scene_entity_judge`/`clock_judge`
-            등)이 오면 `action_classifier` 대역을 그대로 돌려준다 — `ROLE_FALLBACKS`가
-            나머지를 채운다는 것이 이 시험 도우미로도 함께 검증된다. 개별 역할
-            대역을 주입하고 싶으면 그 이름으로 `_make`에 넘기면 된다."""
+            """등록되지 않은 역할(`situation_judge`/`scene_entity_judge`/`clock_judge`/
+            `outcome_picker` 등)이 오면 `action_classifier` 대역을 그대로
+            돌려준다 — `ROLE_FALLBACKS`가 나머지를 채운다는 것이 이 시험
+            도우미로도 함께 검증된다. 개별 역할 대역을 주입하고 싶으면 그
+            이름으로 `_make`에 넘기면 된다."""
             return providers.get(role, providers["action_classifier"])
 
         app = create_app(

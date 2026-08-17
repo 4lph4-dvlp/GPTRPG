@@ -219,8 +219,8 @@ def test_stream_always_fails_before_first_chunk_exits_nonzero_with_zero_narratio
     assert not any(event.event_type == "narration_appended" for event in events)
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    # 09-03: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 진행자(실패해도 기록된다) 다섯 건.
-    assert len(ai_events) == 5
+    # 12-06: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 결과 선택 + 진행자(실패해도 기록된다) 여섯 건.
+    assert len(ai_events) == 6
 
 
 # ---------------------------------------------------------------------------
@@ -277,8 +277,8 @@ def test_narrate_name_replaced_with_failing_generator_exits_nonzero_and_keeps_em
     assert narration_events[0].text == "이미 나간 문장 하나."
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    # 09-03: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 진행자 다섯 건.
-    assert len(ai_events) == 5
+    # 12-06: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 결과 선택 + 진행자 여섯 건.
+    assert len(ai_events) == 6
 
 
 # ---------------------------------------------------------------------------

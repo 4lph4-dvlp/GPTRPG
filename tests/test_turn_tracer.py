@@ -109,12 +109,20 @@ def test_turn_runs_full_loop_and_records_events_in_causal_order(
     assert check_event.seq < narration_events[0].seq
 
     ai_events = [event for event in events if event.event_type == "ai_invoked"]
-    # 09-03: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 진행자 다섯 건.
-    assert len(ai_events) == 5
+    # 12-06: 분류기 + 상황판단 + 장면 신규 대상 + 시계 신호 관문 + 결과 선택 + 진행자 여섯 건.
+    assert len(ai_events) == 6
     for ai_event in ai_events:
         assert ai_event.latency_ms >= 0
-        assert ai_event.prompt_tokens > 0
-        assert ai_event.completion_tokens > 0
+        if ai_event.agent_role == "outcome_picker":
+            # `pick_outcome`은 이 등급에 대가가 안 붙으면(`costs=False`) 모델을
+            # 아예 안 부른다(Task 1의 커밋된 계약, 0회 호출) — 실제 다이스가
+            # 이 CLI 트레이서에서 어느 등급을 내느냐에 따라 토큰이 0일 수
+            # 있다. 그래도 `ai_invoked`는 항상 제출된다(계측에서 안 빠진다).
+            assert ai_event.prompt_tokens >= 0
+            assert ai_event.completion_tokens >= 0
+        else:
+            assert ai_event.prompt_tokens > 0
+            assert ai_event.completion_tokens > 0
 
     declared = events[0]
     assert declared.raw_text == "문을 부수고 들어간다"
