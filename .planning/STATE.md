@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12
-current_phase_name: 능력치 · 자원 변화 · 소지품
+current_phase_name: stats-resources-inventory
 status: executing
-stopped_at: Phase 12 context gathered
-last_updated: "2026-08-17T03:40:57.624Z"
+stopped_at: Phase 12 Plan 1 (12-01) complete
+last_updated: "2026-08-17T05:37:04.000Z"
 last_activity: 2026-08-17
-last_activity_desc: Phase 11 complete, transitioned to Phase 12
+last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
 progress:
   total_phases: 11
   completed_phases: 4
@@ -24,16 +24,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 11 — rulebook-vocabulary
+**Current focus:** Phase 12 — stats-resources-inventory
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 12 — 능력치 · 자원 변화 · 소지품
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-17 — Phase 11 complete, transitioned to Phase 12
+Phase: 12 (stats-resources-inventory) — EXECUTING
+Plan: 2 of 7
+Status: Executing Phase 12 — 12-01 complete (RULE-02/03/04/05/06/09 첫 관통, 12-02가 RULE-09의
+"자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
+Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인트 승인 + Task 2·3 커밋)
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -63,6 +64,7 @@ Progress: [██████████] 100%
 | 08 | 4 | - | - |
 | 10 | 7 | - | - |
 | 11 | 7 | - | - |
+| 12 | 1/7 | - | - |
 
 **Recent Trend:**
 
@@ -111,6 +113,7 @@ Progress: [██████████] 100%
 | Phase 11 P04 | ~50min | 3 tasks | 14 files |
 | Phase 11 P06 | ~3시간20분(사람 확인 대기 포함) | 3 tasks | 15 files |
 | Phase 11 P07 | ~90min | 3 tasks | 15 files |
+| Phase 12 P01 | ~2h30m (체크포인트 승인 대기 제외) | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -225,6 +228,14 @@ Progress: [██████████] 100%
 - [Phase ?]: 11-07: resource_axes 매개변수를 기본값 ()로 넓혀 classify/judge_situation/narrate/gather_turn_judgments에 추가 — 이 저장소 전역의 기존 프롬프트 조립 호출부·시험이 대부분 무변경으로 남고, 웹·CLI 실제 호출부 10곳만 rulebook.resource_axes를 명시적으로 넘긴다
 - [Phase ?]: 11-07: _format_character_state가 stat.form 여섯 값 명시적 분기로 재작성됨 — form=="none"은 건너뛴다(T-11-25). _format_scene_entities는 같은 버그를 잠재적으로 갖고 있으나 이 계획 범위 밖, WINDOWS.md에 todo로 기록
 - [Phase ?]: 11-06 rework 2(코드 리뷰 후 차단 결함, T-11-29): POST /proceed가 라우트 계층 신원 대조만 하고 선언 소유권·분류 결과(tier)를 서버 자체 검증 없이 클라이언트 말을 믿어, 판정이 필요한 행동을 선언한 뒤 판정을 통째로 건너뛸 수 있었다. ActionClassified 사건(판 7)+SessionActor.VerifyProceedEligibility(declare_owners+declare_no_check 이중 검사)로 막았다. 옛/미분류 기록은 declare_owners의 '모르면 통과'와 반대로 '모르면 거부'한다 — 통과시키면 이 구멍이 다시 열린다
+- [Phase 12]: 12-01 Task 1 체크포인트(option-a, 사용자 승인): 자원 변화 선언은 「축 · 동작 · 양」 세 칸으로 확정 — 룰북 데이터·사건 기록·재생 코드 세 곳에 동시에 박힌다. 두 칸(축·양)으로 좁히는 대안은 로드맵 성공 기준 8("자랄 수 있는 모양")을 못 채워 기각
+- [Phase 12]: 12-01: StatUsage(add_to_dice_total/use_as_target)를 rulebook.py에 능력치 쓰임 선언으로 세우고, build_stat_check_input이 캐릭터 StatEntry.current를 룰북 이름 모른 채 Modifier/target으로 조립(D-01). 던전월드류 여섯 능력치가 add_to_dice_total, OpenQuest 능력치 일곱이 use_as_target(계획 원문에 없던 추가 — 아래 참조)
+- [Phase 12]: 12-01: resource_change.py 신설 — 「축 · 동작 · 양」(ResourceChangeDecl/ResourceOp), 이번 계획은 delta 동작 하나뿐이고 12-02가 나머지 일곱을 같은 형식 위에 붙인다(RULE-09 — 요구사항은 12-02까지 완결돼야 완전히 닫힌다, REQUIREMENTS.md 체크 안 함)
+- [Phase 12]: 12-01: EVENT_SCHEMA_VERSION 7→8, ResourceChanged 사건 + reducer.py의 character_resource_ops/resource_change_by_cause를 같은 커밋에(08-CONTEXT.md D-06 네 번째 실증). GET 캐릭터 시트가 시작값이 아니라 사건을 접은 지금 값을 돌려준다(RULE-06)
+- [Phase 12]: 12-01: ConfirmRequest에서 target/modifiers 제거하고 difficulty 하나로 대체(D-02), 웹·CLI 같은 커밋. 난이도는 룰북이 선언한 닫힌 이름 목록(require_difficulty)에서만 찾고, 없는 이름은 사건을 남기기 전에 거절(웹은 ConfirmAction 제출 이전에 미리 검증해 "요청 전후 사건 개수 동일" 보장)
+- [Phase 12]: 12-01 [deviation, Rule 4 — 계획 자기모순 해소, 승인 불필요 조건에 해당]: 계획 원문은 ResolveCheck.stat 빈 문자열을 person_id/character_id처럼 거부하라고 적었으나, Task 2 자신의 <verify>가 요구하는 test_session_actor.py가 stat 없이 ResolveCheck를 부르는 기존 호출을 여러 건 갖고 있어 문자 그대로 하면 그 파일이 깨진다. 빈 stat은 "건너뛴다"로 구현(opt-in) — 웹 confirm()은 ConfirmRequest.stat이 이미 필수라 실질적으로 항상 채워진 값을 넘긴다
+- [Phase 12]: 12-01 [deviation, Rule 2 — 계획 자신의 acceptance criteria 재현 불가 문제 해소]: OpenQuest 능력치 일곱 축에 stat_usage="use_as_target" 추가(계획 원문 액션에 없음) — ConfirmRequest.stat이 여전히 필수이고 웹 캐릭터 로스터가 던전월드류뿐이라, 이것 없이는 "OpenQuest + difficulty=hard → 200"이라는 Task 3 acceptance criteria를 HTTP로 재현할 방법이 없었다. 실제 OpenQuest 플레이어 캐릭터·진짜 기술값 판정은 다음 마일스톤 몫으로 파일에 명시
+- [Phase 12]: 12-01 알려진 갭(차단 아님): ResourceChangeRecord.before/after와 ConfirmResponse.total이 항상 None — 각각 액터의 캐릭터 시작값 접근 경로(층 계약 재검토 필요)와 CheckResolved의 total 필드(스키마 변경 필요)가 없어서다. WINDOWS.md 자동 기록은 시도했으나 이 세션에서 gsd-tools 쿼리 계층이 응답 없이 조용히 실패(타임아웃/무출력) — SUMMARY.md의 "Known Stubs" 절이 1차 기록이다
 
 ### Pending Todos
 
@@ -280,25 +291,28 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-17T02:19:15.391Z
-Stopped at: Phase 12 context gathered
-Traceability 갱신 완료
-Resume file: .planning/phases/12-stats-resources-inventory/12-CONTEXT.md
+Last session: 2026-08-17T14:37:04+09:00
+Stopped at: Phase 12 Plan 1 (12-01-PLAN.md) 실행 완료 — Task 1 체크포인트 사용자 승인 후
+이어받아 Task 2·Task 3 커밋까지 완료
+Resume file: .planning/phases/12-stats-resources-inventory/12-02-PLAN.md
 
-**다음 행동:** Phase 10(AI 출력 검증과 탈옥 방어) **논의 완료** — `10-CONTEXT.md`에 결정
-13개가 잠겼다. 다음은 `/gsd-plan-phase 10`(조사 → 계획).
+**다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
+`resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
+`apply_resource_op`이 `form != "numeric"`을 이미 명시적으로 거절해 다음 계획이 채울 자리를
+코드로 표시해 둔다).
 
 **계획 단계가 반드시 알아야 할 것 셋:**
 
-1. **판을 5 → 6으로 올린다**(D-04, 안내를 사건 기록에 남기기 위해). `reducer.py` 분기를
-   **같은 커밋에** 내야 한다 — 이 프로젝트에서 이미 한 번 사고가 난 자리다(08-CONTEXT.md D-06)
+1. **RULE-09는 아직 REQUIREMENTS.md에서 체크하지 않았다** — 12-01이 「축 · 동작 · 양」 형식과
+   `delta` 동작 하나를 세웠지만, 그 형식이 실제로 "자란다"는 것은 12-02가 나머지 동작을
+   붙여야 증명된다. 12-02 완료 시 RULE-09를 닫을 것
 
-2. **「한 문장씩 늦추기」가 구조를 정한다**(D-01). 서사가 지금은 문장이 완성되는 즉시
-   기록·표시되는데, 그 사이에 한 칸을 끼운다. `master_gm.narrate()`의 재시도 규칙 세 갈래
-   (특히 스톨은 절대 재시도 안 함)를 깨면 안 된다
+2. **`ResourceChangeRecord.before`/`.after`가 항상 `None`이다** — `session_actor`가 캐릭터
+   시작값(`web.characters_data`)에 접근할 수 없어서다(층 계약). 12-07(화면)이 이 칸을
+   실제로 그리게 되면 그 전에 반드시 채워야 한다
 
-3. **SAFE-07이 신설됐다** — 분류기가 목록 밖 이름을 내면 「무브 없음」과 같은 경로로 보낸다
-   (D-12). 2026-08-12 Phase 9 UAT에서 발견
+3. **`ConfirmResponse.total`도 항상 `None`이다** — `CheckResolved`가 `total`을 저장하지
+   않는다. 채우려면 `event_log/schema.py` 스키마 변경(판 올리기)이 필요하다
 
 Phase 9는 검증까지 완전히 닫혔다 — 09-04까지 4개 계획 종료, ARCH-02~06 다섯 다 완료, 열린
 UAT 4항목도 2026-08-12에 전부 PASS(증거는 `.gptrpg/uat9.db`의 `pacing5`·`uatweb` 세션).
