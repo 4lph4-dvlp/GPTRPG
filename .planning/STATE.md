@@ -6,15 +6,15 @@ current_phase: 12
 current_phase_name: stats-resources-inventory
 status: executing
 stopped_at: Completed 12-06-PLAN.md (12-06)
-last_updated: "2026-08-17T08:39:47.791Z"
+last_updated: "2026-08-17T14:38:55.114Z"
 last_activity: 2026-08-17
 last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
 progress:
-  total_phases: 11
+  total_phases: 12
   completed_phases: 4
   total_plans: 29
   completed_plans: 28
-  percent: 36
+  percent: 33
 ---
 
 # Project State
@@ -304,6 +304,7 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 ### Roadmap Evolution
 
 - Phase 12.1 inserted after Phase 12: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22). Phase 8 논의 중 사용자가 지적해 발견: D22가 잠긴 결정인데도 v1.1·M1~M4 어디에도 배정된 적이 없었음. CHAR-01~05 요구사항 신설, REQUIREMENTS.md 69→74건 (URGENT)
+- Phase 13.1 inserted after Phase 13: GM이 이야기를 이끈다 — 2026-08-17 플레이테스트에서 발견한 빈칸: 진행자가 반응만 하고 이야기를 밀지 않는다 (URGENT)
 
 ## Deferred Items
 
