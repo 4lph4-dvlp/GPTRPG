@@ -30,15 +30,19 @@ AGENT_ROLES: tuple[str, ...] = (
     "situation_judge",
     "scene_entity_judge",
     "clock_judge",
+    "outcome_picker",
 )
 """D-32가 요구한 두 역할(`action_classifier`/`master_gm`)이 D-64로 다섯이
-됐다(09-01) — 각자 따로 제공자·모델을 고른다.
+됐고(09-01), 12-06이 여섯째(`outcome_picker`)를 더했다 — 각자 따로 제공자·
+모델을 고른다.
 
 - `action_classifier`: 자유 문장을 닫힌 무브 목록과 대조한다.
 - `master_gm`: 판정 결과를 받아 서술한다.
 - `situation_judge`: 상황판단(서술과 분리된 판단 조각) — 구현은 09-02.
 - `scene_entity_judge`: 장면에 새 대상이 등장했는지 판단 — 구현은 09-03.
-- `clock_judge`: 위협 시계 조건 검사(관문 + 깊은 판단) — 이 계획이 구현한다.
+- `clock_judge`: 위협 시계 조건 검사(관문 + 깊은 판단) — 구현은 09-01.
+- `outcome_picker`: 판정 등급이 나온 뒤 룰북의 결과 목록에서 카테고리를
+  고른다(RULE-13/D-11) — 이 계획이 구현한다.
 """
 
 STRICT_AGENT_ROLES: tuple[str, ...] = ("action_classifier", "master_gm")
@@ -49,12 +53,14 @@ ROLE_FALLBACKS: dict[str, str] = {
     "situation_judge": "master_gm",
     "scene_entity_judge": "action_classifier",
     "clock_judge": "action_classifier",
+    "outcome_picker": "action_classifier",
 }
-"""새 역할 셋의 대체 표 — 설정 파일에 없으면 이 역할의 선택을 그대로 물려받는다.
+"""새 역할 넷의 대체 표 — 설정 파일에 없으면 이 역할의 선택을 그대로 물려받는다.
 
 대체 대상 선택 근거: `situation_judge`는 서술과 같은 급의 추론이 필요하므로
-`master_gm`을 물려받는다. `scene_entity_judge`/`clock_judge`는 닫힌 목록에서
-고르는 경량 판단이므로 `action_classifier`와 같은 급이라 그것을 물려받는다.
+`master_gm`을 물려받는다. `scene_entity_judge`/`clock_judge`/`outcome_picker`는
+닫힌 목록에서 고르는 경량 판단이므로 `action_classifier`와 같은 급이라 그것을
+물려받는다.
 """
 
 DEFAULT_CONFIG_PATH = Path(".gptrpg/agents.json")
@@ -103,7 +109,7 @@ def load_config(path: Path) -> dict[str, AgentChoice]:
     지금처럼 큰 소리로 실패한다.
 
     `ROLE_FALLBACKS`에 든 역할(`situation_judge`/`scene_entity_judge`/
-    `clock_judge`)이 파일에 없으면 대체 역할의 `AgentChoice`를 그대로 물려주고
+    `clock_judge`/`outcome_picker`)이 파일에 없으면 대체 역할의 `AgentChoice`를 그대로 물려주고
     **표준오류에 한 줄** 찍는다 — 이것은 조용한 대체가 아니다: 대체가 일어났다는
     사실이 stderr에 보이고, `gptrpg agents set --role <역할>`로 따로 정할 수
     있다는 안내를 함께 담는다. 실제로 어느 모델을 썼는지는 `RecordAiCall`이

@@ -14,7 +14,7 @@ ROADMAP 성공조건 4, 설계 문서 §3.8이 세운 규율 — AI가 저장소
 
 from dataclasses import dataclass, fields
 
-from gptrpg.rules_core.entities import Entity
+from gptrpg.rules_core.entities import Entity, StatEntry
 
 RECENT_TURNS_LIMIT = 10
 """매 턴 넣는 최근 대화의 최대 개수 (D-31)."""
@@ -281,4 +281,42 @@ class EntityJudgeContext:
         if len(self.recent_turns) > ENTITY_JUDGE_RECENT_TURNS_LIMIT:
             raise ContextCapExceeded(
                 "recent_turns", len(self.recent_turns), ENTITY_JUDGE_RECENT_TURNS_LIMIT
+            )
+
+
+OUTCOME_PICKER_RECENT_TURNS_LIMIT = 4
+"""결과 선택 판단(`outcome_picker`)이 받는 최근 대화 상한(ARCH-06 "각자 상한"의
+네 번째 조각, 12-06). 이 판단은 "방금 판정이 어떻게 됐는가"만 보고 룰북의
+닫힌 결과 목록에서 카테고리를 고르면 되므로 서술용 `RECENT_TURNS_LIMIT`(10)
+보다 좁다 — `CLOCK_JUDGE_RECENT_TURNS_LIMIT`/`ENTITY_JUDGE_RECENT_TURNS_LIMIT`과
+같은 이유의 좁힘이다."""
+
+
+@dataclass(frozen=True)
+class OutcomePickerContext:
+    """`outcome_picker` 역할(`agents.outcome_picker.pick_outcome`)이 받는
+    문맥 — 딱 네 칸(12-06).
+
+    **파티 상태 칸을 두지 않는다** — D-17이 파티 상태를 받는 역할을
+    상황판단(`situation_judge`)과 서술(`master_gm`) 둘로 한정했고, 결과
+    선택은 그 목록에 없다. 이 값 객체가 그 칸을 애초에 갖고 있지 않은
+    것 자체가 ARCH-06의 "각자 상한"이다 — `ClockJudgeContext`/
+    `EntityJudgeContext`와 같은 원리, 필요 이상을 타입 차원에서 막는다.
+    """
+
+    check_summary: str
+    """이번 턴 판정 결과 요약 한 줄 — 등급·목표·합계."""
+    actor_stats: tuple[StatEntry, ...]
+    """행위자 자신의 상태값. `agents.prompt_assembly.actor_stats(ctx)`가
+    `TurnContext.party_state`에서 뽑아 넘긴다 — 남의 상태는 안 들어간다(D-17)."""
+    recent_turns: tuple[str, ...]
+    category_ids: tuple[str, ...]
+    """이번에 고를 수 있는 결과 카테고리 식별자의 닫힌 목록 — 룰북
+    `OutcomeList.categories`의 `category_id`만 옮긴 것이다. 서술 문장은
+    담지 않는다(`OutcomeCategory`가 애초에 그 칸을 갖고 있지 않다)."""
+
+    def __post_init__(self) -> None:
+        if len(self.recent_turns) > OUTCOME_PICKER_RECENT_TURNS_LIMIT:
+            raise ContextCapExceeded(
+                "recent_turns", len(self.recent_turns), OUTCOME_PICKER_RECENT_TURNS_LIMIT
             )

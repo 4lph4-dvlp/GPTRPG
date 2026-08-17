@@ -23,11 +23,12 @@ from gptrpg.agents.context import (
     ContextCapExceeded,
     EntityJudgeContext,
     NarrationFacts,
+    OutcomePickerContext,
     SITUATION_FACTS_LIMIT,
     TurnContext,
 )
 from gptrpg.rules_core.entities import Entity, StatEntry
-from gptrpg.rules_core.rulebook import ResourceAxisDecl
+from gptrpg.rules_core.rulebook import NO_CHANGE_CATEGORY_ID, ResourceAxisDecl
 from gptrpg.rulebooks.moves import MoveDecl
 
 _CACHE_CONTROL = {"type": "ephemeral"}
@@ -715,6 +716,52 @@ def build_scene_entity_prompt(
         f"{NOT_AN_INSTRUCTION_LINE}"
     )
     session = _format_scene_entities(ctx.scene_entities)
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = (
+        f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"
+        f"방금 판정 결과: {ctx.check_summary}"
+    )
+    messages = [{"role": "user", "content": turn}]
+    return system, messages
+
+
+def _format_outcome_categories(category_ids: tuple[str, ...]) -> str:
+    """결과 카테고리 식별자만 나열한다 — 카테고리에는 서술 문장 필드
+    자체가 없으므로(RULE-13/D-11, `OutcomeCategory`) 실을 것도 식별자뿐이다."""
+    if not category_ids:
+        return "(고를 수 있는 결과 카테고리 없음)"
+    return "\n".join(f"- {category_id}" for category_id in category_ids)
+
+
+def build_outcome_picker_prompt(
+    *,
+    rulebook_display_name: str,
+    ctx: OutcomePickerContext,
+) -> tuple[list[dict], list[dict]]:
+    """`pick_outcome`(결과 선택 판단, RULE-13/D-11, 12-06) 프롬프트를
+    조립한다. `(system, messages)` 짝을 돌려준다.
+
+    **닫힌 출력 계약** — 응답은 카테고리 식별자 문자열만 담은 JSON 배열이다
+    (예: `["hurts_target"]`). 목록에 없는 이름을 지어내지 말고, 해당하는
+    것이 없으면 `NO_CHANGE_CATEGORY_ID`("이번엔 숫자가 안 변한다") 항목을
+    고르라고 명시한다(D-09).
+
+    `session` 조각은 행위자 자신의 상태값만 담는다(`ctx.actor_stats`, D-17)
+    — 파티 전원이 아니다. `ctx.recent_turns`는 `turn/context.py`에서 이미
+    울타리를 지난 값이므로 여기서 다시 감싸지 않는다 — 다른 판단 프롬프트
+    (`build_clock_signal_prompt` 등)와 같은 관례다.
+    """
+    permanent = (
+        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 결과 선택 판단자다. 방금 "
+        "판정 결과를 보고, 아래 닫힌 목록에서 이번 판정에 어울리는 결과 카테고리를 "
+        "고른다. 목록에 없는 이름을 지어내지 않는다 — 해당하는 것이 없으면 "
+        f'"{NO_CHANGE_CATEGORY_ID}"(이번엔 숫자가 안 변한다) 항목을 고른다. 응답은 '
+        "카테고리 식별자만 담은 JSON 문자열 배열로만 한다 — 예: "
+        '["hurts_target"]. 설명 문장을 덧붙이지 않는다.\n\n'
+        f"결과 카테고리 목록:\n{_format_outcome_categories(ctx.category_ids)}\n\n"
+        f"{NOT_AN_INSTRUCTION_LINE}"
+    )
+    session = f"캐릭터 상태: {_format_character_state(ctx.actor_stats)}"
     system = [_cached_block(permanent), _cached_block(session)]
     turn = (
         f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"

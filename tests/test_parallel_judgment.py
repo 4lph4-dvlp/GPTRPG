@@ -16,13 +16,20 @@ import time
 from gptrpg.agents.clock_judge import ClockSignal
 from gptrpg.agents.context import ClockState, TurnContext
 from gptrpg.agents.envelope import AgentResult
+from gptrpg.agents.outcome_picker import OutcomePick
 from gptrpg.agents.scene_entity_judge import EntityJudgment
 from gptrpg.agents.situation_judge import SituationJudgment
 from gptrpg.rules_core.entities import Entity
+from gptrpg.rules_core.rulebook import GradeBand, OutcomeList
 from gptrpg.turn import judgments as judgments_module
 from gptrpg.turn.judgments import gather_turn_judgments
 
 _EMPTY_AI = AgentResult(ok=True, value=None, elapsed_ms=1, prompt_tokens=1, completion_tokens=1)
+
+_FAILED_AI = AgentResult(ok=False, value=None, elapsed_ms=1, prompt_tokens=0, completion_tokens=0)
+
+_NO_COST_GRADE_BAND = GradeBand(name="miss", counts_as_failure=True, succeeded=False, costs=False)
+_EMPTY_OUTCOME_LIST = OutcomeList(categories=())
 
 
 def _ctx(**overrides) -> TurnContext:
@@ -47,12 +54,88 @@ class _FakeProvider:
 
 
 # ---------------------------------------------------------------------------
-# 행동 층 — 네 가지 서로 다른 입력에서 세 대역이 각각 정확히 한 번씩 불린다
+# 행동 층 — 네 가지 서로 다른 입력에서 네 대역이 각각 정확히 한 번씩 불린다
 # ---------------------------------------------------------------------------
 
 
 def _install_counting_stubs(monkeypatch) -> dict[str, int]:
-    """`gptrpg.turn.judgments` 이름공간의 세 이름을 호출 횟수를 세는 대역으로 갈아 끼운다."""
+    """`gptrpg.turn.judgments` 이름공간의 네 이름을 호출 횟수를 세는 대역으로 갈아 끼운다."""
+    counts = {"situation": 0, "entity": 0, "clock": 0, "outcome": 0}
+
+    def _stub_judge_situation(*, provider, model, ctx, check_summary, rulebook_display_name, resource_axes=()):
+        counts["situation"] += 1
+        return SituationJudgment(scene_summary="장면.", facts=(), ai=_EMPTY_AI)
+
+    def _stub_judge_new_entity(*, provider, model, ctx, rulebook_display_name):
+        counts["entity"] += 1
+        return EntityJudgment(entities=(), ai=_EMPTY_AI)
+
+    def _stub_judge_clock_signal(*, provider, model, ctx, rulebook_display_name):
+        counts["clock"] += 1
+        return ClockSignal(should_check=False, why="", ai=_EMPTY_AI)
+
+    def _stub_pick_outcome(*, provider, model, ctx, outcome_list, costs, rulebook_display_name):
+        counts["outcome"] += 1
+        return OutcomePick(category_ids=(), ai=_EMPTY_AI)
+
+    monkeypatch.setattr(judgments_module, "judge_situation", _stub_judge_situation)
+    monkeypatch.setattr(judgments_module, "judge_new_entity", _stub_judge_new_entity)
+    monkeypatch.setattr(judgments_module, "judge_clock_signal", _stub_judge_clock_signal)
+    monkeypatch.setattr(judgments_module, "pick_outcome", _stub_pick_outcome)
+    return counts
+
+
+async def _gather(
+    ctx: TurnContext,
+    check_summary: str,
+    *,
+    outcome_list: OutcomeList = _EMPTY_OUTCOME_LIST,
+    grade_band: GradeBand = _NO_COST_GRADE_BAND,
+) -> None:
+    await gather_turn_judgments(
+        situation_provider=_FakeProvider(),
+        situation_model="stub-model",
+        entity_provider=_FakeProvider(),
+        entity_model="stub-model",
+        clock_provider=_FakeProvider(),
+        clock_model="stub-model",
+        outcome_provider=_FakeProvider(),
+        outcome_model="stub-model",
+        ctx=ctx,
+        check_summary=check_summary,
+        rulebook_display_name="던전월드 계열",
+        outcome_list=outcome_list,
+        grade_band=grade_band,
+    )
+
+
+async def test_each_judgment_called_exactly_once_for_ordinary_success_check(monkeypatch):
+    counts = _install_counting_stubs(monkeypatch)
+    await _gather(_ctx(), "hack_and_slash 판정 결과 strong_hit (목표 10)")
+    assert counts == {"situation": 1, "entity": 1, "clock": 1, "outcome": 1}
+
+
+async def test_each_judgment_called_exactly_once_for_failed_check(monkeypatch):
+    counts = _install_counting_stubs(monkeypatch)
+    await _gather(_ctx(), "hack_and_slash 판정 결과 miss (목표 10)")
+    assert counts == {"situation": 1, "entity": 1, "clock": 1, "outcome": 1}
+
+
+async def test_each_judgment_called_exactly_once_when_no_scene_entities(monkeypatch):
+    counts = _install_counting_stubs(monkeypatch)
+    await _gather(_ctx(scene_entities=()), "hack_and_slash 판정 결과 miss (목표 10)")
+    assert counts == {"situation": 1, "entity": 1, "clock": 1, "outcome": 1}
+
+
+async def test_each_judgment_called_exactly_once_when_recent_turns_empty(monkeypatch):
+    counts = _install_counting_stubs(monkeypatch)
+    await _gather(_ctx(recent_turns=()), "hack_and_slash 판정 결과 miss (목표 10)")
+    assert counts == {"situation": 1, "entity": 1, "clock": 1, "outcome": 1}
+
+
+async def test_outcome_judgment_is_always_called_even_when_its_own_provider_fails(monkeypatch):
+    """하나(`outcome`)의 제공자 호출이 실패해도 나머지 셋은 그대로 온다 —
+    D-05/ARCH-05 각자의 실패 계약이 서로를 막지 않는다는 것을 직접 시험한다."""
     counts = {"situation": 0, "entity": 0, "clock": 0}
 
     def _stub_judge_situation(*, provider, model, ctx, check_summary, rulebook_display_name, resource_axes=()):
@@ -67,53 +150,24 @@ def _install_counting_stubs(monkeypatch) -> dict[str, int]:
         counts["clock"] += 1
         return ClockSignal(should_check=False, why="", ai=_EMPTY_AI)
 
+    def _stub_pick_outcome_provider_failed(*, provider, model, ctx, outcome_list, costs, rulebook_display_name):
+        # 제공자 호출 자체가 실패한 경우의 계약(D-05) — 예외를 던지지 않고
+        # 빈 선택을 돌려준다(`pick_outcome`이 재시도까지 실패했을 때와 같은 모양).
+        return OutcomePick(category_ids=(), ai=_FAILED_AI)
+
     monkeypatch.setattr(judgments_module, "judge_situation", _stub_judge_situation)
     monkeypatch.setattr(judgments_module, "judge_new_entity", _stub_judge_new_entity)
     monkeypatch.setattr(judgments_module, "judge_clock_signal", _stub_judge_clock_signal)
-    return counts
+    monkeypatch.setattr(judgments_module, "pick_outcome", _stub_pick_outcome_provider_failed)
 
-
-async def _gather(ctx: TurnContext, check_summary: str) -> None:
-    await gather_turn_judgments(
-        situation_provider=_FakeProvider(),
-        situation_model="stub-model",
-        entity_provider=_FakeProvider(),
-        entity_model="stub-model",
-        clock_provider=_FakeProvider(),
-        clock_model="stub-model",
-        ctx=ctx,
-        check_summary=check_summary,
-        rulebook_display_name="던전월드 계열",
-    )
-
-
-async def test_each_judgment_called_exactly_once_for_ordinary_success_check(monkeypatch):
-    counts = _install_counting_stubs(monkeypatch)
-    await _gather(_ctx(), "hack_and_slash 판정 결과 strong_hit (목표 10)")
-    assert counts == {"situation": 1, "entity": 1, "clock": 1}
-
-
-async def test_each_judgment_called_exactly_once_for_failed_check(monkeypatch):
-    counts = _install_counting_stubs(monkeypatch)
     await _gather(_ctx(), "hack_and_slash 판정 결과 miss (목표 10)")
-    assert counts == {"situation": 1, "entity": 1, "clock": 1}
 
-
-async def test_each_judgment_called_exactly_once_when_no_scene_entities(monkeypatch):
-    counts = _install_counting_stubs(monkeypatch)
-    await _gather(_ctx(scene_entities=()), "hack_and_slash 판정 결과 miss (목표 10)")
-    assert counts == {"situation": 1, "entity": 1, "clock": 1}
-
-
-async def test_each_judgment_called_exactly_once_when_recent_turns_empty(monkeypatch):
-    counts = _install_counting_stubs(monkeypatch)
-    await _gather(_ctx(recent_turns=()), "hack_and_slash 판정 결과 miss (목표 10)")
     assert counts == {"situation": 1, "entity": 1, "clock": 1}
 
 
 # ---------------------------------------------------------------------------
 # 구문 층 — gather_turn_judgments 본문에 조건 분기가 없고, asyncio.gather
-# 호출이 정확히 하나이며 위치 인자가 정확히 셋, 셋 다 asyncio.to_thread다.
+# 호출이 정확히 하나이며 위치 인자가 정확히 넷, 넷 다 asyncio.to_thread다.
 # ---------------------------------------------------------------------------
 
 
@@ -149,7 +203,7 @@ def test_gather_turn_judgments_body_has_no_if_or_ternary():
         assert not isinstance(node, ast.IfExp), "gather_turn_judgments 본문에 삼항 연산자가 있다"
 
 
-def test_gather_turn_judgments_has_exactly_one_gather_call_with_three_positional_args():
+def test_gather_turn_judgments_has_exactly_one_gather_call_with_four_positional_args():
     tree = ast.parse(_gather_turn_judgments_source())
     func = _find_function_def(tree, "gather_turn_judgments")
 
@@ -161,10 +215,10 @@ def test_gather_turn_judgments_has_exactly_one_gather_call_with_three_positional
     assert len(gather_calls) == 1, f"asyncio.gather 호출이 {len(gather_calls)}개다"
 
     gather_call = gather_calls[0]
-    assert len(gather_call.args) == 3, f"위치 인자가 {len(gather_call.args)}개다"
+    assert len(gather_call.args) == 4, f"위치 인자가 {len(gather_call.args)}개다"
 
 
-def test_gather_turn_judgments_all_three_gather_args_are_to_thread_calls():
+def test_gather_turn_judgments_all_four_gather_args_are_to_thread_calls():
     tree = ast.parse(_gather_turn_judgments_source())
     func = _find_function_def(tree, "gather_turn_judgments")
 
@@ -208,14 +262,19 @@ async def test_three_judgments_actually_overlap_in_time(monkeypatch):
         _record("clock")
         return ClockSignal(should_check=False, why="", ai=_EMPTY_AI)
 
+    def _stub_pick_outcome(*, provider, model, ctx, outcome_list, costs, rulebook_display_name):
+        _record("outcome")
+        return OutcomePick(category_ids=(), ai=_EMPTY_AI)
+
     monkeypatch.setattr(judgments_module, "judge_situation", _stub_judge_situation)
     monkeypatch.setattr(judgments_module, "judge_new_entity", _stub_judge_new_entity)
     monkeypatch.setattr(judgments_module, "judge_clock_signal", _stub_judge_clock_signal)
+    monkeypatch.setattr(judgments_module, "pick_outcome", _stub_pick_outcome)
 
     await _gather(_ctx(), "hack_and_slash 판정 결과 miss (목표 10)")
 
-    assert set(starts) == {"situation", "entity", "clock"}
-    assert set(ends) == {"situation", "entity", "clock"}
+    assert set(starts) == {"situation", "entity", "clock", "outcome"}
+    assert set(ends) == {"situation", "entity", "clock", "outcome"}
 
     # 마지막으로 시작한 대역의 시작 시각이 가장 먼저 끝난 대역의 종료 시각보다
     # 이르다 — 세 구간이 실제로 겹친다는 증거다. 순차 실행이었다면 마지막

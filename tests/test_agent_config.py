@@ -25,13 +25,14 @@ from gptrpg.agents.providers import MissingApiKey
 from gptrpg.cli.main import main
 
 
-def test_agent_roles_are_exactly_the_five_roles_in_order():
+def test_agent_roles_are_exactly_the_six_roles_in_order():
     assert AGENT_ROLES == (
         "action_classifier",
         "master_gm",
         "situation_judge",
         "scene_entity_judge",
         "clock_judge",
+        "outcome_picker",
     )
 
 
@@ -39,15 +40,17 @@ def test_strict_agent_roles_are_still_the_original_two():
     assert STRICT_AGENT_ROLES == ("action_classifier", "master_gm")
 
 
-def test_role_fallbacks_cover_exactly_the_three_new_roles():
+def test_role_fallbacks_cover_exactly_the_four_new_roles():
     assert set(ROLE_FALLBACKS.keys()) == {
         "situation_judge",
         "scene_entity_judge",
         "clock_judge",
+        "outcome_picker",
     }
     assert ROLE_FALLBACKS["situation_judge"] == "master_gm"
     assert ROLE_FALLBACKS["scene_entity_judge"] == "action_classifier"
     assert ROLE_FALLBACKS["clock_judge"] == "action_classifier"
+    assert ROLE_FALLBACKS["outcome_picker"] == "action_classifier"
 
 
 # ---------------------------------------------------------------------------
@@ -71,11 +74,11 @@ def test_save_then_load_round_trips_both_roles(tmp_path):
     assert loaded["master_gm"] == choices["master_gm"]
 
 
-def test_two_role_config_file_loads_with_fallbacks_and_logs_three_stderr_lines(tmp_path, capsys):
-    """회귀 방지 시험 — 기존 두 역할짜리 `agents.json`이 09-01 이후에도 예외
-    없이 그대로 로드된다. `clock_judge`/`scene_entity_judge`는
+def test_two_role_config_file_loads_with_fallbacks_and_logs_four_stderr_lines(tmp_path, capsys):
+    """회귀 방지 시험 — 기존 두 역할짜리 `agents.json`이 12-06 이후에도 예외
+    없이 그대로 로드된다. `clock_judge`/`scene_entity_judge`/`outcome_picker`는
     `action_classifier`의 선택을, `situation_judge`는 `master_gm`의 선택을
-    물려받고, 대체가 일어났다는 사실이 표준오류에 세 줄로 남는다."""
+    물려받고, 대체가 일어났다는 사실이 표준오류에 네 줄로 남는다."""
     path = tmp_path / "agents.json"
     choices = {
         "action_classifier": AgentChoice(provider="anthropic", model="claude-haiku"),
@@ -88,10 +91,11 @@ def test_two_role_config_file_loads_with_fallbacks_and_logs_three_stderr_lines(t
     assert set(loaded.keys()) == set(AGENT_ROLES)
     assert loaded["clock_judge"] == loaded["action_classifier"]
     assert loaded["scene_entity_judge"] == loaded["action_classifier"]
+    assert loaded["outcome_picker"] == loaded["action_classifier"]
     assert loaded["situation_judge"] == loaded["master_gm"]
 
     err_lines = [line for line in capsys.readouterr().err.splitlines() if line.strip()]
-    assert len(err_lines) == 3
+    assert len(err_lines) == 4
 
 
 # ---------------------------------------------------------------------------
@@ -185,9 +189,9 @@ def test_two_roles_can_hold_different_provider_and_model(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_agents_show_prints_all_five_roles_without_key_values(tmp_path, capsys, monkeypatch):
-    """09-01: 두 역할짜리 파일로도 `agents show`는 다섯 줄을 찍는다 —
-    `ROLE_FALLBACKS`가 나머지 세 역할을 채우기 때문이다."""
+def test_agents_show_prints_all_six_roles_without_key_values(tmp_path, capsys, monkeypatch):
+    """12-06: 두 역할짜리 파일로도 `agents show`는 여섯 줄을 찍는다 —
+    `ROLE_FALLBACKS`가 나머지 네 역할을 채우기 때문이다."""
     secret = "sk-super-secret-value-should-not-leak"
     monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
     path = tmp_path / "agents.json"
@@ -204,7 +208,7 @@ def test_agents_show_prints_all_five_roles_without_key_values(tmp_path, capsys, 
 
     out = capsys.readouterr().out
     lines = [line for line in out.splitlines() if line.strip()]
-    assert len(lines) == len(AGENT_ROLES) == 5
+    assert len(lines) == len(AGENT_ROLES) == 6
     for role in AGENT_ROLES:
         assert role in out
     assert "claude-haiku" in out
@@ -380,11 +384,11 @@ def test_agents_show_warns_on_stderr_for_known_undersized_model_without_pollutin
     assert exit_code == 0
 
     out, err = capsys.readouterr()
-    # `agents show`는 여전히 다섯 줄만 stdout에 찍는다 — 경고가 이 계약을
-    # 깨지 않는다(09-01의 `test_agents_show_prints_all_five_roles_without_key_values`
+    # `agents show`는 여전히 AGENT_ROLES 개수만큼만 stdout에 찍는다 — 경고가
+    # 이 계약을 깨지 않는다(`test_agents_show_prints_all_six_roles_without_key_values`
     # 회귀 방지와 같은 이유).
     lines = [line for line in out.splitlines() if line.strip()]
-    assert len(lines) == len(AGENT_ROLES) == 5
+    assert len(lines) == len(AGENT_ROLES) == 6
     warning_lines = [line for line in err.splitlines() if line.startswith("경고")]
     assert len(warning_lines) == 1
     assert "action_classifier" in warning_lines[0]
