@@ -11,7 +11,7 @@ import pytest
 
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.entities import StatEntry
-from gptrpg.rules_core.reducer import apply_event, initial_state
+from gptrpg.rules_core.reducer import OutOfOrderEvent, apply_event, fold, initial_state
 from gptrpg.rules_core.resource_change import (
     DepletedAxis,
     InvalidResourceChange,
@@ -651,3 +651,59 @@ async def _run_empty_changes_scenario(tmp_db_path):
 def test_empty_changes_is_rejected_and_no_event_is_written(tmp_db_path):
     events = asyncio.run(_run_empty_changes_scenario(tmp_db_path))
     assert events == []
+
+
+# ---------------------------------------------------------------------------
+# fold — 순번이 어긋나면 조용히 넘어가지 않고 예외로 멈춘다(QUAL-01, Task 3)
+# ---------------------------------------------------------------------------
+
+
+def _declared(seq: int) -> tuple[str, dict]:
+    """`fold`의 순번 검사만 확인하는 최소 payload — `apply_event`의
+    `action_declared` 갈래는 `seq` 말고는 아무 것도 요구하지 않는다."""
+    return ("action_declared", {"seq": seq})
+
+
+def test_fold_empty_event_list_returns_initial_state_without_exception():
+    """`fold(session_id, [])` → 예외 없이 `initial_state(session_id)`."""
+    state = fold("s1", [])
+    assert state == initial_state("s1")
+
+
+def test_fold_consecutive_sequence_numbers_is_normal():
+    """`[0, 1, 2]`는 정상 — 바로 다음 순번(맞닿음)은 어긋남이 아니다."""
+    state = fold("s1", [_declared(0), _declared(1), _declared(2)])
+    assert state.last_seq == 2
+
+
+def test_fold_gapped_sequence_numbers_is_normal():
+    """`[0, 2, 5]`는 정상 — 사이가 비어 있는 것은 어긋남이 아니다(가시성
+    필터 등으로 건너뛴 사건이 있을 수 있다)."""
+    state = fold("s1", [_declared(0), _declared(2), _declared(5)])
+    assert state.last_seq == 5
+
+
+def test_fold_duplicate_sequence_number_raises_out_of_order_event():
+    """`[0, 1, 1]`은 `OutOfOrderEvent` — 같은 순번이 두 번(겹침)은 정상
+    진행이 아니다."""
+    with pytest.raises(OutOfOrderEvent) as exc_info:
+        fold("s1", [_declared(0), _declared(1), _declared(1)])
+    assert exc_info.value.expected_after == 1
+    assert exc_info.value.got == 1
+
+
+def test_fold_regressing_sequence_number_raises_out_of_order_event():
+    """`[0, 2, 1]`은 `OutOfOrderEvent` — 되돌아가는 순번은 어긋남이다."""
+    with pytest.raises(OutOfOrderEvent) as exc_info:
+        fold("s1", [_declared(0), _declared(2), _declared(1)])
+    assert exc_info.value.expected_after == 2
+    assert exc_info.value.got == 1
+
+
+def test_fold_folding_same_event_list_twice_gives_same_result():
+    """같은 사건 목록으로 `fold`를 두 번 부르면 두 결과가 같다 — 중간
+    저장을 쓰지 않으므로 접기 자체가 멱등이다(QUAL-01 idempotency)."""
+    events = [_declared(0), _declared(1), _declared(2)]
+    first = fold("s1", events)
+    second = fold("s1", events)
+    assert first == second

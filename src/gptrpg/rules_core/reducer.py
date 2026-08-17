@@ -140,6 +140,23 @@ class UnknownEventType(Exception):
         self.event_type = event_type
 
 
+class OutOfOrderEvent(Exception):
+    """`fold`가 순번이 어긋난 사건을 만났을 때 던진다(QUAL-01, 12-02 Task 3).
+
+    지금은 `EventStore.read_events`가 `ORDER BY seq`로 항상 정렬해서
+    넘겨주기 때문에 **우연히** 이 문제가 안 생긴다(REQUIREMENTS.md 원문
+    문장) — `fold`는 스스로는 순서를 검사하지 않았다. 이 예외는 `UnknownEventType`과
+    같은 모양(사유를 문구에, 값을 속성에 노출)이다.
+    """
+
+    def __init__(self, expected_after: int, got: int) -> None:
+        super().__init__(
+            f"사건 순번이 어긋났다: last_seq={expected_after} 다음에 seq={got}가 왔다"
+        )
+        self.expected_after = expected_after
+        self.got = got
+
+
 def _legacy_v1_counts_as_failure(grade: str) -> bool:
     """판 1 기록에는 `counts_as_failure` 칸이 없다. 그때는 룰북이 하나뿐이었으므로
     등급 이름이 곧 실패 여부였다 — 이것은 규칙이 아니라 이미 쓰인 기록에 대한
@@ -333,8 +350,24 @@ def fold(session_id: str, pairs: Iterable[tuple[str, Mapping]]) -> GameState:
     """사건 (event_type, payload) 짝들을 순서대로 접어 최종 상태를 만든다.
 
     중간 저장을 쓰지 않는다 — 언제나 initial_state에서 다시 시작한다 (D-08).
+
+    **순번을 스스로 검사한다(QUAL-01, 12-02 Task 3).** 지금은
+    `EventStore.read_events`가 `ORDER BY seq`로 항상 정렬해서 넘겨주기
+    때문에 **우연히** 순서 문제가 안 생긴다(REQUIREMENTS.md 원문 문장) —
+    이 함수는 그 우연에 기대지 않고 각 사건을 접기 **전에**
+    `payload["seq"] <= state.last_seq`면 `OutOfOrderEvent`로 멈춘다.
+    `initial_state`의 `last_seq`가 `-1`이므로 첫 사건의 순번 0은 정상으로
+    통과한다. **사이가 빈 순번은 어긋남이 아니다** — 가시성 필터나 부분
+    읽기로 건너뛴 사건이 있을 수 있고, `read_events`의 계약이 「순번
+    순서대로」이지 「연속」이 아니다. 검사는 이 자리 한 곳에만 둔다(두
+    자리에 두면 서로 다른 규칙으로 갈릴 수 있다 — `_band_matches`가 세운
+    「한 헬퍼를 공유한다」 관례와 같은 이유) — `apply_event` 자체는
+    건드리지 않는다.
     """
     state = initial_state(session_id)
     for event_type, payload in pairs:
+        seq = payload["seq"]
+        if seq <= state.last_seq:
+            raise OutOfOrderEvent(expected_after=state.last_seq, got=seq)
         state = apply_event(state, event_type, payload)
     return state

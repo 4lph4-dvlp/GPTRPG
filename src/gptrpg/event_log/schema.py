@@ -10,10 +10,11 @@ event_log는 rules_core를 모른다 (경계 계약이 양방향으로 강제한
 사이에 코드가 바뀔 수 있는데, Phase 6은 두 기록을 다 읽어야 한다.
 """
 
+import json
 from datetime import UTC, datetime
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 EVENT_SCHEMA_VERSION = 8
 """판 7 -> 판 8: 능력치가 판정에 실리고 판정에 딸린 자원 변화가 기록에
@@ -428,7 +429,80 @@ GameEvent = Annotated[
 
 EVENT_ADAPTER: TypeAdapter[GameEvent] = TypeAdapter(GameEvent)
 
+_KNOWN_EVENT_TYPES = frozenset(
+    {
+        "action_declared",
+        "action_confirmed",
+        "check_resolved",
+        "narration_appended",
+        "clock_advanced",
+        "ai_invoked",
+        "scene_illustrated",
+        "character_occupied",
+        "safety_flagged",
+        "action_classified",
+        "resource_changed",
+    }
+)
+"""`GameEvent` 판별 유니온이 아는 열한 사건 종류 — `parse_event`가 이 목록
+밖의 `event_type`을 `CorruptEventRecord`로 분류하는 데 쓴다."""
+
+
+class CorruptEventRecord(Exception):
+    """`parse_event`가 사건 형식 표시(`schema_version`)나 사건 종류가
+    구조적으로 이상한 레코드를 받았을 때 던진다(QUAL-02, 12-02 Task 3).
+
+    **정확히 이 셋만 잡는다** — ⓐ `schema_version` 칸 자체가 없다 ⓑ
+    `schema_version`이 정수가 아니다 ⓒ `event_type`이 `_KNOWN_EVENT_TYPES`
+    열한 종류 밖이다. 「값이 작은 옛 판」(`schema_version`이 작은 정수)은
+    여기 포함되지 않는다 — `rules_core/reducer.py`의
+    `if schema_version >= N` 분기가 이미 정상 처리하는 별개의 경로다. 이
+    셋 밖의 다른 pydantic 검증 실패(예: 알려진 사건 종류인데 그 종류
+    고유 필수 칸이 빠짐)는 이 예외로 뭉개지 않고 원래 `ValidationError`가
+    그대로 새어 나간다 — 이 계획이 다루는 것은 "형식 표시 자체가 없거나
+    알 수 없다"는 구조적 문제뿐이다.
+
+    **자유 문자열을 문구에 싣지 않는다** — `reason`은 고정된 짧은 분류
+    문자열 셋 중 하나이고, 원본 JSON 본문이나 pydantic 오류 원문은
+    실리지 않는다(`SafetyFlagged`가 이미 지키는 T-10-03 관례). `event_type`은
+    JSON에서 안전하게 읽히면 채우고 아니면 `None`이다.
+    """
+
+    def __init__(self, reason: str, event_type: str | None = None) -> None:
+        super().__init__(f"손상된 사건 기록이다: {reason} (event_type={event_type!r})")
+        self.reason = reason
+        self.event_type = event_type
+
 
 def parse_event(raw: str) -> GameEvent:
-    """JSON 문자열을 사건 객체로 되돌린다. 순수 JSON 파서만 쓴다 — pickle/eval 없음."""
-    return EVENT_ADAPTER.validate_json(raw)
+    """JSON 문자열을 사건 객체로 되돌린다. 순수 JSON 파서만 쓴다 — pickle/eval 없음.
+
+    형식 표시 칸이 아예 없거나(ⓐ) 정수가 아니거나(ⓑ), 사건 종류가 알려진
+    열한 종류 밖이면(ⓒ) pydantic의 일반 `ValidationError`가 그대로 새어
+    나가지 않고 `CorruptEventRecord`로 멈춘다(QUAL-02) — 이 저장소의
+    예외 관례(사유·식별자를 속성으로, 자유 문자열은 문구에 안 싣는다)를
+    따른다. **「칸은 있는데 값이 옛것」은 구멍이 아니다** — `schema_version`이
+    작은 정수인 진짜 옛 판 기록은 이 함수를 그대로 통과해 정상으로
+    읽힌다(그 구분은 `reducer.py`의 `if schema_version >= N` 분기가
+    맡는다). 위 세 사유 밖의 다른 검증 실패는 원래 `ValidationError`를
+    그대로 다시 던진다.
+    """
+    try:
+        return EVENT_ADAPTER.validate_json(raw)
+    except ValidationError as exc:
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            data = None
+        if isinstance(data, dict):
+            event_type = data.get("event_type")
+            event_type = event_type if isinstance(event_type, str) else None
+            if "schema_version" not in data:
+                raise CorruptEventRecord("형식 표시 칸 없음", event_type=event_type) from exc
+            if not isinstance(data.get("schema_version"), int):
+                raise CorruptEventRecord(
+                    "형식 표시 값이 정수가 아님", event_type=event_type
+                ) from exc
+            if event_type not in _KNOWN_EVENT_TYPES:
+                raise CorruptEventRecord("알 수 없는 사건 종류", event_type=event_type) from exc
+        raise

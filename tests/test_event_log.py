@@ -4,6 +4,7 @@
 (01-03-PLAN.md Task 1·2의 명시적 요구사항).
 """
 
+import json
 import shutil
 import sqlite3
 import threading
@@ -20,6 +21,7 @@ from gptrpg.event_log.schema import (
     AiInvoked,
     CheckResolved,
     ClockAdvanced,
+    CorruptEventRecord,
     ModifierRecord,
     NarrationAppended,
     parse_event,
@@ -186,6 +188,89 @@ def test_schema_check_resolved_with_reroll_has_four_rolls_and_roundtrips():
 def test_schema_unknown_event_type_is_rejected():
     with pytest.raises(ValidationError):
         EVENT_ADAPTER.validate_python({"event_type": "nope"})
+
+
+# ---------------------------------------------------------------------------
+# QUAL-02 (12-02 Task 3) — parse_event이 형식 표시 빠짐/손상을
+# CorruptEventRecord로 예외 관례를 따라 멈춘다. 「값이 작은 옛 판」은
+# 구멍이 아니다 — 같은 시험 파일에 나란히 둔다.
+# ---------------------------------------------------------------------------
+
+
+def _raw(payload: dict) -> str:
+    return json.dumps(payload)
+
+
+def test_corrupt_event_record_missing_schema_version_field_raises():
+    """`schema_version` 칸 자체가 없는 레코드 — CorruptEventRecord."""
+    payload = _full_kwargs("action_declared")
+    del payload["schema_version"]
+
+    with pytest.raises(CorruptEventRecord) as exc_info:
+        parse_event(_raw(payload))
+    assert exc_info.value.reason == "형식 표시 칸 없음"
+    assert exc_info.value.event_type == "action_declared"
+
+
+def test_corrupt_event_record_non_integer_schema_version_raises():
+    """`schema_version` 값이 정수가 아닌 레코드 — CorruptEventRecord."""
+    payload = _full_kwargs("action_declared")
+    payload["schema_version"] = "여덟"
+
+    with pytest.raises(CorruptEventRecord) as exc_info:
+        parse_event(_raw(payload))
+    assert exc_info.value.reason == "형식 표시 값이 정수가 아님"
+
+
+def test_corrupt_event_record_unknown_event_type_raises():
+    """`event_type`이 알려진 열한 종류 밖인 레코드 — CorruptEventRecord."""
+    payload = _full_kwargs("action_declared")
+    payload["event_type"] = "이상한_사건"
+
+    with pytest.raises(CorruptEventRecord) as exc_info:
+        parse_event(_raw(payload))
+    assert exc_info.value.reason == "알 수 없는 사건 종류"
+    assert exc_info.value.event_type == "이상한_사건"
+
+
+def test_legacy_schema_version_2_check_resolved_record_is_read_normally_not_corrupt():
+    """`schema_version: 2`인 진짜 옛 판 판정 기록은 예외 없이 정상으로
+    읽힌다 — 위 세 손상 케이스와 나란히 두어 「형식 표시가 빠진 것」과
+    「값이 옛것인 것」이 서로 다른 경로로 갈린다는 것 자체를 시험으로
+    남긴다."""
+    payload = {
+        "event_type": "check_resolved",
+        "session_id": "s1",
+        "seq": 0,
+        "schema_version": 2,
+        "recorded_at": utc_now_iso(),
+        "caused_by_seq": None,
+        "move": "hack_and_slash",
+        "rolls": [3, 4],
+        "modifiers": [],
+        "target": 10,
+        "grade": "miss",
+        "counts_as_failure": True,
+    }
+
+    parsed = parse_event(_raw(payload))
+
+    assert parsed.event_type == "check_resolved"
+    assert parsed.schema_version == 2
+
+
+def test_corrupt_event_record_string_representation_does_not_leak_raw_json_body():
+    """`CorruptEventRecord`의 `str()` 결과에 입력 JSON 본문 문자열이
+    들어 있지 않다 — 원본 본문·pydantic 오류 원문을 문구에 안 싣는다
+    (T-10-03)."""
+    payload = _full_kwargs("action_declared")
+    payload["raw_text"] = "이 특이한-표시자-문자열은-예외-문구에-없어야-한다"
+    del payload["schema_version"]
+
+    with pytest.raises(CorruptEventRecord) as exc_info:
+        parse_event(_raw(payload))
+
+    assert "이 특이한-표시자-문자열은-예외-문구에-없어야-한다" not in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
