@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12
 current_phase_name: stats-resources-inventory
 status: executing
-stopped_at: Completed 12-03-PLAN.md (12-03)
-last_updated: "2026-08-17T06:37:04.632Z"
+stopped_at: Completed 12-05-PLAN.md (12-05)
+last_updated: "2026-08-17T07:11:54.047Z"
 last_activity: 2026-08-17
 last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 29
-  completed_plans: 25
+  completed_plans: 26
   percent: 36
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12 (stats-resources-inventory) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인트 승인 + Task 2·3 커밋)
@@ -42,7 +42,7 @@ Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인�
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -116,6 +116,7 @@ Progress: [█████████░] 86%
 | Phase 12 P01 | ~2h30m (체크포인트 승인 대기 제외) | 3 tasks | 21 files |
 | Phase 12 P02 | ~20min | 3 tasks | 10 files |
 | Phase 12 P03 | ~1h | 2 tasks | 6 files |
+| Phase 12 P05 | ~35min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -245,6 +246,9 @@ Progress: [█████████░] 86%
 - [Phase ?]: [Phase 12] 12-02: CorruptEventRecord는 정확히 세 사유(칸 없음/정수 아님/알 수 없는 종류)만 잡는다 — 그 밖의 pydantic 검증 실패는 원래 ValidationError를 그대로 다시 던진다(QUAL-02 edge probe 경계를 안 넘음)
 - [Phase ?]: [Phase 12] 12-03: 튜플 키(character_id, axis) -> 문자열 키 변환 규칙을 '::'로 이어붙이는 것으로 확정, 스크립트와 시험 파일 양쪽에 같은 규칙을 문서화(import 대신 재작성 — 계획이 허용한 대안). 기대 상태 비교 시 actual을 json 라운드트립으로 정규화해야 int/str 딕셔너리 키 불일치로 인한 거짓 회귀를 피한다
 - [Phase ?]: [Phase 12] 12-03: session1 실기록 895건(판 2)을 tests/fixtures/에 커밋해 TEST-04 회귀 시험이 CI에서 항상 돈다 — 기존 skipif 로컬 스모크 여섯은 무변경으로 남김. scripts/export_session_fixture.py가 재생성 절차를 스크립트로 남김
+- [Phase ?]: [Phase 12] 12-05: TurnContext.character_state -> party_state(tuple[Entity,...])/actor_character_id 두 칸으로 재구성(promote) — 행위자 한 명 상태는 actor_stats(ctx)가 매번 파티에서 뽑는 파생값, 나란히 저장 안 함(어긋난 단수 표현이 살아남는 세션1 사고 재발 방지)
+- [Phase ?]: [Phase 12] 12-05: build_classifier_prompt/build_situation_prompt가 공유하던 _session_block_text를 갈랐다 — 분류기는 actor_stats(ctx) 한 명만, 상황판단/서술은 _format_party_state로 파티 전원(D-17). _format_character_state 본문은 무변경, 11-07 렌더러 재사용
+- [Phase ?]: [Phase 12] 12-05: web declare()/confirm()/proceed() 세 호출부 전부 party_state=_current_party_state(store,session_id)+actor_character_id=identity.character_id로 전환(declare()는 계획 원문 acceptance criteria의 grep 카운트 2와 어긋나지만 기존 통과 시험 test_prompt_carries_the_acting_character_real_stat_names 보존을 위해 포함, Rule 1) — CLI 세 호출부는 무변경(기본값이 예시 개체 파티)
 
 ### Pending Todos
 
@@ -300,8 +304,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-17T06:37:04.595Z
-Stopped at: Completed 12-03-PLAN.md (12-03)
+Last session: 2026-08-17T07:11:54.011Z
+Stopped at: Completed 12-05-PLAN.md (12-05)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
