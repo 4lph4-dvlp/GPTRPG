@@ -18,6 +18,7 @@ from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ActionDeclared, utc_no
 from gptrpg.event_log.store import EventStore
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
+from gptrpg.rulebooks.openquest import OPENQUEST_ID
 
 _REPLAY_LABELS = (
     "사건 수",
@@ -537,8 +538,13 @@ class _AlwaysFailsCompleteProvider:
         return AgentResult(ok=True, value="짧은 서사.", elapsed_ms=1, prompt_tokens=1, completion_tokens=1)
 
 
-def _run_turn_with_fake(db, session, text, *, monkeypatch, fake_provider, input_answers):
-    """`fake_provider`를 등록하고 `turn`을 부른다. `input_answers`를 순서대로 소진한다."""
+def _run_turn_with_fake(
+    db, session, text, *, monkeypatch, fake_provider, input_answers, extra_args=()
+):
+    """`fake_provider`를 등록하고 `turn`을 부른다. `input_answers`를 순서대로 소진한다.
+
+    `extra_args`는 고정 인자 뒤에 그대로 이어 붙는다(`--rulebook`/`--difficulty`
+    등, 12-01 Task 3)."""
     _install_provider(monkeypatch, fake_provider, name="fake", env_var="FAKE_API_KEY")
     answers = iter(input_answers)
     monkeypatch.setattr("builtins.input", lambda *_args: next(answers))
@@ -557,6 +563,7 @@ def _run_turn_with_fake(db, session, text, *, monkeypatch, fake_provider, input_
             "fake",
             "--model",
             "fake-model",
+            *extra_args,
         ]
     )
 
@@ -723,6 +730,56 @@ def test_turn_classifier_unknown_move_proceeds_without_check_and_records_safety_
     assert flagged[0].disposition == "blocked"
     assert flagged[0].subject_len == len("not_a_real_move")
     assert not any(e.event_type == "action_confirmed" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# 12-01 Task 3 — D-02: `gptrpg turn --difficulty`가 웹과 같은 검증·같은
+# 거절을 한다. `--modifier`/`--target`은 `turn`에서 사라졌다(`submit roll`
+# 저수준 디버그 통로에만 남는다).
+# ---------------------------------------------------------------------------
+
+
+def test_turn_with_valid_openquest_difficulty_records_difficulty_modifier(
+    tmp_db_path, monkeypatch, fake_provider, capsys
+):
+    """`gptrpg turn --rulebook openquest --difficulty hard`가 웹과 같은
+    검증을 통과한다 — 종료 코드 0, `check_resolved` 사건의 수정치 목록에
+    `source`가 `difficulty:hard`인 항목이 있다."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps([{"move": "close_combat", "stat": "근접 무기 기술"}])
+
+    exit_code = _run_turn_with_fake(
+        db, "s1", "칼을 뽑아 든다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+        input_answers=[""],
+        extra_args=["--rulebook", OPENQUEST_ID, "--difficulty", "hard"],
+    )
+    assert exit_code == 0
+
+    events = _read_events(db, "s1")
+    resolved = [e for e in events if e.event_type == "check_resolved"]
+    assert len(resolved) == 1
+    sources = [m.source for m in resolved[0].modifiers]
+    assert "difficulty:hard" in sources
+
+
+def test_turn_with_unknown_difficulty_name_exits_nonzero_and_records_no_check_resolved(
+    tmp_db_path, monkeypatch, fake_provider, capsys
+):
+    """룰북 선언에 없는 난이도 이름을 주면 0이 아닌 종료 코드로 끝나고
+    `check_resolved` 사건이 하나도 안 쌓인다 — 던전월드류(기본 룰북)는
+    난이도 개념이 없으므로 어떤 이름을 줘도 거절된다(D-02)."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps([{"move": "hack_and_slash", "stat": "STR"}])
+
+    exit_code = _run_turn_with_fake(
+        db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+        input_answers=[""],
+        extra_args=["--difficulty", "아무말"],
+    )
+    assert exit_code != 0
+
+    events = _read_events(db, "s1")
+    assert not any(e.event_type == "check_resolved" for e in events)
 
 
 def test_turn_provider_call_failure_looks_like_no_move_but_leaves_a_stderr_trail(

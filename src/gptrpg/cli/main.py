@@ -30,10 +30,11 @@ from gptrpg.agents.providers import (
     available_providers,
     get_provider,
 )
-from gptrpg.cli.turn_flow import _parse_modifier, run_turn
+from gptrpg.cli.turn_flow import run_turn
 from gptrpg.cli.turn_flow import _build_turn_context as _build_turn_context
 from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rules_core.grading import DEFAULT_TARGET
+from gptrpg.rules_core.resolution import Modifier
 from gptrpg.rulebooks import UnknownRulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.session_actor.actor import (
@@ -74,6 +75,30 @@ _CLI_ROLL_IDENTITY = "cli"
 `character_id`(판 5+, TRUST-04)는 `CheckResolved`에서 필수이므로 고정
 자리표시자를 쓴다 — 이 통로에 실제 브라우저·캐릭터 개념을 새로 들이는
 것은 이 계획의 범위 밖이다."""
+
+
+def _parse_modifier(raw: str) -> Modifier:
+    """세 조각(type:value:source, 콜론 구분)짜리 --modifier 문자열 하나를
+    `Modifier`로 바꾼다.
+
+    **`submit roll` 전용이다(12-01 Task 3, D-02).** D-02가 닫는 자유 숫자
+    통로는 `confirm`/`turn`(선언 → 분류 → 확인을 거치는 정식 경로)이고,
+    `submit roll`은 그 경로를 우회해 판정 하나만 곧장 찍어보는 저수준
+    디버그 도구다(`_CLI_ROLL_IDENTITY` 도크스트링 참조) — 정식 경로의
+    신뢰 경계 밖에 있으므로 D-02의 적용 대상이 아니다. `web/routes_actions.py`가
+    같은 이름의 함수를 갖고 있었지만(D-02로 제거됨), 이 함수는 그 자리를
+    대체하지 않는다 — `cli/turn_flow.py`의 `_parse_modifier`도 같은
+    이유로 제거됐다(그 함수는 `turn` 정식 경로 전용이었다).
+    """
+    parts = raw.split(":", 2)
+    if len(parts) != 3:
+        raise ValueError(f"modifier 형식은 세 조각(type:value:source)이어야 한다: {raw!r}")
+    mod_type, raw_value, source = parts
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"modifier 값은 정수여야 한다: {raw!r}") from exc
+    return Modifier(type=mod_type, value=value, source=source)
 
 
 def _build_command(args: argparse.Namespace) -> Command:
@@ -635,8 +660,16 @@ def main(argv: list[str] | None = None) -> int:
         default=str(DEFAULT_CONFIG_PATH),
         help="역할별 제공자·모델 선택이 저장된 파일 (기본값: .gptrpg/agents.json)",
     )
-    turn_parser.add_argument("--target", type=int, default=DEFAULT_TARGET)
-    turn_parser.add_argument("--modifier", action="append", default=[])
+    turn_parser.add_argument(
+        "--difficulty",
+        default=None,
+        help=(
+            "룰북이 선언한 닫힌 이름 목록에서 고른 난이도(D-02). 없으면 난이도"
+            " 수정치를 안 싣는다 — 난이도 개념이 없는 룰북(던전월드류 등)은"
+            " 이 인자를 안 쓴다. 목록에 없는 이름을 주면 사건을 남기기 전에"
+            " 0이 아닌 종료 코드로 끝난다"
+        ),
+    )
     turn_parser.add_argument(
         "--progress-after",
         type=float,

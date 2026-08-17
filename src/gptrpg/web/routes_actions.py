@@ -31,10 +31,9 @@ import asyncio
 import os
 import sys
 import time
-from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
@@ -47,9 +46,8 @@ from gptrpg.event_log.store import SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID, DUNGEONWORLD_MISS_HP_COST
 from gptrpg.rulebooks.moves import get_moves
-from gptrpg.rules_core.grading import DEFAULT_TARGET
-from gptrpg.rules_core.resolution import Modifier
 from gptrpg.rules_core.resource_change import ResourceOp
+from gptrpg.rules_core.rulebook import UnknownDifficultyLevel, require_difficulty
 from gptrpg.imagery import (
     ImageryConfig,
     RenderedImage,
@@ -102,25 +100,6 @@ MAX_ID_LEN = 64
 재사용한다(08-04, QUAL-04). 새 상수를 만들지 않는다 — 이미 같은 성격(식별자
 문자열)의 값이 같은 상한을 쓰는 것이 자연스럽다."""
 
-MIN_TARGET = -200
-MAX_TARGET = 200
-"""`ConfirmRequest.target`의 범위(08-04, QUAL-04). d100 롤언더 룰북(OpenQuest)의
-기술값은 0~100이고 난이도 수정치(`OPENQUEST_DIFFICULTY`)가 겹으로 붙어도
-±50 단위라 이 범위를 넉넉히 덮는다. 2d6 등급식(dungeonworld_like)의 목표값은
-`DEFAULT_TARGET=10` 근방의 한 자리~두 자리 수다. 상한을 「일단 크게」 잡아
-사실상 없는 것으로 만들지 않는다 — 신뢰할 수 없는 본문이 판정 결과 사건
-(`CheckResolved.target`)의 크기를 정하지 못하게 막는 것이 이 범위의 목적이다."""
-
-MAX_MODIFIERS_COUNT = 20
-"""`ConfirmRequest.modifiers` 목록의 항목 수 상한(08-04, QUAL-04, T-08-19).
-룰북 수정치가 판정 하나에 이보다 많이 붙을 자연스러운 이유가 없다 — 상한이
-없으면 그대로 `CheckResolved.modifiers`의 크기를 요청자가 정하게 된다."""
-
-MAX_MODIFIER_LEN = 128
-"""`ConfirmRequest.modifiers`의 항목 문자열 하나(`"유형:값:출처"` 형식)의
-길이 상한(08-04, QUAL-04). `_parse_modifier`가 쪼개는 세 조각(유형·값·출처
-설명)을 넉넉히 담으면서도 `MAX_RAW_TEXT_LEN`처럼 크게 잡지 않는다."""
-
 MAX_DIFFICULTY_LEN = 32
 """`ConfirmRequest.difficulty`의 길이 상한(12-01, D-02). `MAX_ID_LEN`(64)
 보다 좁게 잡는다 — 난이도 이름은 룰북이 선언한 닫힌 목록에서 고르는
@@ -137,25 +116,6 @@ _NO_SENTENCE = object()
 `StopIteration`이 `Future`를 타고 넘는 것을 명시적으로 금지한다) — 매번
 `next(iter, _NO_SENTENCE)` 형태로 불러 예외 대신 보초값으로 "끝났다"를
 알린다."""
-
-
-def _parse_modifier(raw: str) -> Modifier:
-    """'유형:값:출처' 형태의 수정치 문자열 하나를 `Modifier`로 바꾼다.
-
-    `cli/turn_flow.py`의 `_parse_modifier`와 같은 형식이다 — 이 계획이 만드는
-    04-06의 화면은 이 칸을 비워 보낼 계획이라(수정치 입력 화면은 만들지
-    않는다, UI-SPEC) 실제 실험 세션에서는 쓰이지 않지만, 룰북 수정치를
-    확인 요청에 직접 실어 보내는 경로 자체는 열어 둔다.
-    """
-    parts = raw.split(":", 2)
-    if len(parts) != 3:
-        raise ValueError(f"modifier 형식은 '유형:값:출처'여야 한다: {raw!r}")
-    mod_type, raw_value, source = parts
-    try:
-        value = int(raw_value)
-    except ValueError as exc:
-        raise ValueError(f"modifier 값은 정수여야 한다: {raw!r}") from exc
-    return Modifier(type=mod_type, value=value, source=source)
 
 
 def _last_result_or_failure_envelope(provider: Provider, *, elapsed_ms: int) -> AgentResult:
@@ -374,6 +334,18 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
 
 
 class ConfirmRequest(BaseModel):
+    """D-02: 바깥(브라우저)에서 판정 계산에 실을 수 있는 자유 숫자 칸이
+    없다. `target`/`modifiers`는 더 이상 이 모델에 없다 — 목표값은
+    서버가 정한다(`stat_usage`가 `use_as_target`인 룰북은
+    `build_stat_check_input`이 돌려준 값을, 아니면 `grading.DEFAULT_TARGET`을
+    쓴다). 받는 것은 `difficulty` 하나뿐이고, 그마저도 룰북이 선언한 닫힌
+    이름 목록에서만 찾는다(`require_difficulty`) — 목록 밖 이름은 사건을
+    남기기 전에 400으로 거절된다. `extra="forbid"`가 오타·조작으로 생긴
+    여분 칸(예: 예전 `target`/`modifiers`)을 거절한다.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
     move: str = Field(min_length=1, max_length=MAX_ID_LEN)
     stat: str = Field(min_length=1, max_length=MAX_ID_LEN)
@@ -381,17 +353,12 @@ class ConfirmRequest(BaseModel):
     suggestion_stat: str = Field(min_length=1, max_length=MAX_ID_LEN)
     confirmed: bool
     declare_seq: int = Field(ge=0)
-    target: int = Field(default=DEFAULT_TARGET, ge=MIN_TARGET, le=MAX_TARGET)
     rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
     character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
-    modifiers: list[Annotated[str, Field(max_length=MAX_MODIFIER_LEN)]] = Field(
-        default_factory=list, max_length=MAX_MODIFIERS_COUNT
-    )
     difficulty: str | None = Field(default=None, max_length=MAX_DIFFICULTY_LEN)
     """룰북이 선언한 닫힌 이름 목록에서 고른 난이도(D-02, 12-01). `None`이면
     난이도 수정치를 안 싣는다 — 던전월드류처럼 난이도 개념이 없는 룰북은
-    이 칸을 안 보낸다. Task 3이 `target`/`modifiers`(바깥에서 받는 자유
-    숫자 통로)를 닫을 때까지는 이 칸이 그 둘과 나란히 있다."""
+    이 칸을 안 보낸다."""
 
 
 class ModifierView(BaseModel):
@@ -472,20 +439,21 @@ async def confirm(
     registry = request.app.state.registry
     actor = registry.get_or_create(session_id)
 
-    # 요청 자체의 유효성(캐릭터·룰북·수정자 구문)은 사건을 하나라도 기록하기
+    # 요청 자체의 유효성(캐릭터·룰북·난이도 이름)은 사건을 하나라도 기록하기
     # 전에 전부 확인한다. 이 검증들은 게임 상태가 아니라 요청 형식에 대한
     # 판단이라 실패해도 사건을 남기지 않아야 한다 — 그렇지 않으면 판정 없는
     # "확인됨" 사건이 로그에 영구히 남아, 이 도구가 보장해야 할 사건 기록의
     # 무결성(RIG-06)이 깨진다. 거부(`confirmed=False`)는 이 검증이 필요 없다.
-    modifiers: tuple[Modifier, ...] = ()
+    # D-02 — 자유 숫자 수정치 구문 검증은 더 이상 없다: `ConfirmRequest`에
+    # `modifiers`/`target` 칸 자체가 없다. `difficulty`가 유일한 통로이고,
+    # 룰북 선언 대조를 **여기서 미리** 한다 — `ResolveCheck` 제출 시점에
+    # `_prepare_resolve_check`가 다시 `require_difficulty`로 확인하지만
+    # (방어선 이중화, 저장소 우회 경로까지 막는다), 그 시점은 이미
+    # `ConfirmAction`이 기록된 뒤라 여기서 걸러야 사건 개수가 요청 전과
+    # 같다는 이 함수의 약속(RIG-06)이 지켜진다.
     character = None
     rulebook = None
     if body.confirmed:
-        try:
-            modifiers = tuple(_parse_modifier(raw) for raw in body.modifiers)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
         character = get_character(body.character_id)
         if character is None:
             raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
@@ -494,6 +462,12 @@ async def confirm(
             rulebook = get_rulebook(body.rulebook_id)
         except UnknownRulebook as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if body.difficulty is not None:
+            try:
+                require_difficulty(rulebook, body.difficulty)
+            except UnknownDifficultyLevel as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # D-10/D-11 — 같은 선언에 대한 재확인은 `AlreadyConfirmed`(CommandRejected의
     # 하위 클래스)로 액터가 단락시킨다. **하위 클래스를 먼저 잡는다** — 순서가
@@ -552,8 +526,11 @@ async def confirm(
             resolve_seq = await actor.submit(
                 ResolveCheck(
                     move=body.move,
-                    modifiers=modifiers,
-                    target=body.target,
+                    # D-02 — 바깥에서 자유 수정치를 안 받는다. 능력치
+                    # 수정치(`stat`)와 난이도 수정치(`difficulty`)를
+                    # `_prepare_resolve_check`가 룰북 선언에서 조립해
+                    # 이 빈 튜플 앞뒤에 붙인다.
+                    modifiers=(),
                     rulebook_id=body.rulebook_id,
                     caused_by_seq=confirm_seq,
                     person_id=identity.browser_id,

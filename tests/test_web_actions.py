@@ -454,6 +454,11 @@ def _declare_first(client: TestClient, **overrides) -> int:
 
 
 def _confirm_body(declare_seq: int, **overrides) -> dict:
+    """`ConfirmRequest`가 받아들이는 칸만 담는다(D-02, 12-01 Task 3) —
+    `target`/`modifiers`(바깥의 자유 숫자 통로)는 더 이상 이 모델에 없고,
+    `extra="forbid"`가 있으면 즉시 400/422로 거절한다. 목표값은 이제
+    서버가 정한다(능력치 축의 `stat_usage`가 `use_as_target`이 아니면
+    `grading.DEFAULT_TARGET`)."""
     body = {
         "player_id": "bram",
         "move": "parley",
@@ -462,10 +467,8 @@ def _confirm_body(declare_seq: int, **overrides) -> dict:
         "suggestion_stat": "CHA",
         "confirmed": True,
         "declare_seq": declare_seq,
-        "target": 10,
         "rulebook_id": "dungeonworld_like",
         "character_id": "bram",
-        "modifiers": [],
     }
     body.update(overrides)
     return body
@@ -917,13 +920,17 @@ def test_check_submission_failure_returns_error_status_with_no_rolls(
     web_client_with_fake_provider,
 ) -> None:
     """굴림 실패(판정 제출 자체가 거부됨)는 오류 상태 코드이고 응답에 rolls가
-    없다 — 서사 실패(200 + rolls 있음)와 구분된다(TRUST-06)."""
+    없다 — 서사 실패(200 + rolls 있음)와 구분된다(TRUST-06).
+
+    D-02(12-01 Task 3)가 자유 수정치 문자열 통로를 닫은 뒤로는, 판정 제출
+    자체가 거부되는 자리는 「룰북 선언에 없는 난이도 이름」이다(던전월드류는
+    난이도 개념이 없으므로 어떤 이름을 보내도 거절된다)."""
     classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=classifier) as client:
         declare_seq = _declare_first(client)
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
-            json=_confirm_body(declare_seq, modifiers=["percentage:10:버프"]),
+            json=_confirm_body(declare_seq, difficulty="아무말"),
         )
 
     assert response.status_code == 400
@@ -941,24 +948,31 @@ def test_check_submission_failure_returns_error_status_with_no_rolls(
 # ---------------------------------------------------------------------------
 
 
-def test_confirm_target_below_min_returns_422(web_client_with_fake_provider) -> None:
-    """QUAL-04 — `ConfirmRequest.target`이 음수로 터무니없이 작으면 422."""
+def test_confirm_target_field_no_longer_exists_and_returns_422(
+    web_client_with_fake_provider,
+) -> None:
+    """D-02(12-01 Task 3) — `target`은 더 이상 `ConfirmRequest`의 칸이
+    아니다. `extra="forbid"`가 이 칸을 오타·조작으로 생긴 여분 칸으로
+    거절한다 — 자유 숫자 칸이 요청 모델에 남아 있지 않다는 것을 이 시험이
+    직접 증명한다(예전에는 이 자리가 범위 상한 위반이라 422였다)."""
     fake = FakeProvider()
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
-            json=_confirm_body(0, target=-201),
+            json=_confirm_body(0, target=10),
         )
     assert response.status_code == 422
 
 
-def test_confirm_target_above_max_returns_422(web_client_with_fake_provider) -> None:
-    """QUAL-04 — `ConfirmRequest.target`이 터무니없이 크면 422."""
+def test_confirm_difficulty_over_max_length_returns_422(web_client_with_fake_provider) -> None:
+    """QUAL-04/D-02 — `ConfirmRequest.difficulty`가 `MAX_DIFFICULTY_LEN`(32)을
+    넘으면 422다. 룰북 선언 대조(`require_difficulty`) 이전에 요청 본문
+    크기 자체가 상한을 넘는다."""
     fake = FakeProvider()
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
-            json=_confirm_body(0, target=201),
+            json=_confirm_body(0, difficulty="a" * 33),
         )
     assert response.status_code == 422
 
@@ -974,26 +988,110 @@ def test_confirm_rulebook_id_over_max_length_returns_422(web_client_with_fake_pr
     assert response.status_code == 422
 
 
-def test_confirm_modifiers_list_over_max_count_returns_422(web_client_with_fake_provider) -> None:
-    """QUAL-04 — `modifiers` 목록의 항목 **수**가 상한을 넘으면 422."""
+def test_confirm_modifiers_field_no_longer_exists_and_returns_422(
+    web_client_with_fake_provider,
+) -> None:
+    """D-02(12-01 Task 3) — `modifiers`도 더 이상 `ConfirmRequest`의 칸이
+    아니다. 「유형:값:출처」 자유 문자열 통로 자체가 요청 모델에서
+    사라졌다는 것을 이 시험이 직접 증명한다."""
     fake = FakeProvider()
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
-            json=_confirm_body(0, modifiers=["flat:1:버프"] * 21),
+            json=_confirm_body(0, modifiers=["flat:1:버프"]),
         )
     assert response.status_code == 422
 
 
-def test_confirm_modifiers_item_over_max_length_returns_422(web_client_with_fake_provider) -> None:
-    """QUAL-04 — `modifiers`의 **한 항목 문자열**이 상한을 넘으면 422."""
+def test_confirm_unknown_extra_field_returns_422(web_client_with_fake_provider) -> None:
+    """D-02 — `target`/`modifiers`뿐 아니라 임의의 알려지지 않은 칸도
+    `extra="forbid"`에 걸린다(behavior 갈래 1: 요청 본문에 알려지지 않은
+    칸이 들어 있으면 pydantic이 거절한다)."""
     fake = FakeProvider()
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
-            json=_confirm_body(0, modifiers=["flat:1:" + "가" * 128]),
+            json=_confirm_body(0, bonus_damage=999),
         )
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# 12-01 Task 3 — D-02: 난이도는 룰북이 선언한 닫힌 이름 목록에서만 고른다.
+# ---------------------------------------------------------------------------
+
+
+def test_confirm_with_openquest_rulebook_and_valid_difficulty_returns_200(
+    web_client_with_fake_provider,
+) -> None:
+    """`{"difficulty": "hard"}`(OpenQuest 룰북)를 보내면 200이고 판정의
+    목표값이 그만큼 이동한다 — `CheckResolved.modifiers`에 `source`가
+    `difficulty:hard`인 항목이 실린다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "판정", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client, rulebook_id="openquest")
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(
+                declare_seq,
+                move="판정",
+                stat="CHA",
+                suggestion_move="판정",
+                suggestion_stat="CHA",
+                rulebook_id="openquest",
+                difficulty="hard",
+            ),
+        )
+        resolved = _events_of_type(client, "check_resolved")
+
+    assert response.status_code == 200
+    assert len(resolved) == 1
+    sources = [m["source"] for m in resolved[0]["modifiers"]]
+    assert "difficulty:hard" in sources
+
+
+def test_confirm_with_unknown_difficulty_name_returns_400_and_no_new_events(
+    web_client_with_fake_provider,
+) -> None:
+    """`{"difficulty": "아무말"}`을 보내면 400이고 사건이 하나도 안 쌓인다 —
+    선언에 없는 이름을 조용히 무시하지 않는다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "판정", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        declare_seq = _declare_first(client, rulebook_id="openquest")
+        events_before = len(_events(client))
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(
+                declare_seq,
+                move="판정",
+                stat="CHA",
+                suggestion_move="판정",
+                suggestion_stat="CHA",
+                rulebook_id="openquest",
+                difficulty="아무말",
+            ),
+        )
+        events_after = len(_events(client))
+
+    assert response.status_code == 400
+    assert events_after == events_before
+
+
+def test_confirm_with_difficulty_on_rulebook_without_difficulty_levels_returns_400(
+    web_client_with_fake_provider,
+) -> None:
+    """던전월드류 룰북(난이도 선언이 없는 룰북)에 `difficulty`를 실어
+    보내면 400이다 — 선언에 없는 이름을 조용히 무시하지 않는다(D-02)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(declare_seq, difficulty="hard"),
+        )
+
+    assert response.status_code == 400
 
 
 def test_confirm_previously_capped_fields_still_behave_the_same(

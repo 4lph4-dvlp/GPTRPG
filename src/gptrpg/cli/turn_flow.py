@@ -24,7 +24,6 @@ from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore
 from gptrpg.rulebooks import get_rulebook
 from gptrpg.rulebooks.moves import get_moves
-from gptrpg.rules_core.resolution import Modifier
 from gptrpg.session_actor.actor import (
     AppendNarration,
     ConfirmAction,
@@ -48,15 +47,6 @@ _NO_SENTENCE = object()
 """narrate()의 첫 조각을 기다릴 때 쓰는 보초값. `chunk_sentences`는 빈
 문자열을 절대 내보내지 않으므로 이 값과의 신원 비교로 "아직 하나도 안
 나왔다"를 안전하게 구분할 수 있다."""
-
-
-def _parse_modifier(raw: str) -> Modifier:
-    """'유형:값:출처' 형태의 --modifier 문자열 하나를 Modifier로 바꾼다."""
-    parts = raw.split(":", 2)
-    if len(parts) != 3:
-        raise ValueError(f"modifier 형식은 '유형:값:출처'여야 한다: {raw!r}")
-    mod_type, value, source = parts
-    return Modifier(type=mod_type, value=int(value), source=source)
 
 
 async def _submit_narration_chunk(
@@ -554,17 +544,20 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     # person_id/character_id(판 5+, TRUST-04)는 CLI에 브라우저 쿠키 신원
     # 개념이 없으므로 args.player를 그대로 두 칸에 쓴다 — D-42가 이 CLI
     # 경로에서는 여전히 유효한 전제다(신원 분리는 웹 계층의 서명 쿠키에서만
-    # 의미가 있다, D-03).
-    modifiers = tuple(_parse_modifier(raw) for raw in args.modifier)
+    # 의미가 있다, D-03). D-02 — 바깥에서 자유 수정치/목표값을 안 받는다.
+    # `--difficulty`가 유일한 통로이고, 그 이름을 룰북 선언에서 찾는 것은
+    # `_prepare_resolve_check`(session_actor)가 한다 — 없는 이름이면
+    # `UnknownDifficultyLevel` -> `CommandRejected`가 되어 `_cmd_turn`의
+    # except 절이 0이 아닌 종료 코드로 끝맺는다(사건은 하나도 안 쌓인다).
     resolve_seq = await actor.submit(
         ResolveCheck(
             move=picked.move,
-            modifiers=modifiers,
-            target=args.target,
+            modifiers=(),
             rulebook_id=args.rulebook,
             caused_by_seq=confirm_seq,
             person_id=args.player,
             character_id=args.player,
+            difficulty=args.difficulty,
         )
     )
     check_event = store.read_events(args.session, from_seq=resolve_seq)[0]

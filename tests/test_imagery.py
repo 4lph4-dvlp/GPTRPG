@@ -333,6 +333,8 @@ def _run_one_turn(client: TestClient) -> dict:
         },
     )
     assert declare.status_code == 200
+    # `target`/`modifiers`는 `ConfirmRequest`에서 사라졌다(D-02, 12-01
+    # Task 3) — `extra="forbid"`가 이 두 칸을 거절한다.
     confirm = client.post(
         f"/api/sessions/{SESSION_ID}/actions/confirm",
         json={
@@ -343,10 +345,8 @@ def _run_one_turn(client: TestClient) -> dict:
             "suggestion_stat": "CHA",
             "confirmed": True,
             "declare_seq": declare.json()["declare_seq"],
-            "target": 10,
             "rulebook_id": "dungeonworld_like",
             "character_id": "bram",
-            "modifiers": [],
         },
     )
     assert confirm.status_code == 200
@@ -477,6 +477,8 @@ def test_rejected_confirm_makes_no_illustration(tmp_db_path: Path, tmp_path: Pat
                 "rulebook_id": "dungeonworld_like",
             },
         )
+        # `target`/`modifiers`는 `ConfirmRequest`에서 사라졌다(D-02, 12-01
+        # Task 3) — `extra="forbid"`가 이 두 칸을 거절한다.
         client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
             json={
@@ -487,10 +489,8 @@ def test_rejected_confirm_makes_no_illustration(tmp_db_path: Path, tmp_path: Pat
                 "suggestion_stat": "CHA",
                 "confirmed": False,
                 "declare_seq": declare.json()["declare_seq"],
-                "target": 10,
                 "rulebook_id": "dungeonworld_like",
                 "character_id": "bram",
-                "modifiers": [],
             },
         )
         illustrations = _events_of_type(client, "scene_illustrated")

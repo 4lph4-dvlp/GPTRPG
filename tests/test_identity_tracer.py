@@ -34,6 +34,8 @@ def _declare_body(**overrides) -> dict:
 
 
 def _confirm_body(declare_seq: int, **overrides) -> dict:
+    # `target`/`modifiers`는 `ConfirmRequest`에서 사라졌다(D-02, 12-01
+    # Task 3) — `extra="forbid"`가 이 두 칸을 거절한다.
     body = {
         "player_id": "p1",
         "move": "parley",
@@ -42,10 +44,8 @@ def _confirm_body(declare_seq: int, **overrides) -> dict:
         "suggestion_stat": "CHA",
         "confirmed": True,
         "declare_seq": declare_seq,
-        "target": 10,
         "rulebook_id": "dungeonworld_like",
         "character_id": "bram",
-        "modifiers": [],
     }
     body.update(overrides)
     return body

@@ -8,7 +8,14 @@
 
 from gptrpg.rules_core.resolution import Modifier
 from gptrpg.rules_core.resolution_d100 import TARGET_SHIFT
-from gptrpg.rules_core.rulebook import D100_ROLL_UNDER, GradeBand, ResourceAxisDecl, Rulebook
+from gptrpg.rules_core.rulebook import (
+    D100_ROLL_UNDER,
+    DifficultyLevelDecl,
+    GradeBand,
+    ResourceAxisDecl,
+    Rulebook,
+    require_difficulty,
+)
 
 OPENQUEST_ID = "openquest"
 
@@ -21,14 +28,20 @@ OPENQUEST_GRADE_BANDS: tuple[GradeBand, ...] = (
 
 OPENQUEST_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
     # 크리처가 실제로 갖고 있는 열 축 — 이 단계는 numeric 형태 하나만
-    # 관통시킨다(11-01).
-    ResourceAxisDecl(name="STR", form="numeric"),
-    ResourceAxisDecl(name="CON", form="numeric"),
-    ResourceAxisDecl(name="DEX", form="numeric"),
-    ResourceAxisDecl(name="SIZ", form="numeric"),
-    ResourceAxisDecl(name="INT", form="numeric"),
-    ResourceAxisDecl(name="POW", form="numeric"),
-    ResourceAxisDecl(name="CHA", form="numeric"),
+    # 관통시킨다(11-01). 능력치 일곱(STR~CHA)에는 12-01 Task 3이
+    # `stat_usage="use_as_target"`을 더한다(D-01 Assumption A5 — 이
+    # 저장소의 웹 캐릭터 로스터(`characters_data.PLAYER_CHARACTERS`)가
+    # 아직 던전월드류뿐이라 실제 OpenQuest 판정 캐릭터가 없다. 이 값은
+    # OpenQuest가 d100 롤언더 판정 방식(`use_as_target`)에 능력치 축을
+    # 실제로 연결한다는 실증이고, 진짜 기술값(근접 무기 기술 등)이 판정에
+    # 쓰이는 것은 OpenQuest 플레이어 캐릭터가 생기는 다음 마일스톤이다).
+    ResourceAxisDecl(name="STR", form="numeric", stat_usage="use_as_target"),
+    ResourceAxisDecl(name="CON", form="numeric", stat_usage="use_as_target"),
+    ResourceAxisDecl(name="DEX", form="numeric", stat_usage="use_as_target"),
+    ResourceAxisDecl(name="SIZ", form="numeric", stat_usage="use_as_target"),
+    ResourceAxisDecl(name="INT", form="numeric", stat_usage="use_as_target"),
+    ResourceAxisDecl(name="POW", form="numeric", stat_usage="use_as_target"),
+    ResourceAxisDecl(name="CHA", form="numeric", stat_usage="use_as_target"),
     ResourceAxisDecl(name="Hit Points", form="numeric"),
     ResourceAxisDecl(name="Magic Points", form="numeric"),
     ResourceAxisDecl(name="Armour Points", form="numeric"),
@@ -50,15 +63,6 @@ OPENQUEST_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
     ResourceAxisDecl(name="원거리 무기 기술", form="numeric"),
 )
 
-OPENQUEST = Rulebook(
-    rulebook_id=OPENQUEST_ID,
-    display_name="OpenQuest",
-    resolution_method=D100_ROLL_UNDER,
-    grade_bands=OPENQUEST_GRADE_BANDS,
-    resource_axes=OPENQUEST_RESOURCE_AXES,
-    check_trigger_mode="declared_list",
-)
-
 OPENQUEST_DIFFICULTY: dict[str, int] = {
     "easy": 50,
     "simple": 20,
@@ -67,8 +71,27 @@ OPENQUEST_DIFFICULTY: dict[str, int] = {
     "hard": -50,
 }
 """OpenQuest SRD 난이도 다섯 단계 — 기술값에 가산할 목표값 변경 폭.
-출처: https://openquestrpg.com/srd/skills/difficulty/ (`[CITED]`).
-"""
+출처: https://openquestrpg.com/srd/skills/difficulty/ (`[CITED]`). 값의
+권위는 이 사전에 남아 있다 — `OPENQUEST_DIFFICULTY_LEVELS`가 이 사전을
+그대로 옮겨 담은 선언 형식이다(D-02, 12-01 Task 3)."""
+
+OPENQUEST_DIFFICULTY_LEVELS: tuple[DifficultyLevelDecl, ...] = tuple(
+    DifficultyLevelDecl(name=name, modifier_type=TARGET_SHIFT, value=value)
+    for name, value in OPENQUEST_DIFFICULTY.items()
+)
+"""D-02가 요구하는 닫힌 이름 목록 — 바깥(브라우저·CLI)이 판정에 실을 수
+있는 난이도 이름은 이 목록에 있는 다섯 개뿐이다. `require_difficulty`가
+이 목록에서 이름으로 찾는다."""
+
+OPENQUEST = Rulebook(
+    rulebook_id=OPENQUEST_ID,
+    display_name="OpenQuest",
+    resolution_method=D100_ROLL_UNDER,
+    grade_bands=OPENQUEST_GRADE_BANDS,
+    resource_axes=OPENQUEST_RESOURCE_AXES,
+    check_trigger_mode="declared_list",
+    difficulty_levels=OPENQUEST_DIFFICULTY_LEVELS,
+)
 
 
 def difficulty_modifier(name: str) -> Modifier:
@@ -78,9 +101,14 @@ def difficulty_modifier(name: str) -> Modifier:
     룰북의 운용 규칙이지 플랫폼의 계산 제약이 아니다 — 플랫폼은 여러 개를
     합산할 수 있어야 한다(다른 룰북은 여러 개를 허용한다). 이 함수는 하나만
     돌려주고, 여러 개를 합칠지는 호출부(룰북 운용 규칙)가 정한다.
+
+    이제 새 선언(`OPENQUEST_DIFFICULTY_LEVELS`)을 `require_difficulty`로
+    조회한다(D-02, 12-01 Task 3) — 기존 호출부·시험은 그대로 통과한다
+    (값과 예외 상황이 `OPENQUEST_DIFFICULTY` 사전과 동일하다).
     """
+    level = require_difficulty(OPENQUEST, name)
     return Modifier(
-        type=TARGET_SHIFT,
-        value=OPENQUEST_DIFFICULTY[name],
+        type=level.modifier_type,
+        value=level.value,
         source=f"openquest:difficulty:{name}",
     )
