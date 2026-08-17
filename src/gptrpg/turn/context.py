@@ -11,7 +11,7 @@
 from gptrpg.agents.context import ClockState, RECENT_TURNS_LIMIT, TurnContext
 from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.event_log.store import EventStore
-from gptrpg.rules_core.entities import StatEntry
+from gptrpg.rules_core.entities import Entity
 from gptrpg.rulebooks.dungeonworld_like import EXAMPLE_SINGLE_STAT_FOE
 from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST, THREAT_CLOCK_SEGMENT_COUNT
 from gptrpg.session_actor.projection import rebuild_state_from_events
@@ -32,10 +32,11 @@ def build_turn_context(
     session_id: str,
     rulebook_id: str,
     *,
-    character_stats: tuple[StatEntry, ...] | None = None,
+    party_state: tuple[Entity, ...] | None = None,
+    actor_character_id: str | None = None,
     character_names: dict[str, str] | None = None,
 ) -> TurnContext:
-    """`TurnContext` 네 칸을 채운다 — 명령줄·웹 두 호출부가 공유하는 단일 출처.
+    """`TurnContext` 다섯 칸을 채운다 — 명령줄·웹 두 호출부가 공유하는 단일 출처.
 
     시계 상태는 `rebuild_state`가 돌려주는 `GameState.clock_segment`에서
     「몇 번째 칸인가」를, `rulebooks.threat_clocks.M0_THREAT_CLOCK`에서
@@ -43,11 +44,19 @@ def build_turn_context(
     저장소에서 읽은 사건 중 선언·서사 텍스트만 뽑아 마지막
     `RECENT_TURNS_LIMIT`개로 잘라서, 장면 대상은 시나리오 캐스트
     `THREAT_CAST` 전체로 채운다(D-48 — 국면별로 걸러내는 로직은 두지
-    않는다, 매 턴 캐스트 전체가 그대로 들어간다). 캐릭터 상태는
-    `character_stats`가 주어지면 그것으로, 아니면 `EXAMPLE_SINGLE_STAT_FOE.
-    stats`로 채운다 — 이 기본값은 캐릭터를 아직 고르지 않은 명령줄 경로가
-    쓰는 자리라 시나리오 캐스트와 무관하게 남아 있다. 웹 경로는 행동한
-    사람의 실제 캐릭터 상태값을 여기로 넘긴다(RIG-05 연장).
+    않는다, 매 턴 캐스트 전체가 그대로 들어간다).
+
+    **파티 상태는 `party_state`가 주어지면 그것으로, 아니면 예시 개체
+    하나짜리 파티(`EXAMPLE_SINGLE_STAT_FOE`)로 채운다(12-05, D-17/D-18).**
+    이전에는 행위자 한 명의 상태값(`character_stats`)만 받는 자리였다 —
+    이제는 파티 전원의 상태, 그중 한 명이 행위자라는 것이 일차 개념이다
+    (`agents.context.TurnContext` 도크스트링). 두 인자를 모두 생략하면
+    (기존 CLI 경로) 예시 개체 하나짜리 파티와 그 개체의 식별자가 기본값으로
+    들어간다 — 캐릭터를 아직 고르지 않은 명령줄 경로가 쓰는 자리라
+    시나리오 캐스트와 무관하게 남아 있다(기존 동작 그대로 유지). **웹
+    경로는 세션에 있는 파티 구성원 전원의 「접은 지금 값」을 여기로
+    넘긴다** — 시작값이 아니라 사건을 접어 만든 지금 값이다(RULE-06과
+    같은 경로).
 
     **각 줄에 화자를 밝힌다.** 예전에는 플레이어 원문과 진행자 서사를
     "플레이어: "/"진행자: " 구분 없이 그냥 한 줄씩 이어 붙였다 — 03-04 Task 3
@@ -119,13 +128,17 @@ def build_turn_context(
     )
 
     scene_entities = THREAT_CAST
-    character_state = (
-        character_stats if character_stats is not None else EXAMPLE_SINGLE_STAT_FOE.stats
-    )
+    if party_state is not None:
+        resolved_party_state = party_state
+        resolved_actor_character_id = actor_character_id
+    else:
+        resolved_party_state = (EXAMPLE_SINGLE_STAT_FOE,)
+        resolved_actor_character_id = EXAMPLE_SINGLE_STAT_FOE.entity_id
 
     return TurnContext(
         scene_entities=scene_entities,
-        character_state=character_state,
+        party_state=resolved_party_state,
+        actor_character_id=resolved_actor_character_id,
         clock_state=clock_state,
         recent_turns=recent_turns,
     )

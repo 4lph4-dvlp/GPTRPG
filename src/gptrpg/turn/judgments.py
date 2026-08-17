@@ -140,8 +140,12 @@ def empty_turn_judgments() -> TurnJudgments:
 def build_narration_facts(
     *, ctx: TurnContext, check_summary: str, judgments: TurnJudgments
 ) -> NarrationFacts:
-    """판단 결과 + `TurnContext`의 안전한 칸(장면 대상·캐릭터 상태·최근 대화)만
+    """판단 결과 + `TurnContext`의 안전한 칸(장면 대상·파티 상태·최근 대화)만
     골라 `NarrationFacts`를 조립한다.
+
+    `party_state`/`actor_character_id`는 `ctx`에서 그대로 옮긴다(12-05,
+    D-17/D-18) — 서술도 지금 행동한 사람 하나가 아니라 파티 전원의 상태를
+    받아야 세션1의 사고가 되풀이되지 않는다.
 
     `new_entities`는 `judgments.entity.entities`의 `name`만 뽑아 채운다 —
     `judge_new_entity`가 이미 `NEW_ENTITY_LIMIT`으로 잘라 뒀으므로 여기서
@@ -156,7 +160,8 @@ def build_narration_facts(
         scene_summary=judgments.situation.scene_summary,
         facts=judgments.situation.facts,
         scene_entities=ctx.scene_entities,
-        character_state=ctx.character_state,
+        party_state=ctx.party_state,
+        actor_character_id=ctx.actor_character_id,
         recent_turns=ctx.recent_turns,
         new_entities=tuple(entity.name for entity in judgments.entity.entities),
     )

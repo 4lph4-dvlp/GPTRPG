@@ -253,7 +253,8 @@ def test_classify_absorbs_move_name_outside_closed_list_into_no_move_proposal(fa
     fake_provider.complete_value = json.dumps([{"move": "fireball", "stat": "INT"}])
     ctx = TurnContext(
         scene_entities=(EXAMPLE_SINGLE_STAT_FOE,),
-        character_state=EXAMPLE_SINGLE_STAT_FOE.stats,
+        party_state=(EXAMPLE_SINGLE_STAT_FOE,),
+        actor_character_id=EXAMPLE_SINGLE_STAT_FOE.entity_id,
         clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=6),
         recent_turns=(),
     )

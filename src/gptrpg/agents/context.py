@@ -1,15 +1,20 @@
-"""매 턴 에이전트에게 넘기는 것을 네 가지로 못박는다.
+"""매 턴 에이전트에게 넘기는 것을 역할별로 못박는다.
 
-ROADMAP 성공조건 4, 설계 문서 §3.8이 정한 것 그대로다 — 장면에 등장한 대상 /
-내 캐릭터 상태 / 위협 시계 상태 / 최근 대화 열 턴, 그 이상도 이하도 아니다.
-AI가 저장소 전체를 훑는 경로를 만들지 않기 위해, 에이전트가 받는 문맥은 이
-파일이 선언하는 값 객체뿐이다 — `gptrpg.event_log`나 `gptrpg.session_actor`를
-참조할 수단 자체가 없다(`.importlinter` contract:3).
+ROADMAP 성공조건 4, 설계 문서 §3.8이 세운 규율 — AI가 저장소 전체를 훑는
+경로를 만들지 않기 위해, 에이전트가 받는 문맥은 이 파일이 선언하는 값
+객체뿐이다. `gptrpg.event_log`나 `gptrpg.session_actor`를 참조할 수단 자체가
+없다(`.importlinter` contract:3).
+
+12-05부터 `TurnContext`/`NarrationFacts`가 담는 캐릭터 상태는 행위자 한 명이
+아니라 **파티 전원**이다(D-17/D-18) — 세션1(2026-08-04)이 무너진 지점이
+"AI가 네 명을 한 사람으로 인식했다"였고, 그 사고의 원인이 이 값 객체가
+행위자 한 명의 상태값만 담을 자리를 갖고 있던 것이었다. 아래
+`TurnContext`/`NarrationFacts` 도크스트링이 이 전환의 근거를 자세히 적는다.
 """
 
 from dataclasses import dataclass, fields
 
-from gptrpg.rules_core.entities import Entity, StatEntry
+from gptrpg.rules_core.entities import Entity
 
 RECENT_TURNS_LIMIT = 10
 """매 턴 넣는 최근 대화의 최대 개수 (D-31)."""
@@ -40,6 +45,50 @@ class TooMuchContext(Exception):
         self.length = length
 
 
+class ContextCapExceeded(Exception):
+    """역할별 문맥 값 객체 중 하나가 스스로 정한 상한을 넘겼을 때 던진다(D-66/ARCH-06).
+
+    `TooMuchContext`(위, `TurnContext.recent_turns` 전용)와 달리 이 예외는
+    여러 역할별 값 객체가 공유한다 — 어느 칸이 몇 개로 몇을 넘겼는지 세
+    속성에 그대로 남긴다.
+    """
+
+    def __init__(self, field_name: str, length: int, limit: int) -> None:
+        super().__init__(f"{field_name} 길이가 {length}로 상한({limit})을 넘었다")
+        self.field_name = field_name
+        self.length = length
+        self.limit = limit
+
+
+PARTY_MEMBER_LIMIT = 8
+"""`TurnContext.party_state`/`NarrationFacts.party_state`에 들어갈 수 있는
+파티 구성원의 최대 개수(D-18, ARCH-06, 12-05) — `RECENT_TURNS_LIMIT`·
+`NEW_ENTITY_LIMIT`과 같은 성격의 안전 밸브다.
+
+**요약하려는 장치가 아니다** — D-18이 "파티 전원의 축이 요약 없이 같은
+모양으로 들어간다"를 못박았고, 실제 파티는 넷이다. 이 상한은 파티 인원이
+비정상적으로 커져 프롬프트가 폭주하는 것(T-12-23)만 막는다 — 정상 파티
+크기에서는 절대 걸리지 않도록 넉넉하게 잡았다."""
+
+
+class ActorNotInParty(Exception):
+    """행위자 식별자를 파티 목록에서 찾을 수 없을 때 던진다
+    (`agents.prompt_assembly.actor_stats`가 던진다).
+
+    조용히 빈 튜플로 넘어가면 "행위자가 없는 정상 상태"와 "행위자를 못
+    찾은 이상 상태"가 구분되지 않는다 — `ContextCapExceeded`와 같은 모양으로
+    원인을 속성에 남긴다(D-17, T-12-25).
+    """
+
+    def __init__(self, actor_character_id: str | None, party_size: int) -> None:
+        super().__init__(
+            f"actor_character_id({actor_character_id!r})를 party_state(길이 {party_size})에서 "
+            "찾을 수 없다"
+        )
+        self.actor_character_id = actor_character_id
+        self.party_size = party_size
+
+
 @dataclass(frozen=True)
 class ClockState:
     """위협 시계 상태 한 조각 — 몇 번째 칸인지와 전체 칸 수, 그리고 이야기 내용.
@@ -61,42 +110,48 @@ class ClockState:
 
 @dataclass(frozen=True)
 class TurnContext:
-    """매 턴 에이전트에게 넘기는 것 딱 네 가지 — 그 이상도 이하도 아니다.
+    """매 턴 `action_classifier`/`situation_judge`에게 넘기는 것 다섯 칸.
+
+    **일차 개념은 「이 세션에 있는 파티의 상태, 그중 한 명이 행위자」다
+    (D-17/D-18, 12-05).** 이전에는 `character_state`가 「행동한 캐릭터의
+    상태값」 한 명분이었다 — 그 칸에는 파티 전원을 넣을 자리가 없었고,
+    이것이 세션1(2026-08-04)에서 "AI가 네 명을 한 사람으로 인식했다"는
+    사고의 코드 쪽 원인이었다. `party_state`(전원)를 일차 표현으로 올리고,
+    「행위자 한 명의 상태」는 그것에서 **파생되는 값**으로 내렸다
+    (`agents.prompt_assembly.actor_stats`가 이 파생을 만든다).
+
+    **왜 행위자 상태값을 따로 저장하지 않는가.** 두 값을 나란히 저장하면
+    조용히 어긋날 수 있고, 네 명을 한 사람으로 인식하는 사고가 정확히
+    「어긋난 단수 표현이 살아남는」 모양이다. 파생으로 만들면 어긋날 자리가
+    구조적으로 사라진다.
 
     09-02부터는 `action_classifier`와 `situation_judge` 둘만 이 값 객체를
-    받는다 — 이 둘이 시나리오 원문(시계 상태 포함)까지 필요한 유일한 역할이다.
-    서술(`master_gm.narrate`)은 더 이상 `TurnContext`를 받지 않는다(D-06) —
+    받는다 — 이 둘이 시나리오 원문(시계 상태 포함)까지 필요한 유일한
+    역할이다. 다만 `action_classifier`는 `party_state` 전체가 아니라
+    `actor_stats(ctx)`가 뽑은 행위자 한 명만 본다(D-17,
+    `agents.prompt_assembly.build_classifier_prompt`). 서술
+    (`master_gm.narrate`)은 더 이상 `TurnContext`를 받지 않는다(D-06) —
     좁아진 `NarrationFacts`(아래)를 받는다.
     """
 
     scene_entities: tuple[Entity, ...]
-    character_state: tuple[StatEntry, ...]
+    party_state: tuple[Entity, ...]
+    actor_character_id: str | None
     clock_state: ClockState
     recent_turns: tuple[str, ...]
 
     def __post_init__(self) -> None:
         if len(self.recent_turns) > RECENT_TURNS_LIMIT:
             raise TooMuchContext(len(self.recent_turns))
+        if len(self.party_state) > PARTY_MEMBER_LIMIT:
+            raise ContextCapExceeded("party_state", len(self.party_state), PARTY_MEMBER_LIMIT)
 
 
-# 칸이 정확히 넷임을 코드로도 고정한다 — `entities.py`의 `ENTITY_FIELD_NAMES`
-# 관례를 그대로 따른다.
+# 칸이 정확히 다섯임을 코드로도 고정한다 — `entities.py`의 `ENTITY_FIELD_NAMES`
+# 관례를 그대로 따른다. 11-CONTEXT.md D-03: 칸을 늘리게 되면 이 고정 시험을
+# 지우지 말고 새 목록으로 다시 고정한다 — 12-05가 넷에서 다섯으로 다시
+# 고정했다(character_state 한 칸 -> party_state·actor_character_id 두 칸).
 TURN_CONTEXT_FIELD_NAMES = frozenset(f.name for f in fields(TurnContext))
-
-
-class ContextCapExceeded(Exception):
-    """역할별 문맥 값 객체 중 하나가 스스로 정한 상한을 넘겼을 때 던진다(D-66/ARCH-06).
-
-    `TooMuchContext`(위, `TurnContext` 전용)와 달리 이 예외는 새로 생기는
-    역할별 값 객체들이 공유한다 — 어느 칸이 몇 개로 몇을 넘겼는지 세 속성에
-    그대로 남긴다.
-    """
-
-    def __init__(self, field_name: str, length: int, limit: int) -> None:
-        super().__init__(f"{field_name} 길이가 {length}로 상한({limit})을 넘었다")
-        self.field_name = field_name
-        self.length = length
-        self.limit = limit
 
 
 CLOCK_JUDGE_RECENT_TURNS_LIMIT = 4
@@ -114,7 +169,8 @@ class ClockJudgeContext:
     칸에 적힌 일이 일어났는가"만 판단하면 되고, 시나리오 원문 전체는 필요
     없다. 이 값 객체의 칸을 넷으로 좁힌 것 자체가 그 필요 없음을 타입
     차원에서 막는다(ARCH-02와 같은 원리 — 필요 이상을 애초에 못 받게
-    설계한다).
+    설계한다). 12-05 이후로도 파티 상태 칸을 받지 않는다(D-17) — 이
+    값 객체 자체가 그 칸을 갖고 있지 않다.
     """
 
     clock_position: str
@@ -155,6 +211,12 @@ class NarrationFacts:
     추가하는 것은 곧 ARCH-02 위반이다 — "그 칸은 안 쓰기로 한다"는 관례가
     아니라, 애초에 그 칸이 타입에 없다는 것으로 막는다.
 
+    **12-05부터 `party_state`/`actor_character_id`가 옛 `character_state`를
+    대신한다** — `TurnContext`와 같은 이유다(D-17/D-18). 서술은 지금 행동한
+    사람 하나가 아니라 파티 전원의 상태를 정직하게 받는다 — 세션1에서
+    AI가 네 명을 한 사람으로 인식한 사고의 반대편이다. **요약하지 않는다**
+    — 어느 축을 넣을지 플랫폼이 고르지 않는다(D-18, 특정 룰북 편향 금지).
+
     `new_entities`(09-03)는 시나리오 원문이 아니다 — 이번 턴 장면에 새로
     등장한 대상(인물·사물)의 표시 이름 목록일 뿐이다. `scene_entity_judge`가
     판단한 결과가 여기로 흘러 서술이 그 이름을 자연스럽게 등장시킨다(D-03).
@@ -166,7 +228,8 @@ class NarrationFacts:
     scene_summary: str
     facts: tuple[str, ...]
     scene_entities: tuple[Entity, ...]
-    character_state: tuple[StatEntry, ...]
+    party_state: tuple[Entity, ...]
+    actor_character_id: str | None
     recent_turns: tuple[str, ...]
     new_entities: tuple[str, ...]
 
@@ -180,6 +243,10 @@ class NarrationFacts:
         if len(self.new_entities) > NEW_ENTITY_LIMIT:
             raise ContextCapExceeded(
                 "new_entities", len(self.new_entities), NEW_ENTITY_LIMIT
+            )
+        if len(self.party_state) > PARTY_MEMBER_LIMIT:
+            raise ContextCapExceeded(
+                "party_state", len(self.party_state), PARTY_MEMBER_LIMIT
             )
 
 
@@ -199,11 +266,11 @@ NEW_ENTITY_LIMIT = 3
 class EntityJudgeContext:
     """`scene_entity_judge` 역할(judge_new_entity)이 받는 문맥 — 딱 세 칸.
 
-    **시계 상태 칸도 캐릭터 상태 칸도 없다** — "이번 판정 결과가 장면에
+    **시계 상태 칸도 파티 상태 칸도 없다** — "이번 판정 결과가 장면에
     새 인물·사물을 등장시키는가"를 판단하는 데 위협 시계가 몇 칸째인지도
-    캐릭터의 남은 자원도 필요 없다. 이 값 객체가 그 두 칸을 애초에 갖고
+    캐릭터들의 남은 자원도 필요 없다. 이 값 객체가 그 두 칸을 애초에 갖고
     있지 않은 것 자체가 ARCH-06의 "각자 상한"이다 — 필요 이상을 못 받게
-    타입으로 막는다(`ClockJudgeContext`와 같은 원리).
+    타입으로 막는다(`ClockJudgeContext`와 같은 원리, 12-05 이후로도 그대로다).
     """
 
     scene_entities: tuple[Entity, ...]

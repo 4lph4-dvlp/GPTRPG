@@ -14,6 +14,7 @@ import pytest
 
 from gptrpg.agents import prompt_assembly
 from gptrpg.agents.context import (
+    ActorNotInParty,
     ClockJudgeContext,
     ClockState,
     CLOCK_JUDGE_RECENT_TURNS_LIMIT,
@@ -22,6 +23,7 @@ from gptrpg.agents.context import (
     EntityJudgeContext,
     NarrationFacts,
     NEW_ENTITY_LIMIT,
+    PARTY_MEMBER_LIMIT,
     RECENT_TURNS_LIMIT,
     SITUATION_FACTS_LIMIT,
     TooMuchContext,
@@ -43,10 +45,13 @@ _SESSION_ID = "caps-test"
 # ---------------------------------------------------------------------------
 
 
-def _turn_context(*, recent_turns: tuple[str, ...]) -> TurnContext:
+def _turn_context(
+    *, recent_turns: tuple[str, ...], party_state: tuple[Entity, ...] = ()
+) -> TurnContext:
     return TurnContext(
         scene_entities=(),
-        character_state=(),
+        party_state=party_state,
+        actor_character_id=None,
         clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
         recent_turns=recent_turns,
     )
@@ -75,7 +80,8 @@ def _narration_facts(**overrides) -> NarrationFacts:
         scene_summary="s",
         facts=(),
         scene_entities=(),
-        character_state=(),
+        party_state=(),
+        actor_character_id=None,
         recent_turns=(),
         new_entities=(),
     )
@@ -129,6 +135,99 @@ def test_narration_facts_raises_context_cap_exceeded_over_new_entities_limit():
         _narration_facts(new_entities=tuple(f"대상 {i}" for i in range(NEW_ENTITY_LIMIT + 1)))
 
 
+# ---------------------------------------------------------------------------
+# 파티 상한(PARTY_MEMBER_LIMIT, D-18/ARCH-06/T-12-23, 12-05) — 요약이 아니라
+# 상한이다. 실제 파티는 넷이라 정상 경로에서는 절대 안 걸린다.
+# ---------------------------------------------------------------------------
+
+
+def _party_of(count: int) -> tuple[Entity, ...]:
+    return tuple(
+        Entity(
+            entity_id=f"party.member{i}",
+            display_name=f"구성원{i}",
+            rulebook_id="dungeonworld_like",
+        )
+        for i in range(count)
+    )
+
+
+def test_turn_context_raises_context_cap_exceeded_over_party_member_limit():
+    with pytest.raises(ContextCapExceeded):
+        _turn_context(recent_turns=(), party_state=_party_of(PARTY_MEMBER_LIMIT + 1))
+
+
+def test_turn_context_at_party_member_limit_does_not_raise():
+    _turn_context(recent_turns=(), party_state=_party_of(PARTY_MEMBER_LIMIT))
+
+
+def test_narration_facts_raises_context_cap_exceeded_over_party_member_limit():
+    with pytest.raises(ContextCapExceeded):
+        _narration_facts(party_state=_party_of(PARTY_MEMBER_LIMIT + 1))
+
+
+def test_narration_facts_at_party_member_limit_does_not_raise():
+    _narration_facts(party_state=_party_of(PARTY_MEMBER_LIMIT))
+
+
+# ---------------------------------------------------------------------------
+# actor_stats(ctx) — 파티에서 행위자 한 명을 뽑는 파생 함수(D-17, 12-05 Task 2).
+# `prompt_assembly.actor_stats`가 실제로 구현하지만, 이 예외 갈래는
+# `TurnContext`/`ActorNotInParty`(둘 다 이 파일이 이미 다루는 값 객체)와
+# 직접 엮인 성질이라 이 파일에서 같이 고정한다.
+# ---------------------------------------------------------------------------
+
+
+def test_actor_stats_finds_actor_by_exact_entity_id_match():
+    actor = Entity(entity_id="party.actor", display_name="행위자", rulebook_id="dungeonworld_like")
+    ctx = TurnContext(
+        scene_entities=(),
+        party_state=(actor,),
+        actor_character_id="party.actor",
+        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
+        recent_turns=(),
+    )
+    assert prompt_assembly.actor_stats(ctx) is actor.stats
+
+
+def test_actor_stats_raises_actor_not_in_party_when_id_missing_from_party():
+    actor = Entity(entity_id="party.actor", display_name="행위자", rulebook_id="dungeonworld_like")
+    ctx = TurnContext(
+        scene_entities=(),
+        party_state=(actor,),
+        actor_character_id="누군가-다른-이름",
+        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
+        recent_turns=(),
+    )
+    with pytest.raises(ActorNotInParty):
+        prompt_assembly.actor_stats(ctx)
+
+
+def test_actor_stats_returns_empty_tuple_when_actor_id_none_and_party_empty():
+    ctx = TurnContext(
+        scene_entities=(),
+        party_state=(),
+        actor_character_id=None,
+        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
+        recent_turns=(),
+    )
+    assert prompt_assembly.actor_stats(ctx) == ()
+
+
+def test_actor_stats_raises_actor_not_in_party_when_id_none_but_party_nonempty():
+    """「누가 행동했는지 모른다」를 조용히 넘기지 않는다(T-12-25)."""
+    actor = Entity(entity_id="party.actor", display_name="행위자", rulebook_id="dungeonworld_like")
+    ctx = TurnContext(
+        scene_entities=(),
+        party_state=(actor,),
+        actor_character_id=None,
+        clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
+        recent_turns=(),
+    )
+    with pytest.raises(ActorNotInParty):
+        prompt_assembly.actor_stats(ctx)
+
+
 def test_resource_treatment_lines_over_limit_raises():
     """`form == "none"`인 축이 `RESOURCE_TREATMENT_LINES_LIMIT`을 넘으면
     조용히 잘라내지 않고 `ContextCapExceeded`를 던진다(D-66/ARCH-06,
@@ -164,22 +263,31 @@ def test_narration_facts_has_no_clock_state_field():
     assert "clock_state" not in _field_names(NarrationFacts)
 
 
-def test_clock_judge_context_has_no_character_state_or_scene_entities_field():
+def test_clock_judge_context_has_no_party_state_or_scene_entities_field():
+    """12-05 이후로도 시계 판단은 파티 상태를 받지 않는다(D-17) — 옛
+    `character_state`가 새 `party_state`로 바뀌었으니 그물도 새 이름으로
+    다시 친다(D-03 재고정 규율)."""
     field_names = _field_names(ClockJudgeContext)
-    assert "character_state" not in field_names
+    assert "party_state" not in field_names
+    assert "actor_character_id" not in field_names
     assert "scene_entities" not in field_names
 
 
-def test_entity_judge_context_has_no_clock_state_or_character_state_field():
+def test_entity_judge_context_has_no_clock_state_or_party_state_field():
     field_names = _field_names(EntityJudgeContext)
     assert "clock_state" not in field_names
-    assert "character_state" not in field_names
+    assert "party_state" not in field_names
+    assert "actor_character_id" not in field_names
 
 
-def test_turn_context_is_the_only_one_with_all_four_fields():
+def test_turn_context_is_the_only_one_with_all_five_fields():
+    """칸이 넷에서 다섯으로 다시 고정됐다(12-05) — 옛 `character_state`
+    한 칸이 `party_state`·`actor_character_id` 두 칸으로 갈렸다. 이 시험
+    함수는 지워지지 않고 새 목록으로 다시 고정됐다(11-CONTEXT D-03)."""
     assert _field_names(TurnContext) == {
         "scene_entities",
-        "character_state",
+        "party_state",
+        "actor_character_id",
         "clock_state",
         "recent_turns",
     }
