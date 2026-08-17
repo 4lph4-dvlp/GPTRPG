@@ -313,6 +313,53 @@ input {
   font-weight: 600;
 }
 
+/* --- 자원 변화 표시(D-19, RULE-07) — 여섯 형태 렌더 갈래 각각에 얹는다 ----- */
+
+.resource-badge {
+  --resource-intensity: 1;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  /* 세기(연속값, RULE-07/D-19)와 시간에 따른 가라앉음을 같은 opacity
+     계산식에서 함께 표현한다 — 인라인 style(`--resource-intensity`)과
+     이 keyframes가 서로를 덮어쓰지 않는다. */
+  animation: resource-badge-fade 3000ms ease-out forwards;
+}
+
+.resource-badge--up {
+  background: rgba(86, 185, 138, 0.16);
+  color: var(--strong);
+}
+
+.resource-badge--down {
+  background: rgba(224, 90, 75, 0.16);
+  color: var(--danger);
+}
+
+.resource-badge--flat {
+  background: var(--ink-500);
+  color: var(--text-dim);
+}
+
+/* 재촉하지 않는다 — 깜빡이지 않고 잠시 뒤 조용히 가라앉는다(ThreatClock.tsx와
+   같은 규율). 세기는 opacity(연속값)로만 표현하고, 이 애니메이션은 등급과
+   무관하게 항상 같은 시간에 같은 곡선으로 가라앉는다. */
+@keyframes resource-badge-fade {
+  0%,
+  70% {
+    opacity: calc(0.4 + var(--resource-intensity) * 0.6);
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
 .gauge {
   margin-top: 6px;
   height: 6px;
@@ -1163,6 +1210,34 @@ details.record > summary::-webkit-details-marker {
 .candidate__stat {
   margin-left: auto;
   font-size: 12px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- 자원 변화 확인 카드(D-09/D-10) --------------------------------------- */
+
+.resource-confirm__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.resource-confirm__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  font-size: 14px;
+}
+
+.resource-confirm__axis {
+  color: var(--text);
+}
+
+.resource-confirm__op {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }

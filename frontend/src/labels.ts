@@ -101,6 +101,24 @@ export function modifierSourceLabel(source: string): string {
   return source;
 }
 
+/** `resource_change.py::ResourceOperation`의 여덟 값(RULE-09) — 화면에서
+ * 「무엇을 했는지」를 짧게 옮길 때만 쓴다. 새 동작이 추가되면 원문 그대로
+ * 보인다(조용히 숨기지 않는다, D-04와 같은 규율). */
+const RESOURCE_OPERATION_GLOSS: Record<string, string> = {
+  delta: "변화",
+  advance: "진행",
+  fill: "채움",
+  clear: "비움",
+  add_tag: "추가",
+  remove_tag: "제거",
+  step_down: "감소",
+  deplete: "소진",
+};
+
+export function resourceOperationLabel(operation: string): string {
+  return RESOURCE_OPERATION_GLOSS[operation] ?? operation;
+}
+
 /**
  * 04-UI-SPEC.md의 Copywriting Contract 문구 — 문구는 그 표가 권위다.
  * 화면을 새로 짜면서 문구까지 바꾸지 않았다.
@@ -127,4 +145,10 @@ export const COPY = {
   usageDieSpent: "다 씀",
   /** D-04 — 판정 검산 표시(`CheckBreakdown.tsx`). */
   checkTarget: "목표",
+  /** RULE-07/D-19, 12-06/12-07 — 자원 변화 확인 카드(`ChatPane.tsx`). */
+  resourceChangeHeading: "이 판정으로 자원이 바뀔 예정이에요",
+  resourceChangeApply: "그대로 반영",
+  resourceChangeDecline: "반영 안 함",
+  resourceChangeForbidden: "이 캐릭터를 잡은 사람만 반영할 수 있어요",
+  resourceChangeFailed: "자원 변화를 반영하지 못했어요. 다시 시도해 주세요",
 } as const;

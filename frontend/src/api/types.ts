@@ -73,6 +73,30 @@ export interface ClockAdvancedEvent extends EventEnvelope {
   trigger: "fail_counter" | "condition" | "ai_choice";
 }
 
+/**
+ * 자원 변화 사건 안의 항목 하나(판 8, `event_log/schema.py::ResourceChangeRecord`).
+ * `before`/`after`는 이 계획 시점에도 항상 `null`이다(12-01 알려진 갭 — 액터가
+ * 캐릭터 시작값에 접근하지 못해 계산하지 않는다) — 화면은 이 값이 데이터인
+ * 척 렌더하지 않는다. 세기 표시(`changeIntensity`, `ResourceChangeBadge.tsx`)는
+ * 이 칸이 아니라 `amount`와 시트에서 다시 읽은 지금 값(`StatEntry`)으로 만든다.
+ */
+export interface ResourceChangeRecord {
+  axis: string;
+  operation: string;
+  amount: number;
+  rolls: number[];
+  before: number | null;
+  after: number | null;
+}
+
+export interface ResourceChangedEvent extends EventEnvelope {
+  event_type: "resource_changed";
+  character_id: string;
+  changes: ResourceChangeRecord[];
+  category_id: string | null;
+  source: "outcome_list" | "discretionary_ruling" | "retro_declaration";
+}
+
 export interface AiInvokedEvent extends EventEnvelope {
   event_type: "ai_invoked";
   agent_role: string;
@@ -107,7 +131,8 @@ export type GameEvent =
   | NarrationAppendedEvent
   | ClockAdvancedEvent
   | AiInvokedEvent
-  | SceneIllustratedEvent;
+  | SceneIllustratedEvent
+  | ResourceChangedEvent;
 
 export interface GameStateView {
   session_id: string;
@@ -192,6 +217,45 @@ export interface ModifierView {
   source: string;
 }
 
+/**
+ * `POST .../actions/confirm-resource-change`가 실제로 적용한(또는 멱등
+ * 재사용으로 되읽은) 자원 변화 하나(`routes_actions.py::ResourceChangeView`).
+ * `before`/`after`는 `ResourceChangeRecord`와 같은 이유로 항상 `null`이다.
+ */
+export interface ResourceChangeView {
+  axis: string;
+  operation: string;
+  amount: number;
+  rolls: number[];
+  before: number | null;
+  after: number | null;
+}
+
+/**
+ * 이번 판정으로 「변할 예정」인 자원 변화 하나(12-06, D-09) —
+ * `routes_actions.py::PendingResourceChangeView`. `amount_decl`은 룰북 선언
+ * 그대로다(정수 또는 주사위식 문자열, 또는 `fill`/`add_tag` 같은 동작의
+ * 문자열 값) — 아직 굴리지 않았으므로 실제 적용량이 아니다.
+ */
+export interface PendingResourceChangeView {
+  category_id: string;
+  axis: string;
+  operation: string;
+  amount_decl: number | string;
+  source: string;
+}
+
+/**
+ * 룰북에 결과 목록이 없어도(RULE-13 empty) 재량 판정으로 자원이 변할 수
+ * 있다는 신호(RULE-10) — `routes_actions.py::DiscretionaryProposalView`.
+ * 이 계획은 실제 재량 제안 UI를 만들지 않는다(Known Stubs 참조) — `available`이
+ * 참이어도 화면은 지금 아무것도 안 그린다.
+ */
+export interface DiscretionaryProposalView {
+  available: boolean;
+  axes: string[];
+}
+
 export interface ConfirmResponse {
   confirmed: boolean;
   confirm_seq: number;
@@ -219,6 +283,14 @@ export interface ConfirmResponse {
    * 계산 자체가 검산 대상이므로 서버 값을 기다리지 않는다.
    */
   total?: number | null;
+  /** AI가 고른 결과가 가리키는 자원 변화 — 아직 사건이 안 쌓였다(D-09). */
+  pending_resource_changes?: PendingResourceChangeView[];
+  discretionary?: DiscretionaryProposalView;
+}
+
+export interface ConfirmResourceChangeResponse {
+  applied: boolean;
+  resource_changes: ResourceChangeView[];
 }
 
 export interface ProceedResponse {

@@ -10,9 +10,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchCharacterSheet, fetchCharacters } from "../api/client.ts";
+import { changeIntensity } from "../components/ResourceChangeBadge.tsx";
 import { DiceModal } from "../components/DiceModal.tsx";
 import { COPY } from "../labels.ts";
 import { ChatPane } from "../panes/ChatPane.tsx";
+import type { RecentResourceChange } from "../panes/StatusPane.tsx";
 import { StatusPane } from "../panes/StatusPane.tsx";
 import { StoryPane } from "../panes/StoryPane.tsx";
 import { groupTurns } from "../session/groupTurns.ts";
@@ -29,6 +31,9 @@ const MAX_QUEUED_ROLLS = 3;
 
 const CLOCK_PULSE_MS = 3000;
 const CHECK_HIGHLIGHT_MS = 1800;
+/** 자원 변화 배지가 떠 있는 시간(D-19) — `CLOCK_PULSE_MS`와 같은 자리, 같은
+ * 재량(CONTEXT.md Claude's Discretion, Phase 16이 전면 재감사한다). */
+const RESOURCE_BADGE_MS = 3000;
 
 interface SessionScreenProps {
   sessionId: string;
@@ -47,25 +52,90 @@ export function SessionScreen({
   const [failedDeclareSeqs, setFailedDeclareSeqs] = useState<Set<number>>(new Set());
   const shownRef = useRef<Set<number>>(new Set());
 
-  const onLiveEvents = useCallback((events: GameEvent[]) => {
-    const checks: CheckResolvedEvent[] = [];
-    let clockAdvanced = false;
-    for (const event of events) {
-      if (event.event_type === "check_resolved" && !shownRef.current.has(event.seq)) {
-        shownRef.current.add(event.seq);
-        checks.push(event);
+  const [characters, setCharacters] = useState<CharacterSummary[]>([]);
+  const [sheet, setSheet] = useState<CharacterSheet | null>(null);
+  const [sheetError, setSheetError] = useState(false);
+  // D-19 — 이 축이 방금 변했다는 표시(`ResourceChangeBadge`)를 잠시 띄운다.
+  // `changeIntensity(change, stat)`가 세기를 정한다(RULE-07, 문턱 상수 없음).
+  const [recentChanges, setRecentChanges] = useState<Record<string, RecentResourceChange>>({});
+
+  useEffect(() => {
+    let alive = true;
+    fetchCharacters(sessionId)
+      .then((list) => alive && setCharacters(list))
+      .catch(() => undefined);
+    fetchCharacterSheet(sessionId, characterId)
+      .then((value) => alive && setSheet(value))
+      .catch(() => alive && setSheetError(true));
+    return () => {
+      alive = false;
+    };
+  }, [sessionId, characterId]);
+
+  /**
+   * 이 캐릭터의 자원이 방금 변했다(RULE-06/D-19) — 시트를 다시 불러오고
+   * (StatusPane 도크스트링이 더 이상 "한 번만 불러 둔다"고 적지 않는 이유),
+   * 새 시트의 `max`/`slot_values`/`tags`로 `changeIntensity`를 계산해
+   * 배지를 켠다. 매 폴링마다 무조건 다시 부르지 않는다 — `resource_changed`
+   * 사건이 실제로 이 캐릭터를 가리킬 때만 호출된다.
+   */
+  const refreshSheetAfterResourceChange = useCallback(
+    (changes: { axis: string; amount: number }[]) => {
+      fetchCharacterSheet(sessionId, characterId)
+        .then((newSheet) => {
+          setSheet(newSheet);
+          setSheetError(false);
+          setRecentChanges((previous) => {
+            const next = { ...previous };
+            for (const change of changes) {
+              const stat = newSheet.stats.find((entry) => entry.name === change.axis);
+              if (stat === undefined) {
+                continue;
+              }
+              next[change.axis] = {
+                amount: change.amount,
+                intensity: changeIntensity(change, stat),
+              };
+            }
+            return next;
+          });
+        })
+        .catch(() => setSheetError(true));
+    },
+    [sessionId, characterId],
+  );
+
+  const onLiveEvents = useCallback(
+    (events: GameEvent[]) => {
+      const checks: CheckResolvedEvent[] = [];
+      let clockAdvanced = false;
+      const myResourceChanges: { axis: string; amount: number }[] = [];
+      for (const event of events) {
+        if (event.event_type === "check_resolved" && !shownRef.current.has(event.seq)) {
+          shownRef.current.add(event.seq);
+          checks.push(event);
+        }
+        if (event.event_type === "clock_advanced") {
+          clockAdvanced = true;
+        }
+        if (event.event_type === "resource_changed" && event.character_id === characterId) {
+          for (const change of event.changes) {
+            myResourceChanges.push({ axis: change.axis, amount: change.amount });
+          }
+        }
       }
-      if (event.event_type === "clock_advanced") {
-        clockAdvanced = true;
+      if (checks.length > 0) {
+        setQueue((previous) => [...previous, ...checks].slice(0, MAX_QUEUED_ROLLS));
       }
-    }
-    if (checks.length > 0) {
-      setQueue((previous) => [...previous, ...checks].slice(0, MAX_QUEUED_ROLLS));
-    }
-    if (clockAdvanced) {
-      setClockPulsing(true);
-    }
-  }, []);
+      if (clockAdvanced) {
+        setClockPulsing(true);
+      }
+      if (myResourceChanges.length > 0) {
+        refreshSheetAfterResourceChange(myResourceChanges);
+      }
+    },
+    [characterId, refreshSheetAfterResourceChange],
+  );
 
   const feed = usePolling(sessionId, onLiveEvents);
 
@@ -85,22 +155,13 @@ export function SessionScreen({
     return () => window.clearTimeout(timer);
   }, [justRevealedSeq]);
 
-  const [characters, setCharacters] = useState<CharacterSummary[]>([]);
-  const [sheet, setSheet] = useState<CharacterSheet | null>(null);
-  const [sheetError, setSheetError] = useState(false);
-
   useEffect(() => {
-    let alive = true;
-    fetchCharacters(sessionId)
-      .then((list) => alive && setCharacters(list))
-      .catch(() => undefined);
-    fetchCharacterSheet(sessionId, characterId)
-      .then((value) => alive && setSheet(value))
-      .catch(() => alive && setSheetError(true));
-    return () => {
-      alive = false;
-    };
-  }, [sessionId, characterId]);
+    if (Object.keys(recentChanges).length === 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => setRecentChanges({}), RESOURCE_BADGE_MS);
+    return () => window.clearTimeout(timer);
+  }, [recentChanges]);
 
   const nameById = useMemo(() => {
     const map = new Map<string, string>();
@@ -177,6 +238,7 @@ export function SessionScreen({
           characters={characters}
           myCharacterId={characterId}
           clockPulsing={clockPulsing}
+          recentChanges={recentChanges}
           onChangeCharacter={onChangeCharacter}
         />
 

@@ -20,11 +20,17 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { ApiError, confirmAction, declareAction, proceed } from "../api/client.ts";
-import type { DeclareResponse, ModifierView, MoveCandidate } from "../api/types.ts";
+import {
+  ApiError,
+  confirmAction,
+  confirmResourceChange,
+  declareAction,
+  proceed,
+} from "../api/client.ts";
+import type { DeclareResponse, ModifierView, MoveCandidate, PendingResourceChangeView } from "../api/types.ts";
 import { CheckBreakdown } from "../components/CheckBreakdown.tsx";
 import { MAX_RAW_TEXT_LEN } from "../config.ts";
-import { COPY, moveLabel, statLabel } from "../labels.ts";
+import { COPY, moveLabel, resourceOperationLabel, statLabel } from "../labels.ts";
 import type { Turn } from "../session/groupTurns.ts";
 
 /** `resolve()`가 만든 방금 판정의 검산 재료(D-04) — `CheckBreakdown`에
@@ -34,6 +40,13 @@ interface CheckBreakdownData {
   rolls: number[];
   modifiers: ModifierView[];
   target: number | null;
+}
+
+/** 확인을 기다리는 자원 변화 묶음(D-09/D-10) — `causedBySeq`는 이번 판정의
+ * `resolve_seq`다. `confirm-resource-change`가 이 값으로 멱등성 창을 연다. */
+interface PendingResourceChangeState {
+  causedBySeq: number;
+  changes: PendingResourceChangeView[];
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -71,6 +84,12 @@ export function ChatPane({
   const [proposal, setProposal] = useState<DeclareResponse | null>(null);
   // D-04 — 방금 판정의 검산 표시. 판정이 없는 턴(no_check/unclear)에는 안 켠다.
   const [breakdown, setBreakdown] = useState<CheckBreakdownData | null>(null);
+  // D-09/D-10 — 숫자가 실제로 변할 때만 뜨는 확인 카드. 빈 목록이면 아예 안 켠다.
+  const [pendingChange, setPendingChange] = useState<PendingResourceChangeState | null>(null);
+  const [resourceBusy, setResourceBusy] = useState(false);
+  const [resourceStatus, setResourceStatus] = useState<{ text: string; error: boolean } | null>(
+    null,
+  );
 
   const listRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
@@ -159,6 +178,14 @@ export function ChatPane({
           target: response.target,
         });
       }
+      // D-09/D-10 — 숫자가 실제로 변할 때만 확인 카드를 켠다. 빈 목록이면
+      // 판정마다 확인 창이 뜨는 것을 막는 서버 쪽 절반(`NO_CHANGE_CATEGORY_ID`)의
+      // 화면 쪽 절반이다.
+      const changes = response.pending_resource_changes ?? [];
+      if (changes.length > 0 && response.resolve_seq !== null) {
+        setResourceStatus(null);
+        setPendingChange({ causedBySeq: response.resolve_seq, changes });
+      }
     } catch (error) {
       // 서사 실패는 이제 200이지만, 다른 실패(403·409·503 등)는 여전히
       // 예외로 온다 — 이 경로는 그대로 둔다.
@@ -169,6 +196,44 @@ export function ChatPane({
     } finally {
       setBusy(false);
       pollNow();
+    }
+  }
+
+  /**
+   * 확인 카드에서 「그대로 반영」/「반영 안 함」을 눌렀을 때(D-09/D-10).
+   * `categoryIds`는 `pending_resource_changes`에 실렸던 식별자를 중복 없이
+   * 되돌려 보낸다 — 서버가 `ordered_categories`로 다시 대조한다. 변화량
+   * 숫자는 이 함수 어디에도 없다(T-12-26).
+   */
+  async function resolveResourceChange(confirmed: boolean): Promise<void> {
+    const pending = pendingChange;
+    if (pending === null || resourceBusy) {
+      return;
+    }
+    const categoryIds = [...new Set(pending.changes.map((change) => change.category_id))];
+    setResourceBusy(true);
+    try {
+      await confirmResourceChange(
+        sessionId,
+        characterId,
+        pending.causedBySeq,
+        categoryIds,
+        confirmed,
+      );
+      setPendingChange(null);
+      setResourceStatus(null);
+      // 시트를 다시 그리는 것은 이 함수 몫이 아니다 — `SessionScreen`이
+      // `resource_changed` 사건을 폴링에서 보고 시트를 다시 부른다(RULE-06).
+      // 여기서는 그 사건이 최대한 빨리 도착하게 다음 폴링을 앞당길 뿐이다.
+      pollNow();
+    } catch (error) {
+      const forbidden = error instanceof ApiError && error.status === 403;
+      setResourceStatus({
+        text: forbidden ? COPY.resourceChangeForbidden : COPY.resourceChangeFailed,
+        error: true,
+      });
+    } finally {
+      setResourceBusy(false);
     }
   }
 
@@ -310,6 +375,51 @@ export function ChatPane({
             modifiers={breakdown.modifiers}
             target={breakdown.target}
           />
+        ) : null}
+
+        {pendingChange !== null ? (
+          <div className="proposal resource-confirm">
+            <p className="t-caps">{COPY.resourceChangeHeading}</p>
+            <ul className="resource-confirm__list">
+              {pendingChange.changes.map((change, index) => (
+                <li className="resource-confirm__item" key={`${change.axis}-${index}`}>
+                  <span className="resource-confirm__axis">{statLabel(change.axis)}</span>
+                  <span className="resource-confirm__op">
+                    {resourceOperationLabel(change.operation)} {change.amount_decl}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="btn btn--primary btn--wide"
+              disabled={resourceBusy}
+              onClick={() => void resolveResourceChange(true)}
+            >
+              {COPY.resourceChangeApply}
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost btn--wide"
+              disabled={resourceBusy}
+              onClick={() => void resolveResourceChange(false)}
+            >
+              {COPY.resourceChangeDecline}
+            </button>
+            {resourceStatus !== null ? (
+              <div
+                className={
+                  resourceStatus.error
+                    ? "composer__status composer__status--error"
+                    : "composer__status"
+                }
+                role="status"
+                aria-live="polite"
+              >
+                {resourceStatus.text}
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         <form

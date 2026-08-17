@@ -11,6 +11,7 @@
 import type {
   CharacterSheet,
   CharacterSummary,
+  ConfirmResourceChangeResponse,
   ConfirmResponse,
   DeclareResponse,
   MoveCandidate,
@@ -112,6 +113,36 @@ export function confirmAction(
     confirmed,
     declare_seq: declareSeq,
   });
+}
+
+/**
+ * 숫자가 실제로 변할 때만 뜨는 확인 관문(12-06, D-09/D-10). `confirmAction`과
+ * 같은 오류 처리·같은 쿠키 취급을 따른다 — `fetch`가 쿠키를 자동으로 실어
+ * 보내므로 서버가 이 요청도 「그 캐릭터를 잡은 사람인가」로 대조한다(남의
+ * 캐릭터면 403).
+ *
+ * **변화량 숫자를 보내지 않는다** — 서버가 `categoryIds`로 룰북 결과 목록을
+ * 다시 대조해 실제 양을 만든다(D-02와 같은 근거, T-12-26). `causedBySeq`는
+ * 그 자원 변화를 일으킨 원인 사건 순번(보통 그 판정의 `resolve_seq`)이고,
+ * Phase 8 멱등성 창이 이 값으로 재시도를 단락시킨다 — 같은 값으로 두 번
+ * 보내도 서버는 처음 기록한 사건을 그대로 되읽어 돌려준다(두 번 안 깎인다).
+ */
+export function confirmResourceChange(
+  sessionId: string,
+  characterId: string,
+  causedBySeq: number,
+  categoryIds: string[],
+  confirmed: boolean,
+): Promise<ConfirmResourceChangeResponse> {
+  return postJson<ConfirmResourceChangeResponse>(
+    `${sessionBase(sessionId)}/actions/confirm-resource-change`,
+    {
+      character_id: characterId,
+      caused_by_seq: causedBySeq,
+      category_ids: categoryIds,
+      confirmed,
+    },
+  );
 }
 
 /**
