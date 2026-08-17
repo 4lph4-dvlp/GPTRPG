@@ -31,6 +31,7 @@ import asyncio
 import os
 import sys
 import time
+from dataclasses import replace
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -42,11 +43,12 @@ from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
 from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, UnknownProvider
 from gptrpg.agents.providers.base import Provider
-from gptrpg.event_log.store import SequenceConflict
+from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID, DUNGEONWORLD_MISS_HP_COST
 from gptrpg.rulebooks.moves import get_moves
-from gptrpg.rules_core.resource_change import ResourceOp
+from gptrpg.rules_core.entities import Entity
+from gptrpg.rules_core.resource_change import ResourceOp, resolve_character_stats
 from gptrpg.rules_core.rulebook import UnknownDifficultyLevel, require_difficulty
 from gptrpg.imagery import (
     ImageryConfig,
@@ -81,6 +83,7 @@ from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, g
 from gptrpg.web.characters_data import get_character, list_characters
 from gptrpg.web.cookie_auth import read_identity
 from gptrpg.web.media import media_file_path, media_url, scene_relative_path
+from gptrpg.session_actor.projection import rebuild_state_from_events
 
 _CHARACTER_NAMES: dict[str, str] = {c.character_id: c.display_name for c in list_characters()}
 """character_id -> display_name, `build_turn_context`의 `character_names`로
@@ -88,6 +91,50 @@ _CHARACTER_NAMES: dict[str, str] = {c.character_id: c.display_name for c in list
 한 사람 것처럼 뭉뚱그려진다(2026-08-04 실전에서 발견, T-05-16급)."""
 
 router = APIRouter()
+
+
+def _current_party_state(store: EventStore, session_id: str) -> tuple[Entity, ...]:
+    """세션에 있는 캐릭터 **전원**을 접은 「지금 값」으로 만든 개체 튜플을
+    조립한다(12-05, D-17/D-18/RULE-06) — `build_turn_context`의
+    `party_state`로 그대로 넘긴다.
+
+    `list_characters()`가 돌려주는 선언 순서 그대로 각 식별자에
+    `get_character()`를 부르고, 사건에서 접은 `GameState.
+    character_resource_ops`를 `resolve_character_stats`에 넘겨 새 `Entity`를
+    만든다. **선언 순서를 다시 정렬하지 않는다**(`list_characters()`가 세운
+    관례).
+
+    **`web/routes_characters.py`의 `_current_stats`와 같은 결합 규칙을
+    쓴다** — 두 경로가 갈리면 시트와 프롬프트가 서로 다른 값을 보여준다.
+    그 함수를 여기서 직접 import하지 않는다 — `routes_characters.py`가
+    이미 이 모듈(`MAX_ID_LEN`)을 import하므로, 반대 방향으로 다시 import하면
+    순환 import가 생긴다. 그래서 같은 결합 규칙(시작값 + 축별 연산 이력 →
+    `resolve_character_stats`)을 이 함수가 독립적으로 반복한다 — 두 자리가
+    갈리지 않는다는 것은 이 도크스트링과 `_current_stats`의 도크스트링이
+    서로를 지목하는 것으로 못박는다.
+
+    각 파티 구성원의 `entity_id`는 **짧은 캐릭터 식별자**(`"bram"` 등)로
+    다시 쓴다 — `characters_data.PLAYER_CHARACTERS`가 쓰는 긴 형태
+    (`"player.bram"`)가 아니다. `identity.character_id`도 짧은 형태이고,
+    `agents.prompt_assembly.actor_stats`가 `party_state`에서 `entity_id ==
+    actor_character_id`로 행위자를 찾으므로 두 값의 식별자 공간이 일치해야
+    한다.
+    """
+    events = store.read_events(session_id)
+    state = rebuild_state_from_events(session_id, events)
+    party: list[Entity] = []
+    for summary in list_characters():
+        entity = get_character(summary.character_id)
+        if entity is None:
+            continue
+        ops: dict[str, tuple[ResourceOp, ...]] = {}
+        for (op_character_id, axis_name), axis_ops in state.character_resource_ops.items():
+            if op_character_id != summary.character_id:
+                continue
+            ops[axis_name] = axis_ops
+        current_stats = resolve_character_stats(entity.stats, ops)
+        party.append(replace(entity, entity_id=summary.character_id, stats=current_stats))
+    return tuple(party)
 
 MAX_RAW_TEXT_LEN = 2000
 """플레이어가 친 자유 문장의 상한 — 이 자리가 처음으로 신뢰할 수 없는 HTTP
@@ -243,12 +290,21 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
         if character is None:
             raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
 
-        # **행동한 사람의 실제 캐릭터 상태값이 여기서 처음으로 AI 문맥에 들어간다.**
+        # **파티 전원의 접은 지금 값이 여기서 처음으로 AI 문맥에 들어간다
+        # (12-05, D-17/D-18).** 분류기(`classify()`)는 `actor_stats(ctx)`로
+        # 파티에서 행위자 한 명만 뽑아 본다 — 남의 상태는 안 받는다(D-17).
+        # `build_turn_context`의 `character_stats` 단일 인자가 12-05에서
+        # `party_state`/`actor_character_id` 두 인자로 갈렸으므로, 이
+        # 호출부도 함께 갱신해야 한다 — 안 그러면 분류기가 이 캐릭터가
+        # 아니라 예시 개체(`EXAMPLE_SINGLE_STAT_FOE`)를 보게 된다
+        # (`test_prompt_carries_the_acting_character_real_stat_names`가
+        # 잡는 회귀).
         ctx = build_turn_context(
             store,
             session_id,
             body.rulebook_id,
-            character_stats=character.stats,
+            party_state=_current_party_state(store, session_id),
+            actor_character_id=identity.character_id,
             character_names=_CHARACTER_NAMES,
         )
 
@@ -605,11 +661,16 @@ async def confirm(
     ) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    # 자원이 깎인 뒤 이 자리에서 다시 접는다 — 위에서 RecordResourceChange가
+    # 이미 제출됐을 수 있으므로(553~591줄), 진행자·상황판단이 보는 파티
+    # 상태가 시작값이 아니라 깎인 지금 값이어야 한다(RULE-06과 같은 경로,
+    # 12-05).
     ctx = build_turn_context(
         store,
         session_id,
         body.rulebook_id,
-        character_stats=character.stats,
+        party_state=_current_party_state(store, session_id),
+        actor_character_id=identity.character_id,
         character_names=_CHARACTER_NAMES,
     )
 
@@ -954,11 +1015,16 @@ async def proceed(
     ) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    # `confirm()`과 같은 자리·같은 모양으로 파티의 「접은 지금 값」을
+    # 넘긴다(12-05, D-17/D-18) — **웹 안에서도 호출부가 둘이라는 것이 이
+    # 함정이다.** 하나만 고치면 「굴린 턴은 파티를 보고 안 굴린 턴은 못
+    # 보는」 어긋남이 생긴다.
     ctx = build_turn_context(
         store,
         session_id,
         body.rulebook_id,
-        character_stats=character.stats,
+        party_state=_current_party_state(store, session_id),
+        actor_character_id=identity.character_id,
         character_names=_CHARACTER_NAMES,
     )
 

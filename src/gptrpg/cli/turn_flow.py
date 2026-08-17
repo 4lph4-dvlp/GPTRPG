@@ -239,6 +239,9 @@ async def _proceed_without_check(
     except ProceedEligible:
         pass  # 검증 통과 — 사건은 안 남는다, 그대로 진행한다.
 
+    # 파티 인자(party_state/actor_character_id)를 안 넘긴다(12-05) — 명령줄에는
+    # 캐릭터 선택·신원 개념이 없다(person_id=args.player, character_id=args.player
+    # 전제와 같은 이유). 기본값이 예시 개체 하나짜리 파티를 채운다.
     ctx = _build_turn_context(store, args.session, args.rulebook)
 
     # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
@@ -427,6 +430,9 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
 
     rulebook = get_rulebook(args.rulebook)
     moves = get_moves(args.rulebook)
+    # 파티 인자를 안 넘긴다(12-05) — 명령줄에는 캐릭터 선택·신원 개념이 없다
+    # (아래 person_id=args.player, character_id=args.player 전제와 같은
+    # 이유). 기본값이 예시 개체 하나짜리 파티를 채운다.
     ctx = _build_turn_context(store, args.session, args.rulebook)
 
     classifier_choice = _resolve_role_choice(args, "action_classifier")
@@ -573,7 +579,8 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     # 만든 `ctx`(192줄)를 그대로 아래 세 판단(`gather_turn_judgments`)·서사
     # (`build_narration_facts`)·배경 시계 조건 검사(`run_clock_condition_check`)에
     # 넘기면 이 판정 자신이 옮긴 시계 위치를 놓친 채로 판단하게 된다 — 웹과
-    # 똑같이 여기서도 다시 접어 뒤 구간에 넘긴다.
+    # 똑같이 여기서도 다시 접어 뒤 구간에 넘긴다. 파티 인자는 여전히 안
+    # 넘긴다(12-05) — 명령줄에는 캐릭터 선택 개념이 없다는 전제는 그대로다.
     ctx = _build_turn_context(store, args.session, args.rulebook)
 
     # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에

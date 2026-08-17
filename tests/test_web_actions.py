@@ -14,12 +14,19 @@ from httpx import ASGITransport, AsyncClient
 
 from conftest import FakeProvider
 from conftest import select_character as _select_character_at
+from gptrpg.agents import prompt_assembly
 from gptrpg.agents.context import NO_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.prompt_assembly import fence_player_text
+from gptrpg.event_log.schema import EVENT_SCHEMA_VERSION, ResourceChanged, utc_now_iso
+from gptrpg.event_log.store import EventStore
 from gptrpg.imagery import imagery_config_from_env
+from gptrpg.turn.context import build_turn_context
+from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments
 from gptrpg.web.app import create_app
+from gptrpg.web.characters_data import PLAYER_CHARACTERS
 from gptrpg.web.cookie_auth import verify_cookie
+from gptrpg.web.routes_actions import _current_party_state
 from gptrpg.web.routes_characters import COOKIE_NAME
 
 SESSION_ID = "s1"
@@ -1495,3 +1502,133 @@ def test_proceed_on_own_no_check_declare_still_returns_200(
 
     assert response.status_code == 200
     assert response.json()["proceeded"] is True
+
+
+# ---------------------------------------------------------------------------
+# 12-05 Task 3: 파티 상태는 시작값이 아니라 「접은 지금 값」이다(RULE-06과
+# 같은 경로) — 웹의 두 호출부(`confirm()`/`proceed()`)가 같은 결합 규칙을
+# 쓴다는 것을 실제 사건 기록으로 증명한다.
+# ---------------------------------------------------------------------------
+
+
+def test_next_turn_gm_prompt_reflects_folded_resource_change_not_starting_value(
+    tmp_db_path,
+) -> None:
+    """자원이 깎인 뒤 다음 턴의 진행자 프롬프트에 그 깎인 값이 나온다 —
+    시작값이 아니다. 이것이 파티 상태가 접은 값이라는 유일한 증거다.
+
+    실제 `confirm()`을 HTTP로 왕복하지 않는다 — 실제 다이스는 결정적이지
+    않아서(판정 자체가 또 다른 `RecordResourceChange`를 낼 수도, 안 낼
+    수도 있다) 그 경로로 이 시험을 만들면 굴림 결과에 따라 흔들린다
+    (flaky). `_current_party_state`(routes_actions.py, 12-05가 만든 파티
+    조립 도우미) → `build_turn_context` → `build_narration_facts`가 만드는
+    실제 값을 직접 확인해 결정론적으로 증명한다."""
+    starting_hp = next(
+        stat.current for stat in PLAYER_CHARACTERS["bram"].stats if stat.name == "체력"
+    )
+    folded_hp = starting_hp - 6
+
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    store.append(
+        ResourceChanged(
+            session_id=SESSION_ID,
+            seq=store.next_seq(SESSION_ID),
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="resource_changed",
+            character_id="bram",
+            changes=[
+                {
+                    "axis": "체력",
+                    "operation": "delta",
+                    "amount": -6,
+                    "rolls": [],
+                    "before": starting_hp,
+                    "after": folded_hp,
+                }
+            ],
+            category_id=None,
+            source="outcome_list",
+        )
+    )
+
+    party = _current_party_state(store, SESSION_ID)
+    ctx = build_turn_context(
+        store,
+        SESSION_ID,
+        "dungeonworld_like",
+        party_state=party,
+        actor_character_id="bram",
+    )
+    store.close()
+
+    judgments = empty_turn_judgments()
+    facts = build_narration_facts(ctx=ctx, check_summary="c", judgments=judgments)
+    gm_system, _messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=facts
+    )
+    combined = "\n".join(block["text"] for block in gm_system)
+    assert f"체력 {folded_hp}" in combined
+    assert f"체력 {starting_hp}" not in combined
+
+
+def test_party_state_axis_value_matches_character_sheet_response(
+    tmp_db_path, tmp_path
+) -> None:
+    """캐릭터 시트 응답의 축 값과 같은 세션 파티 상태의 같은 축 값이
+    같다 — 12-01의 `_current_stats`(routes_characters.py)와 12-05의
+    `_current_party_state`(routes_actions.py)가 갈리면 화면(시트)과 AI가
+    보는 값이 서로 달라진다."""
+    starting_hp = next(
+        stat.current for stat in PLAYER_CHARACTERS["bram"].stats if stat.name == "체력"
+    )
+    folded_hp = starting_hp - 6
+
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    store.append(
+        ResourceChanged(
+            session_id=SESSION_ID,
+            seq=0,
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="resource_changed",
+            character_id="bram",
+            changes=[
+                {
+                    "axis": "체력",
+                    "operation": "delta",
+                    "amount": -6,
+                    "rolls": [],
+                    "before": starting_hp,
+                    "after": folded_hp,
+                }
+            ],
+            category_id=None,
+            source="outcome_list",
+        )
+    )
+    party = _current_party_state(store, SESSION_ID)
+    store.close()
+
+    bram_party_hp = next(
+        stat.current
+        for member in party
+        if member.entity_id == "bram"
+        for stat in member.stats
+        if stat.name == "체력"
+    )
+
+    web_app = create_app(
+        db_path=tmp_db_path,
+        imagery_config=imagery_config_from_env({"GPTRPG_IMAGERY_DIR": str(tmp_path / "media")}),
+    )
+    with TestClient(web_app) as client:
+        response = client.get(f"/api/sessions/{SESSION_ID}/characters/bram")
+    assert response.status_code == 200
+    sheet_hp = next(stat["current"] for stat in response.json()["stats"] if stat["name"] == "체력")
+
+    assert bram_party_hp == sheet_hp == folded_hp
