@@ -430,7 +430,7 @@ RULE-10, RULE-13, RULE-14, RULE-16, QUAL-01, QUAL-02, QUAL-06, TEST-04
   8. 「자원이 얼마나 바뀌는가」의 선언 형식이 효과 표현(D7)의 첫 원자 연산으로 자랄 수 있는
      모양이다
 
-**Plans**: 5/7 plans executed (5 waves)
+**Plans**: 6/7 plans executed (5 waves)
 
 Plans:
 **Wave 1**
@@ -449,7 +449,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 12-06-PLAN.md — 목록에서 고르기 · 자원 변화 확인 관문 · 재량 판정 · 소지품 대조 (wave 4)
+- [x] 12-06-PLAN.md — 목록에서 고르기 · 자원 변화 확인 관문 · 재량 판정 · 소지품 대조 (wave 4)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -756,7 +756,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 9. 에이전트 구조 재편 | v1.1 | 4/4 | Complete    | 2026-08-12 |
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 7/7 | Complete    | 2026-08-14 |
 | 11. 룰북 표현 어휘 확장 | v1.1 | 7/7 | Complete    | 2026-08-17 |
-| 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 5/7 | In Progress|  |
+| 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 6/7 | In Progress|  |
 | 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 0/TBD | Not started | - |
 | 13. 장면 — 오프닝과 대상 | v1.1 | 0/TBD | Not started | - |
 | 14. 기억 유지 — 관계 장부 · 문맥 압축기 · 저장소 색인 | v1.1 | 0/TBD | Not started | - |

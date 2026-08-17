@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12
 current_phase_name: stats-resources-inventory
 status: executing
-stopped_at: Completed 12-04-PLAN.md (12-04)
-last_updated: "2026-08-17T07:33:27.571Z"
+stopped_at: Completed 12-06-PLAN.md (12-06)
+last_updated: "2026-08-17T08:39:47.791Z"
 last_activity: 2026-08-17
 last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 29
-  completed_plans: 27
+  completed_plans: 28
   percent: 36
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12 (stats-resources-inventory) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인트 승인 + Task 2·3 커밋)
@@ -42,7 +42,7 @@ Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인�
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [█████████░] 93%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -118,6 +118,7 @@ Progress: [█████████░] 93%
 | Phase 12 P03 | ~1h | 2 tasks | 6 files |
 | Phase 12 P05 | ~35min | 3 tasks | 20 files |
 | Phase 12 P04 | ~40min | 3 tasks | 9 files |
+| Phase 12 P06 | ~4h | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -253,6 +254,12 @@ Progress: [█████████░] 93%
 - [Phase ?]: [Phase 12] 12-04: GradeBand에 succeeded/costs 두 칸을 counts_as_failure 옆에 필수로 더했다(D-13/D-14, RULE-14) — 세 칸 다 서로 독립이고, succeeded=True이면서 counts_as_failure=True인 조합도 등록을 거부하지 않는다. 사건(CheckResolved)에는 안 싣는다 — session_actor/web이 이미 rulebook_id로 require_band를 통해 직접 읽을 수 있다
 - [Phase ?]: [Phase 12] 12-04: OutcomeCategory/OutcomeList/RetroDeclarationDecl 신설(RULE-13/D-16) — validate_outcome_list를 rulebooks/__init__.py의 등록 시점 자동 검증에 배선하지 않고(파일 목록 밖), 세 룰북 전부에 대한 명시적 시험으로만 확인했다. 12-06이 실제 목록 사용 경로를 만들 때 자동 배선을 고려할 것
 - [Phase ?]: [Phase 12] 12-04 [deviation, Rule 3]: dungeonworld_like.py에서 DUNGEONWORLD_MISS_HP_COST를 outcome_list 항목으로 흡수하며 제거하자 web/routes_actions.py(파일 목록 밖)의 import가 깨져, require_outcome_category 조회로 교체했다 — 값(체력/delta/-6)은 무변경
+- [Phase ?]: 12-06 Task1: pick_outcome의 두 조기 반환(빈 목록·costs=False)은 함수 안 순수 판단 — gather_turn_judgments 자신은 조건 분기 없이 언제나 넷을 부른다(ARCH-04 유지)
+- [Phase ?]: 12-06 Task1: UnknownOutcomeCategoryFromAI는 pick_outcome 밖으로 그대로 던져지고 confirm()/proceed()의 기존 D-05 광범위 except가 흡수 — 새 방어를 안 만듦
+- [Phase ?]: 12-06 Task2: confirm()이 판정 직후 자원 변화를 곧바로 적용하던 것을 대체 — pending_resource_changes만 응답에 싣고, 실제 적용은 새 POST confirm-resource-change가 사람 확인 뒤에 한다(D-09)
+- [Phase ?]: 12-06 Task2: RULE-10 재량 판정의 실제 AI 제안 생성은 파일 범위 밖(Task1의 0회 호출 계약과 충돌) — 서버는 자격 있는 축 이름만 알리고 축·동작·양 제안은 요청 쪽이 만들어 보내면 validate_outcome_list로 재검사(알려진 갭으로 문서화)
+- [Phase ?]: 12-06 Task3: 소지품 판단은 새 AI 역할 없이 action_classifier.Proposal.item_use로 기존 분류기 응답에 얹음 — named_slots 축 없는 룰북은 이 판단 자체가 프롬프트에 안 실림(D-09 적용 범위)
+- [Phase ?]: 12-06 Task3: declare()의 item_use 이중 대조 실패 시 held를 not_held로 낮춘다(안전한 실패 방향) — 소급 선언 축·동작은 룰북이 잠그고 양만 confirm-resource-change의 retro_declaration_amount로 확인 관문을 지남(D-16)
 
 ### Pending Todos
 
@@ -308,8 +315,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-17T07:33:27.533Z
-Stopped at: Completed 12-04-PLAN.md (12-04)
+Last session: 2026-08-17T08:39:47.753Z
+Stopped at: Completed 12-06-PLAN.md (12-06)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
