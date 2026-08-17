@@ -23,6 +23,7 @@ from gptrpg.rules_core.resource_change import ResourceChangeDecl
 from gptrpg.rules_core.rulebook import (
     NO_CHANGE_CATEGORY_ID,
     TWO_D6,
+    AxisNotOnCharacter,
     EntityAxisMismatch,
     GradeBand,
     InvalidOutcomeList,
@@ -36,7 +37,10 @@ from gptrpg.rules_core.rulebook import (
     ShadowedGradeBand,
     UncoveredOutcomeGap,
     UnknownOutcomeCategory,
+    character_axis_names,
+    eligible_categories,
     ordered_categories,
+    require_axes_on_character,
     require_band,
     require_outcome_category,
     validate_entity_axes,
@@ -936,3 +940,72 @@ def test_cairn_example_adventurer_registered_for_axis_check():
     — 이미 `validate_registered_rulebooks()`가 임포트 시점에 통과했다는
     것(이 파일 상단 import)이 첫 증거이고, 여기서 다시 명시적으로 확인한다."""
     validate_registered_rulebooks()  # 예외 없이 통과한다(재확인)
+
+
+# ---------------------------------------------------------------------------
+# 캐릭터가 안 가진 축 (2026-08-18 플레이테스트 회귀)
+#
+# 관측된 결함: 나리에게 「방어구」 축이 없는데(D-49로 확정된 수치), 던전월드류
+# 결과 목록의 두 항목이 방어구를 깎는다. 룰북 대조는 전부 통과하고 사건까지
+# 기록됐지만, `resolve_character_stats`는 캐릭터가 가진 축만 순회하므로 그
+# 연산이 조용히 버려졌다 — 화면엔 「변했다」가 뜨는데 실제로는 아무 일도
+# 안 일어났다.
+# ---------------------------------------------------------------------------
+
+
+def test_character_axis_names_excludes_none_form():
+    """`form == "none"`인 축은 「가진 축」에 안 들어간다 — 바꿀 값 자체가
+    없기 때문이다(`validate_outcome_list`의 검증 ⓑ와 같은 이유)."""
+    bram = PLAYER_CHARACTERS["bram"]
+    names = character_axis_names(bram.stats)
+    assert "방어구" in names
+    assert all(stat.name in names for stat in bram.stats if stat.form != "none")
+    assert all(stat.name not in names for stat in bram.stats if stat.form == "none")
+
+
+def test_nari_lacks_armor_but_bram_has_it():
+    """이 회귀 시험들이 딛고 선 사실 — D-49가 확정한 두 캐릭터의 축이 실제로
+    다르다. 이 전제가 깨지면 아래 두 시험은 아무것도 확인하지 못한다."""
+    assert "방어구" not in character_axis_names(PLAYER_CHARACTERS["nari"].stats)
+    assert "방어구" in character_axis_names(PLAYER_CHARACTERS["bram"].stats)
+
+
+def test_eligible_categories_drops_categories_the_character_cannot_receive():
+    """방어구를 가리키는 항목은 나리의 선택지에서 통째로 빠지고, 브람에게는
+    전부 남는다. 부분 적용은 하지 않는다 — 카테고리는 「진행자가 고르는 대응
+    하나」라는 한 덩어리의 뜻을 갖는다."""
+    rulebook = get_rulebook("dungeonworld_like")
+    all_ids = {c.category_id for c in rulebook.outcome_list.categories}
+
+    bram_ids = {
+        c.category_id
+        for c in eligible_categories(rulebook.outcome_list, PLAYER_CHARACTERS["bram"].stats)
+    }
+    nari_ids = {
+        c.category_id
+        for c in eligible_categories(rulebook.outcome_list, PLAYER_CHARACTERS["nari"].stats)
+    }
+
+    assert bram_ids == all_ids
+    assert nari_ids < all_ids
+    armor_ids = {
+        c.category_id
+        for c in rulebook.outcome_list.categories
+        if any(change.axis == "방어구" for change in c.changes)
+    }
+    assert armor_ids, "이 시험의 전제 — 던전월드류에 방어구를 깎는 항목이 있다"
+    assert not (nari_ids & armor_ids)
+    # 변화가 없는 항목은 어느 캐릭터에게나 남는다 — 아무 축도 안 건드린다.
+    assert NO_CHANGE_CATEGORY_ID in nari_ids
+
+
+def test_require_axes_on_character_rejects_axis_the_character_lacks():
+    """적용 직전 관문 — 조용히 버리지 않고 `AxisNotOnCharacter`로 멈춘다."""
+    decl = ResourceChangeDecl(axis="방어구", operation="delta", amount=-1)
+
+    # 브람에게는 통과한다.
+    require_axes_on_character((decl,), PLAYER_CHARACTERS["bram"].stats)
+
+    with pytest.raises(AxisNotOnCharacter) as excinfo:
+        require_axes_on_character((decl,), PLAYER_CHARACTERS["nari"].stats)
+    assert excinfo.value.axis == "방어구"

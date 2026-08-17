@@ -56,6 +56,7 @@ from gptrpg.rules_core.resource_change import (
     roll_amount,
 )
 from gptrpg.rules_core.rulebook import (
+    AxisNotOnCharacter,
     GradeBand,
     InvalidOutcomeList,
     OutcomeCategory,
@@ -63,7 +64,10 @@ from gptrpg.rules_core.rulebook import (
     UnknownDifficultyLevel,
     UnknownGradeName,
     UnknownOutcomeCategory,
+    character_axis_names,
+    eligible_categories,
     ordered_categories,
+    require_axes_on_character,
     require_band,
     require_difficulty,
     validate_outcome_list,
@@ -596,7 +600,7 @@ class ConfirmResponse(BaseModel):
 
 
 def _pending_resource_changes(
-    *, rulebook, grade_band, outcome, resolve_seq: int
+    *, rulebook, grade_band, outcome, resolve_seq: int, actor_axes: frozenset[str]
 ) -> tuple[list[PendingResourceChangeView], DiscretionaryProposalView]:
     """AI가 고른 카테고리(`judgments.outcome`)를 코드가 다시 대조해
     「변할 예정」 목록을 만든다(RULE-13, D-11, T-12-27).
@@ -644,7 +648,16 @@ def _pending_resource_changes(
     if not pending and not rulebook.outcome_list.categories and grade_band.costs:
         discretionary = DiscretionaryProposalView(
             available=True,
-            axes=[axis.name for axis in rulebook.resource_axes if axis.form != "none"],
+            # 룰북이 선언한 축이 아니라 **이 행위자가 실제로 가진** 축만
+            # 제안 대상이다 — 결과 목록 쪽 걸름(`eligible_categories`)과
+            # 같은 이유다. 룰북 축을 그대로 내보내면 사람이 나리에게 없는
+            # 방어구를 골라 제안할 수 있고, 그 제안은 확인 관문
+            # (`require_axes_on_character`)에서 거절되어 막다른 길이 된다.
+            axes=[
+                axis.name
+                for axis in rulebook.resource_axes
+                if axis.form != "none" and axis.name in actor_axes
+            ],
         )
     return pending, discretionary
 
@@ -874,7 +887,17 @@ async def confirm(
             ctx=ctx,
             check_summary=check_summary,
             rulebook_display_name=rulebook.display_name,
-            outcome_list=rulebook.outcome_list,
+            # 이 **행위자에게 실제로 적용될 수 있는** 항목만 AI에게 보인다.
+            # 룰북이 선언한 축과 캐릭터가 실린 축은 다르다(D-49로 확정된 두
+            # 캐릭터가 실제로 다르다 — 브람은 방어구를 갖고 나리는 안 갖는다).
+            # 이 걸름이 없으면 AI가 「나리의 방어구를 깎는다」를 고르고, 룰북
+            # 대조는 통과하고, 사건까지 기록된 뒤 `resolve_character_stats`가
+            # 그 연산을 조용히 버린다 — 화면엔 「변했다」가 뜨는데 아무 일도
+            # 안 일어난다(2026-08-18 플레이테스트 관측).
+            outcome_list=OutcomeList(
+                categories=eligible_categories(rulebook.outcome_list, actor_stats(ctx)),
+                max_picks=rulebook.outcome_list.max_picks,
+            ),
             grade_band=grade_band,
             resource_axes=rulebook.resource_axes,
         )
@@ -943,7 +966,11 @@ async def confirm(
     )
 
     pending_resource_changes, discretionary = _pending_resource_changes(
-        rulebook=rulebook, grade_band=grade_band, outcome=judgments.outcome, resolve_seq=resolve_seq
+        rulebook=rulebook,
+        grade_band=grade_band,
+        outcome=judgments.outcome,
+        resolve_seq=resolve_seq,
+        actor_axes=character_axis_names(actor_stats(ctx)),
     )
 
     facts = build_narration_facts(ctx=ctx, check_summary=check_summary, judgments=judgments)
@@ -1263,6 +1290,20 @@ async def confirm_resource_change(
 
     if not decls:
         raise HTTPException(status_code=400, detail="적용할 자원 변화가 없다")
+
+    # 마지막 관문 — 이 캐릭터가 **실제로 가진** 축인지 확인한다. 위 세
+    # 갈래(결과 목록·재량 판정·소급 선언)는 전부 **룰북**과만 대조했다.
+    # 룰북이 선언한 축과 캐릭터가 실린 축은 다르다(D-49). 여기서 막지 않으면
+    # 그 사건이 기록된 뒤 `resolve_character_stats`가 조용히 버려서, 화면엔
+    # 「변했다」가 뜨는데 실제로는 아무 일도 안 일어난다 — 잘못된 기록이
+    # 영구히 남는다(2026-08-18 플레이테스트 관측).
+    actor_entity = get_character(identity.character_id)
+    if actor_entity is None:
+        raise HTTPException(status_code=404, detail="캐릭터를 찾을 수 없다")
+    try:
+        require_axes_on_character(decls, actor_entity.stats)
+    except AxisNotOnCharacter as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     store = request.app.state.store
     registry = request.app.state.registry

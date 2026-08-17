@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-from gptrpg.rules_core.entities import Entity, NoneKind, ResourceAxisForm
+from gptrpg.rules_core.entities import Entity, NoneKind, ResourceAxisForm, StatEntry
 from gptrpg.rules_core.resource_change import ResourceChangeDecl, ResourceOperation
 
 TWO_D6 = "2d6"
@@ -633,6 +633,83 @@ def ordered_categories(
     if missing:
         raise UnknownOutcomeCategory(next(iter(sorted(missing))))
     return ordered
+
+
+class AxisNotOnCharacter(Exception):
+    """그 캐릭터가 **실제로 가지고 있지 않은** 축을 바꾸려 했을 때 던진다.
+
+    `validate_outcome_list`가 대조하는 대상은 **룰북**의 자원 축이다 —
+    「이 룰북에 방어구라는 개념이 있는가」. 그런데 축은 캐릭터마다 다르게
+    실린다(D-49로 확정된 두 캐릭터가 실제로 다르다 — 브람은 방어구를 갖고
+    나리는 안 갖는다). 룰북 검증만 통과시키면 「나리의 방어구를 1 깎는다」가
+    등록 시점·선택 시점 검사를 전부 지나 사건으로 기록되고, 그런데
+    `resolve_character_stats`는 캐릭터가 가진 축만 순회하므로 **그 연산은
+    조용히 버려진다** — 화면에는 「변했다」가 뜨는데 실제로는 아무 일도 안
+    일어난다(2026-08-18 플레이테스트에서 실제로 관측).
+
+    「모르는 것을 조용히 기본값으로 넘기지 않는다」는 이 저장소 규율
+    (`UnknownEventType`·`InvalidStatEntry`·`UnknownOutcomeCategory`)이
+    여기에도 그대로 적용된다."""
+
+    def __init__(self, axis: str, character_axes: Iterable[str]) -> None:
+        available = ", ".join(sorted(character_axes)) or "없음"
+        super().__init__(
+            f"이 캐릭터에게 없는 축을 바꾸려 했다: {axis!r} (가진 축: {available})"
+        )
+        self.axis = axis
+
+
+def character_axis_names(stats: Iterable[StatEntry]) -> frozenset[str]:
+    """이 캐릭터가 **실제로 바꿀 수 있는** 축 이름의 집합.
+
+    `Entity`가 아니라 상태값 튜플을 받는다 — `resolve_character_stats`,
+    `actor_stats`가 이미 그 모양이고, 행위자 한 명의 상태를 파생값으로
+    다루는 12-05의 배치를 그대로 잇는다.
+
+    `form == "none"`인 축은 제외한다 — 그 축에는 바꿀 값 자체가 없다
+    (`validate_outcome_list`의 검증 ⓑ와 같은 이유). 「캐릭터가 안 가진
+    축」과 「가졌지만 값이 없는 축」을 둘 다 같은 이유로 걸러낸다."""
+    return frozenset(stat.name for stat in stats if stat.form != "none")
+
+
+def eligible_categories(
+    outcome_list: OutcomeList, stats: Iterable[StatEntry]
+) -> tuple[OutcomeCategory, ...]:
+    """이 캐릭터에게 **실제로 적용될 수 있는** 카테고리만 선언 순서대로
+    돌려준다 — 변화 하나라도 이 캐릭터에게 없는 축을 가리키면 그 카테고리
+    통째로 뺀다.
+
+    부분 적용은 하지 않는다. 카테고리는 「진행자가 고르는 대응 하나」라는
+    한 덩어리의 뜻을 갖는다 — 그중 절반만 적용하면 룰북이 선언한 것과 다른
+    일이 일어난다.
+
+    변화가 없는 카테고리(`NO_CHANGE_CATEGORY_ID` 등)는 항상 자격이 있다 —
+    아무 축도 안 건드리므로 어느 캐릭터에게나 적용될 수 있다. 그래서 이
+    함수가 빈 튜플을 돌려주는 일은 「이 캐릭터에게 고를 수 있는 대응이
+    하나도 없다」는 뜻이고, 호출자는 그때 재량 판정으로 가면 된다(룰북이
+    결과 목록을 아예 선언하지 않은 경우와 같은 처리)."""
+    available = character_axis_names(stats)
+    return tuple(
+        category
+        for category in outcome_list.categories
+        if all(change.axis in available for change in category.changes)
+    )
+
+
+def require_axes_on_character(
+    changes: Iterable[ResourceChangeDecl], stats: Iterable[StatEntry]
+) -> None:
+    """적용 직전 마지막 관문 — 변화 하나라도 이 캐릭터에게 없는 축을
+    가리키면 `AxisNotOnCharacter`.
+
+    `eligible_categories`가 선택지 단계에서 이미 걸러 내므로 정상 경로에서는
+    걸리지 않는다. 그래도 두는 이유는 `ordered_categories`를 확인 요청에서
+    한 번 더 돌리는 것과 같다 — 요청 본문은 브라우저가 보내므로, 고를 때
+    걸러 낸 것과 확인할 때 올라온 것이 같다는 보장이 없다."""
+    available = character_axis_names(stats)
+    for change in changes:
+        if change.axis not in available:
+            raise AxisNotOnCharacter(change.axis, available)
 
 
 _FORM_ALLOWED_OPERATIONS: dict[ResourceAxisForm, tuple[ResourceOperation, ...]] = {

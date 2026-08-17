@@ -1935,7 +1935,17 @@ def test_confirm_discretionary_available_when_outcome_list_empty_and_grade_costs
     body = response.json()
     assert body["pending_resource_changes"] == []
     assert body["discretionary"]["available"] is True
-    assert set(body["discretionary"]["axes"]) == {"STR", "DEX", "WIL", "Hit Protection", "Inventory"}
+    # 축 목록은 룰북 선언과 **행위자가 실제로 가진 축**의 교집합이다 —
+    # 룰북 선언 전체가 아니다. 룰북이 선언한 축을 그대로 내보내면 사람이
+    # 그 캐릭터에게 없는 축을 골라 제안할 수 있고, 그 제안은 확인 관문
+    # (`require_axes_on_character`)에서 거절되어 막다른 길이 된다.
+    #
+    # 이 픽스처는 Cairn 룰북에 던전월드류 캐릭터(`bram`)를 짝지은 인위적
+    # 조합이라 교집합이 두 개뿐이다 — 실제 제품에서는 `validate_entity_axes`가
+    # 캐릭터 축이 자기 룰북 축의 부분집합임을 보장하므로 이렇게까지 줄지
+    # 않는다. 「이 캐릭터가 안 가진 축은 안 내보낸다」는 본래 의도는
+    # `test_discretionary_axes_exclude_axis_the_character_lacks`가 확인한다.
+    assert set(body["discretionary"]["axes"]) == {"STR", "DEX"}
 
 
 # ---------------------------------------------------------------------------
@@ -2044,6 +2054,59 @@ def test_confirm_resource_change_unknown_category_returns_400_and_no_new_events(
 
     assert response.status_code == 400
     assert events_after == events_before
+
+
+def test_confirm_resource_change_rejects_axis_the_character_lacks(
+    web_client_with_fake_provider,
+) -> None:
+    """2026-08-18 플레이테스트 회귀 — 나리는 「방어구」 축이 없는데(D-49로
+    확정된 수치) 던전월드류 결과 목록의 「가진 것을 빼앗는다」가 방어구를
+    깎는다. 고치기 전에는 이 요청이 200으로 통과해 `resource_changed` 사건이
+    쌓였고, 시트를 다시 접을 때 `resolve_character_stats`가 그 연산을 조용히
+    버려서 **화면엔 「변했다」가 뜨는데 실제로는 아무 일도 안 일어났다.**
+
+    같은 카테고리가 브람(방어구 2를 가진 캐릭터)에게는 그대로 적용된다는
+    것도 함께 확인한다 — 카테고리 자체를 막은 것이 아니라 「이 캐릭터가
+    그 축을 가졌는가」로 갈랐다는 뜻이다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "nari")
+        declare_seq = _declare_first(client, character_id="nari")
+        events_before = len(_events(client))
+        rejected = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(
+                declare_seq, character_id="nari", category_ids=["가진 것을 빼앗는다"]
+            ),
+        )
+        events_after = len(_events(client))
+        nari_resource_events = _events_of_type(client, "resource_changed")
+
+    assert rejected.status_code == 400
+    assert "방어구" in rejected.json()["detail"]
+    assert events_after == events_before
+    assert nari_resource_events == []
+
+
+def test_confirm_resource_change_accepts_same_category_for_character_that_has_the_axis(
+    web_client_with_fake_provider,
+) -> None:
+    """위 시험의 짝 — 같은 카테고리가 방어구를 가진 브람에게는 그대로
+    적용된다. 카테고리 자체를 막은 것이 아니라 「이 캐릭터가 그 축을
+    가졌는가」로 갈랐다는 것을 이 둘이 함께 보인다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _select_character(client, "bram")
+        declare_seq = _declare_first(client)
+        accepted = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
+            json=_confirm_resource_change_body(declare_seq, category_ids=["가진 것을 빼앗는다"]),
+        )
+        resource_events = _events_of_type(client, "resource_changed")
+
+    assert accepted.status_code == 200
+    assert len(resource_events) == 1
 
 
 def test_confirm_resource_change_same_caused_by_seq_twice_records_exactly_one_event_with_same_roll(
