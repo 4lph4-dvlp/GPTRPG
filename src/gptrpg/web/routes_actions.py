@@ -45,11 +45,15 @@ from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, Unkno
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
-from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID, DUNGEONWORLD_MISS_HP_COST
+from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE, DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.entities import Entity
 from gptrpg.rules_core.resource_change import ResourceOp, resolve_character_stats
-from gptrpg.rules_core.rulebook import UnknownDifficultyLevel, require_difficulty
+from gptrpg.rules_core.rulebook import (
+    UnknownDifficultyLevel,
+    require_difficulty,
+    require_outcome_category,
+)
 from gptrpg.imagery import (
     ImageryConfig,
     RenderedImage,
@@ -608,21 +612,29 @@ async def confirm(
 
     # 자원 변화 — 이 계획의 탐색적 한 줄기는 판정 직후 서버가 결정한 고정
     # 변화 하나뿐이다(RULE-04/05/09, D-05). 던전월드류 룰북이 선언한
-    # 「대가가 붙는 등급(counts_as_failure)이 나오면 체력이 고정 6 깎인다」
-    # (`DUNGEONWORLD_MISS_HP_COST`)를 그 등급이 나왔을 때만 제출한다.
-    # 12-06이 사람 확인 관문을 이 자리에 붙인다 — 이 계획은 서버가 곧바로
-    # 결정해서 제출한다.
+    # 「대가가 붙는 등급(counts_as_failure)이 나오면 체력이 고정 6 깎인다」를
+    # 그 등급이 나왔을 때만 제출한다. 12-01은 이 값을 파일 수준 임시 상수
+    # (`DUNGEONWORLD_MISS_HP_COST`)로 뒀었지만, 12-04가 실제 결과 목록
+    # 그릇(`Rulebook.outcome_list`)을 놓으면서 "대상을 다치게 한다" 항목
+    # 안으로 흡수했다 — 값(축·동작·양)은 안 바뀌었다, 자리만 옮겼다.
+    # `require_outcome_category`로 이름 조회하는 것은 `require_difficulty`와
+    # 같은 모양이다. 12-06이 사람 확인 관문 + 실제 목록에서 고르는 경로를
+    # 이 자리에 붙인다 — 이 계획은 여전히 서버가 이 항목 하나로 곧바로
+    # 결정해서 제출한다(범위는 12-01 그대로, 소스만 바뀌었다).
     resource_changes: list[ResourceChangeView] = []
     if body.rulebook_id == DUNGEONWORLD_LIKE_ID and check_event.counts_as_failure:
+        miss_cost = require_outcome_category(
+            DUNGEONWORLD_LIKE.outcome_list, "대상을 다치게 한다"
+        ).changes[0]
         try:
             await actor.submit(
                 RecordResourceChange(
                     character_id=identity.character_id,
                     changes=(
                         ResourceOp(
-                            axis=DUNGEONWORLD_MISS_HP_COST.axis,
-                            operation=DUNGEONWORLD_MISS_HP_COST.operation,
-                            amount=DUNGEONWORLD_MISS_HP_COST.amount,
+                            axis=miss_cost.axis,
+                            operation=miss_cost.operation,
+                            amount=miss_cost.amount,
                         ),
                     ),
                     # `outcome_list`를 쓴다 — 12-04가 실제 결과 목록
@@ -640,9 +652,9 @@ async def confirm(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         resource_changes = [
             ResourceChangeView(
-                axis=DUNGEONWORLD_MISS_HP_COST.axis,
-                operation=DUNGEONWORLD_MISS_HP_COST.operation,
-                amount=DUNGEONWORLD_MISS_HP_COST.amount,
+                axis=miss_cost.axis,
+                operation=miss_cost.operation,
+                amount=miss_cost.amount,
             )
         ]
 

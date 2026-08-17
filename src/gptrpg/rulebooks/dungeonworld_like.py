@@ -13,7 +13,15 @@
 from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.grading import WEAK_HIT_BAND
 from gptrpg.rules_core.resource_change import ResourceChangeDecl
-from gptrpg.rules_core.rulebook import TWO_D6, GradeBand, ResourceAxisDecl, Rulebook
+from gptrpg.rules_core.rulebook import (
+    NO_CHANGE_CATEGORY_ID,
+    TWO_D6,
+    GradeBand,
+    OutcomeCategory,
+    OutcomeList,
+    ResourceAxisDecl,
+    Rulebook,
+)
 
 DUNGEONWORLD_LIKE_ID = "dungeonworld_like"
 
@@ -70,6 +78,46 @@ DUNGEONWORLD_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
     ResourceAxisDecl(name="소지품", form="none", none_kind="discretionary"),
 )
 
+DUNGEONWORLD_OUTCOME_LIST = OutcomeList(
+    categories=(
+        # 「판정이 나빴을 때(또는 대가가 붙을 때) 진행자가 고르는 대응」
+        # 계열 — 던전월드 GM 대응 목록이 8~10개 고정 카테고리로 실재하는
+        # 표준 형태라는 것은 `RULEBOOK-SURVEY.md` §2-C가 정리한 스펙트럼상의
+        # 사실이다. 이 파일 도크스트링이 이미 "원문 옮김이 아니라 자체
+        # 선언"이라고 밝히고 있으므로, 카테고리 식별자는 특정 출간작의
+        # 원문·고유명사가 아니라 플랫폼 어휘로 짓는다. 이 룰북이 실제로
+        # 가진 축(체력·방어구)만 가리킨다 — 없는 축을 지어내 넣지 않는다.
+        OutcomeCategory(
+            category_id="대상을 다치게 한다",
+            # 12-01이 이 파일에 임시로 뒀던 `DUNGEONWORLD_MISS_HP_COST`
+            # (체력 -6)를 그대로 흡수한다 — 값(축·동작·양)은 안 바뀌었다,
+            # 목록 항목 안으로 자리만 옮겼다. `web/routes_actions.py`는 이제
+            # 이 항목을 `require_outcome_category`로 찾아 쓴다.
+            changes=(ResourceChangeDecl(axis="체력", operation="delta", amount=-6),),
+        ),
+        OutcomeCategory(
+            category_id="가진 것을 빼앗는다",
+            changes=(ResourceChangeDecl(axis="방어구", operation="delta", amount=-1),),
+        ),
+        OutcomeCategory(
+            category_id="자원을 소모시킨다",
+            # 고정값이 아니라 주사위식(D-06) — 12-02가 연 통로가 실제
+            # 룰북 데이터에 처음 쓰이는 자리다.
+            changes=(ResourceChangeDecl(axis="체력", operation="delta", amount="-1d4"),),
+        ),
+        OutcomeCategory(
+            category_id="대가를 요구하되 이득을 준다",
+            changes=(ResourceChangeDecl(axis="방어구", operation="delta", amount=-1),),
+        ),
+        # 「이번엔 숫자가 안 변한다」(D-09) — 이 항목 하나가 확인 창을
+        # 정말 변할 때만 뜨게 만든다. 변화가 빈 항목은 이것 하나뿐이다.
+        OutcomeCategory(category_id=NO_CHANGE_CATEGORY_ID, changes=()),
+    ),
+    # 이 계열은 실제로 한 번에 하나씩 돈다 — GM 대응은 한 번에 한 가지를
+    # 고르는 절차다(RULEBOOK-SURVEY.md §2-C).
+    max_picks=1,
+)
+
 DUNGEONWORLD_LIKE = Rulebook(
     rulebook_id=DUNGEONWORLD_LIKE_ID,
     display_name="Dungeonworld-like",
@@ -77,15 +125,8 @@ DUNGEONWORLD_LIKE = Rulebook(
     grade_bands=DUNGEONWORLD_GRADE_BANDS,
     resource_axes=DUNGEONWORLD_RESOURCE_AXES,
     check_trigger_mode="declared_list",
+    outcome_list=DUNGEONWORLD_OUTCOME_LIST,
 )
-
-DUNGEONWORLD_MISS_HP_COST = ResourceChangeDecl(axis="체력", operation="delta", amount=-6)
-"""「대가가 붙는 등급(miss)이 나오면 체력이 고정 6 깎인다」— 이 계획(12-01)이
-뚫는 탐색적 한 줄기를 위한 상수다. 자원 변화 한 줄기를 실제로 관통시키는
-것이 목적이라 지금은 이 파일 안의 상수 하나일 뿐이고, `rules_core`는 이
-이름도 「체력」이라는 축 이름도 모른다. 12-04가 이 값을 결과 목록
-(outcome_list) 항목 안으로 옮긴다 — 그때까지는 `web/routes_actions.py`가
-이 상수를 직접 참조해 자원 변화 사건을 제출한다."""
 
 # 자체 작성 예시 — 어떤 룰북 원문에서도 오지 않았다(D-18이 배제한 자체 창작
 # 미니 룰북과 혼동하지 않도록, 이 사실을 라벨로 남긴다). 그릇에 상태값

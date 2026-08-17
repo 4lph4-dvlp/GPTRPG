@@ -591,6 +591,78 @@ def test_validate_outcome_list_checks_retro_declaration_cost_axis_too():
 
 
 # ---------------------------------------------------------------------------
+# 세 룰북의 실제 결과 목록·소급 선언 (RULE-13, RULE-16) — 12-04
+# ---------------------------------------------------------------------------
+
+
+def test_dungeonworld_outcome_list_has_at_least_four_categories_with_changes():
+    """던전월드류가 결과 목록을 실제로 갖는다 — 항목마다 「축 · 동작 · 양」
+    변화가 붙어 있다(변화가 빈 no-change 항목 하나는 제외)."""
+    changeful = [c for c in DUNGEONWORLD_LIKE.outcome_list.categories if c.changes]
+    assert len(changeful) >= 4
+    for category in changeful:
+        for change in category.changes:
+            assert change.axis in {"체력", "방어구"}
+
+
+def test_dungeonworld_outcome_list_has_exactly_one_no_change_item():
+    """변화가 빈 항목이 정확히 하나(`NO_CHANGE_CATEGORY_ID`)다."""
+    empty_change_categories = [
+        c for c in DUNGEONWORLD_LIKE.outcome_list.categories if c.changes == ()
+    ]
+    assert len(empty_change_categories) == 1
+    assert empty_change_categories[0].category_id == NO_CHANGE_CATEGORY_ID
+
+
+def test_dungeonworld_outcome_list_absorbs_the_former_miss_hp_cost_constant():
+    """12-01이 임시로 뒀던 `DUNGEONWORLD_MISS_HP_COST`(체력 -6)가 목록
+    항목 안으로 흡수됐다 — 값(축·동작·양)은 그대로다."""
+    category = require_outcome_category(DUNGEONWORLD_LIKE.outcome_list, "대상을 다치게 한다")
+    change = category.changes[0]
+    assert (change.axis, change.operation, change.amount) == ("체력", "delta", -6)
+
+
+def test_openquest_outcome_list_is_empty():
+    """OpenQuest는 SRD가 실패 결과를 절차로 정하지 않으므로 빈 목록이다."""
+    assert OPENQUEST.outcome_list.categories == ()
+
+
+def test_cairn_outcome_list_is_empty_and_registers_without_exception():
+    """Cairn의 결과 목록이 빈 튜플이고 그 룰북이 예외 없이 등록된다."""
+    assert CAIRN.outcome_list.categories == ()
+    assert get_rulebook(CAIRN_ID) is CAIRN
+
+
+def test_cairn_allows_retro_declaration_with_a_locked_cost_axis():
+    """Cairn이 소급 선언을 허용하고 비용 축을 함께 선언한다(D-16, RULE-16)
+    — 소지품을 세는 유일한 룰북이라 「없는 것을 쓴다」가 성립하는 유일한
+    자리다."""
+    assert CAIRN.retro_declaration.allowed is True
+    assert CAIRN.retro_declaration.cost_axis == "Inventory"
+    assert CAIRN.retro_declaration.operation == "fill"
+
+
+def test_dungeonworld_does_not_declare_retro_declaration():
+    """던전월드류는 소급 선언을 선언하지 않는다 — 소지품이
+    `form="none", none_kind="discretionary"`라 대조할 목록 자체가 없다
+    (11-CONTEXT D-09)."""
+    assert DUNGEONWORLD_LIKE.retro_declaration.allowed is False
+    assert DUNGEONWORLD_LIKE.retro_declaration.cost_axis is None
+
+
+def test_all_three_rulebooks_pass_validate_outcome_list():
+    """세 룰북 전부가 `validate_outcome_list`를 통과한다."""
+    for rulebook in (DUNGEONWORLD_LIKE, OPENQUEST, CAIRN):
+        validate_outcome_list(rulebook.outcome_list, rulebook)  # 예외 없이 통과한다
+
+
+def test_outcome_category_declarations_have_no_korean_narration_field():
+    """결과 카테고리 선언 어디에도 한국어 서술 문장을 담는 필드가 없다
+    (D-11) — `OutcomeCategory`의 필드 이름 목록으로 단언한다."""
+    assert {f.name for f in dataclasses.fields(OutcomeCategory)} == {"category_id", "changes"}
+
+
+# ---------------------------------------------------------------------------
 # 개체-룰북 축 정합성 검증 (D-01) — 11-02
 # ---------------------------------------------------------------------------
 

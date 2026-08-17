@@ -12,6 +12,7 @@ from gptrpg.rules_core.rulebook import (
     D100_ROLL_UNDER,
     DifficultyLevelDecl,
     GradeBand,
+    OutcomeList,
     ResourceAxisDecl,
     Rulebook,
     require_difficulty,
@@ -111,6 +112,16 @@ OPENQUEST_DIFFICULTY_LEVELS: tuple[DifficultyLevelDecl, ...] = tuple(
 있는 난이도 이름은 이 목록에 있는 다섯 개뿐이다. `require_difficulty`가
 이 목록에서 이름으로 찾는다."""
 
+OPENQUEST_OUTCOME_LIST = OutcomeList(categories=())
+"""빈 목록이다 — SRD가 실패/펌블에 절차적 결과 카테고리(던전월드 GM 대응
+목록 같은 것)를 정하지 않는다. 이 파일이 인용하는 SRD 범위(스킬 판정
+규칙, 이 파일 상단 도크스트링)는 성공/실패/크리티컬/펌블 등급 산출까지만
+다루고, 그 뒤에 "무슨 일이 일어나는가"는 절차가 아니라 서술이다 — 지어내
+넣지 않는 것이 이 파일의 기존 규율이다(`OPENQUEST_RESOURCE_AXES`의
+"필드 단위 상세 규격은 M0 범위 밖" 관례와 같은 판단). 빈 목록은 미완성이
+아니라 정상값이고, OpenQuest의 판정 결과는 전부 재량 판정(12-06)으로
+간다(RULE-13, D-07의 귀결)."""
+
 OPENQUEST = Rulebook(
     rulebook_id=OPENQUEST_ID,
     display_name="OpenQuest",
@@ -119,6 +130,7 @@ OPENQUEST = Rulebook(
     resource_axes=OPENQUEST_RESOURCE_AXES,
     check_trigger_mode="declared_list",
     difficulty_levels=OPENQUEST_DIFFICULTY_LEVELS,
+    outcome_list=OPENQUEST_OUTCOME_LIST,
 )
 
 

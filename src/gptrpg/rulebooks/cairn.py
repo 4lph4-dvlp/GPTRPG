@@ -16,7 +16,14 @@
 """
 
 from gptrpg.rules_core.entities import Entity, StatEntry
-from gptrpg.rules_core.rulebook import D20_ROLL_UNDER, GradeBand, ResourceAxisDecl, Rulebook
+from gptrpg.rules_core.rulebook import (
+    D20_ROLL_UNDER,
+    GradeBand,
+    OutcomeList,
+    ResourceAxisDecl,
+    RetroDeclarationDecl,
+    Rulebook,
+)
 
 CAIRN_ID = "cairn"
 
@@ -53,6 +60,26 @@ CAIRN_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
     # 않는다(SRD 원문: Fatigue 한 칸을 소진하면 소지품 칸 하나가 그만큼 준다).
 )
 
+CAIRN_OUTCOME_LIST = OutcomeList(categories=())
+"""빈 튜플이다 — SRD가 세이브 실패 시의 결과를 절차로 정하지 않는다(이
+파일 도크스트링이 이미 "고정된 무브/행동 목록이 없다"로 같은 성질을
+적었다). `fail` 밴드는 `costs=True`로 대가가 있다는 사실만 선언하고,
+그 대가가 구체적으로 무엇인지는 지어내 넣지 않는다 — 재량 판정(12-06)
+으로 간다(RULE-13)."""
+
+CAIRN_RETRO_DECLARATION = RetroDeclarationDecl(
+    allowed=True,
+    # 축은 Hit Protection이 아니라 Inventory다 — SRD가 실제로 정한 사실은
+    # "Fatigue가 소지품 칸을 차지한다"는 것뿐이다(이 파일 위쪽
+    # `CAIRN_RESOURCE_AXES` 주석·`LICENSES.md`가 인용하는 SRD 조항). 소급
+    # 선언("사실 나 그거 챙겨왔었어")의 대가를 이 자리에 태운다 — 이미
+    # SRD가 정한 Fatigue 형태(소지품 칸 하나를 채운다)를 그대로 재사용한다
+    # (D-16 — 새 형식을 만들지 않는다). 소지품을 세는 유일한 룰북이라
+    # "없는 것을 쓴다"가 데이터로 성립하는 유일한 자리다(RULE-16).
+    cost_axis="Inventory",
+    operation="fill",
+)
+
 CAIRN = Rulebook(
     rulebook_id=CAIRN_ID,
     display_name="Cairn",
@@ -61,6 +88,8 @@ CAIRN = Rulebook(
     resource_axes=CAIRN_RESOURCE_AXES,
     # Cairn에는 고정 무브 목록이 없다 — 진행자가 그 자리에서 정한다(D-12).
     check_trigger_mode="gm_discretion",
+    outcome_list=CAIRN_OUTCOME_LIST,
+    retro_declaration=CAIRN_RETRO_DECLARATION,
 )
 
 # 자체 작성 예시 — 어떤 룰북 원문에서도 오지 않았다(D-18이 배제한 자체 창작
