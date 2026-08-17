@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12
 current_phase_name: stats-resources-inventory
 status: executing
-stopped_at: Completed 12-02-PLAN.md (12-02)
-last_updated: "2026-08-17T06:23:37.865Z"
+stopped_at: Completed 12-03-PLAN.md (12-03)
+last_updated: "2026-08-17T06:37:04.632Z"
 last_activity: 2026-08-17
 last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 29
-  completed_plans: 24
+  completed_plans: 25
   percent: 36
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12 (stats-resources-inventory) — EXECUTING
-Plan: 3 of 7
+Plan: 4 of 7
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인트 승인 + Task 2·3 커밋)
@@ -42,7 +42,7 @@ Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인�
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [████████░░] 83%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -115,6 +115,7 @@ Progress: [████████░░] 83%
 | Phase 11 P07 | ~90min | 3 tasks | 15 files |
 | Phase 12 P01 | ~2h30m (체크포인트 승인 대기 제외) | 3 tasks | 21 files |
 | Phase 12 P02 | ~20min | 3 tasks | 10 files |
+| Phase 12 P03 | ~1h | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -242,6 +243,8 @@ Progress: [████████░░] 83%
 - [Phase ?]: [Phase 12] 12-02: clock의 최대치 자르기는 위아래 둘 다(0과 max) — numeric은 위쪽만(0 아래는 룰북 몫, D-08). clock은 max가 항상 필수라는 StatEntry 규약을 그대로 이용
 - [Phase ?]: [Phase 12] 12-02: OutOfOrderEvent 검사를 fold() 한 자리에만 뒀다 — apply_event는 건드리지 않음(두 자리에 검사를 두면 서로 다른 규칙으로 갈릴 수 있다는 _band_matches 관례)
 - [Phase ?]: [Phase 12] 12-02: CorruptEventRecord는 정확히 세 사유(칸 없음/정수 아님/알 수 없는 종류)만 잡는다 — 그 밖의 pydantic 검증 실패는 원래 ValidationError를 그대로 다시 던진다(QUAL-02 edge probe 경계를 안 넘음)
+- [Phase ?]: [Phase 12] 12-03: 튜플 키(character_id, axis) -> 문자열 키 변환 규칙을 '::'로 이어붙이는 것으로 확정, 스크립트와 시험 파일 양쪽에 같은 규칙을 문서화(import 대신 재작성 — 계획이 허용한 대안). 기대 상태 비교 시 actual을 json 라운드트립으로 정규화해야 int/str 딕셔너리 키 불일치로 인한 거짓 회귀를 피한다
+- [Phase ?]: [Phase 12] 12-03: session1 실기록 895건(판 2)을 tests/fixtures/에 커밋해 TEST-04 회귀 시험이 CI에서 항상 돈다 — 기존 skipif 로컬 스모크 여섯은 무변경으로 남김. scripts/export_session_fixture.py가 재생성 절차를 스크립트로 남김
 
 ### Pending Todos
 
@@ -297,8 +300,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-17T06:23:37.827Z
-Stopped at: Completed 12-02-PLAN.md (12-02)
+Last session: 2026-08-17T06:37:04.595Z
+Stopped at: Completed 12-03-PLAN.md (12-03)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
