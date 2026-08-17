@@ -6,6 +6,7 @@ from hypothesis import strategies as st
 
 from gptrpg.event_log.replay_roller import ReplayExhausted, ReplayRoller, rolls_from_events
 from gptrpg.rules_core.resolution import Modifier, resolve_2d6
+from gptrpg.rules_core.resource_change import roll_amount
 from gptrpg.session_actor.live_roller import LiveRoller
 
 
@@ -76,3 +77,17 @@ def test_replaying_same_recorded_rolls_twice_is_always_deterministic(roll_pairs,
     ]
 
     assert first_outcomes == second_outcomes
+
+
+def test_replaying_same_recorded_rolls_twice_gives_same_roll_amount_result():
+    """같은 눈 목록을 되먹이면 `roll_amount` 결과(정수+눈)가 두 번 다
+    같다 — 재생 일치가 주사위식 양에도 성립한다(D-06)."""
+    recorded_rolls = [3, 5, 2, 6]
+
+    first_run = ReplayRoller(list(recorded_rolls))
+    second_run = ReplayRoller(list(recorded_rolls))
+
+    first_result = roll_amount(first_run, "2d8+1")
+    second_result = roll_amount(second_run, "2d8+1")
+
+    assert first_result == second_result

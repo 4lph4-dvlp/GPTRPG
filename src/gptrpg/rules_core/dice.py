@@ -31,3 +31,22 @@ class PercentileRoller(Protocol):
     def roll_units(self) -> int:
         """0 이상 9 이하의 정수 하나(일의 자리 눈)를 돌려준다."""
         ...
+
+
+class DieRoller(Protocol):
+    """임의 면수의 눈 하나를 돌려주는 도구가 갖춰야 할 구조(12-02, D-06).
+
+    `Roller`·`PercentileRoller`와 나란히 세 번째로 추가한다 — 기존 두
+    Protocol은 한 글자도 고치지 않는다(확장이지 변경이 아니다, `PercentileRoller`가
+    세운 관례를 그대로 잇는다). **`Roller`에 `roll_die`를 메서드로 더하지
+    않은 이유:** 구조적 타이핑(PEP 544)이라 `roll_d6`만 구현한 기존 시험용
+    즉석 객체들이, `Roller`에 메서드가 하나 늘어나는 순간 그 구조를 더는
+    만족하지 못해 프로토콜에서 떨어져 나간다 — 나란히 둔 세 번째 Protocol만
+    새로 채택하면 되므로 기존 호출부는 전혀 안 건드린다.
+
+    「1 이상 `sides` 이하의 정수 하나」가 계약이다.
+    """
+
+    def roll_die(self, sides: int) -> int:
+        """1 이상 `sides` 이하의 정수 하나를 돌려준다."""
+        ...

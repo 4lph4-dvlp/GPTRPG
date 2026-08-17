@@ -1,5 +1,7 @@
 """자원 변화 「축 · 동작 · 양」 — 순수 함수. 무작위·시간·파일·네트워크를 쓰지
-않는다(`.importlinter` contract:1).
+않는다(`.importlinter` contract:1). 무작위는 `DieRoller`를 통해서만 받는다
+— `rules_core` 안에서 `random`/`secrets`를 직접 import하는 자리는 없다
+(`roll_amount`가 그 유일한 통로다, D-06).
 
 D-05가 확정한 형식이다: 판정 결과가 자원을 얼마나 바꾸는지는 항상 이 세
 칸짜리 항목의 목록으로 적힌다. `ResourceOperation`은 이번 계획에서
@@ -9,10 +11,12 @@ D-05가 확정한 형식이다: 판정 결과가 자원을 얼마나 바꾸는�
 모듈에 더한다.
 """
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Literal
 
+from gptrpg.rules_core.dice import DieRoller
 from gptrpg.rules_core.entities import StatEntry
 
 ResourceOperation = Literal["delta"]
@@ -20,6 +24,22 @@ ResourceOperation = Literal["delta"]
 하나뿐이다. 12-02가 나머지 일곱을 더한다. 동작 이름이 늘어도 「축 · 동작 ·
 양」 세 칸짜리 모양 자체는 안 바뀐다(D-05) — 룰북 데이터·사건 기록·이
 모듈의 폴딩 함수 세 곳이 동시에 새 이름을 알게 되는 것이 유일한 변화다."""
+
+MAX_DICE_COUNT = 20
+"""주사위식 한 개당 굴릴 수 있는 최대 개수(D-06, T-12-09). 이 상한을 넘는
+굴림 호출은 계산이 아니라 입력 실수로 본다 —
+`resolution_d100.MAX_BONUS_DICE_MAGNITUDE`가 세운 것과 같은 형식의
+방어다."""
+
+MAX_DIE_SIDES = 1000
+"""주사위식 한 개의 최대 면수(D-06, T-12-09). `MAX_DICE_COUNT`와 같은
+근거 — 굴림 도구 호출 자체는 면수와 무관하게 한 번이지만, 비정상적으로
+큰 면수도 입력 실수로 본다."""
+
+_DICE_EXPR = re.compile(r"^(?P<sign>[+-]?)(?P<count>\d+)d(?P<sides>\d+)(?P<flat>[+-]\d+)?$")
+"""`NdM` 문법에 앞 부호와 뒤 고정 가감을 붙인 모양만 받는다(예: `"1d6"`,
+`"-1d6"`, `"2d8+1"`). 그 밖(`"d6"`·`"1d"`·`"abc"`·`""` 등)은 전부
+`InvalidResourceChange`다."""
 
 
 class InvalidResourceChange(Exception):
@@ -42,9 +62,12 @@ class InvalidResourceChange(Exception):
 class ResourceChangeDecl:
     """룰북이 적는 자원 변화 선언 하나 — 「축 · 동작 · 양」(D-05).
 
-    `amount`가 `int`면 고정량이고, `str`이면 12-02가 붙일 주사위식이다.
-    이번 계획은 `str`을 `InvalidResourceChange`로 거절한다 — 주사위식
-    해석기는 12-02가 만든다.
+    `amount`가 `int`면 고정량이고, `str`이면 주사위식이다(`"1d6"`·`"2d8+1"`·
+    `"-1d6"` 같은 `NdM` 문법, D-06). 실제 출간작 대부분이 피해를 주사위로
+    적는다 — 고정값만 받으면 저장소의 룰북을 원문대로 적을 수 없고 평균값
+    근사로 흐른다(이 프로젝트가 금지한 「특정 룰북 근사」). 이 칸은 형식만
+    검사한다 — 실제로 굴려서 정수로 바꾸는 것은 `roll_amount`의 몫이다
+    (12-01은 문자열을 무조건 거절했다 — 그 거절을 이 형식 검사로 바꾼다).
     """
 
     axis: str
@@ -54,10 +77,9 @@ class ResourceChangeDecl:
     def __post_init__(self) -> None:
         if not self.axis.strip():
             raise InvalidResourceChange("axis가 비었거나 공백뿐이다", axis=self.axis)
-        if isinstance(self.amount, str):
+        if isinstance(self.amount, str) and _DICE_EXPR.match(self.amount) is None:
             raise InvalidResourceChange(
-                "amount가 문자열(주사위식)이다 — 이번 계획은 정수 고정량만"
-                " 다룬다(12-02가 주사위식 해석을 붙인다)",
+                "amount가 주사위식 문법(NdM, 예: '1d6'·'2d8+1'·'-1d6')을 따르지 않는다",
                 axis=self.axis,
                 amount=self.amount,
             )
@@ -68,8 +90,11 @@ class ResourceOp:
     """실제로 적용된 자원 변화 연산 하나 — 사건 기록에 남는 모양(D-05/D-09).
 
     `ResourceChangeDecl`이 룰북의 "선언"이라면 이것은 "적용된 사실"이다.
-    `rolls`는 주사위식 양이 낸 실제 눈이다(이번 계획은 고정량만 다루므로
-    항상 빈 튜플) — 12-02가 채운다.
+    `rolls`는 주사위식 양이 낸 실제 눈이다 — 고정 정수 양은 빈 튜플이고,
+    `roll_amount`가 주사위식을 굴려 만든 값은 굴린 눈 그대로가 채워진다
+    (D-06). 실제로 `ResourceChangeDecl`에서 이 필드를 채워 `ResourceOp`를
+    만드는 호출부(룰북 결과 목록 → 사건 제출 경로)는 12-04가 잇는다 —
+    이 계획은 `roll_amount` 자체와 그 결과 모양만 세운다.
     """
 
     axis: str
@@ -80,6 +105,47 @@ class ResourceOp:
     def __post_init__(self) -> None:
         if not self.axis.strip():
             raise InvalidResourceChange("axis가 비었거나 공백뿐이다", axis=self.axis)
+
+
+def roll_amount(roller: DieRoller, amount: int | str) -> tuple[int, tuple[int, ...]]:
+    """변화량 하나를 실제 정수로 만든다 — 고정 정수는 그대로, 주사위식은
+    굴려서(D-06).
+
+    고정 정수면 `(amount, ())`를 그대로 돌려준다(굴림 도구를 한 번도 안
+    부른다). 주사위식(`NdM` 문법)이면 개수만큼 `roller.roll_die(sides)`를
+    불러 `(부호 × (눈 합 + 고정 가감), 굴린 눈 튜플)`을 돌려준다.
+
+    **눈은 부호를 붙이지 않은 굴린 값 그대로 돌려준다** — 화면에서
+    「1d6 = 4 → 체력 −4」로 검산되어야 한다(D-04). 부호는 결과값에만 붙는다.
+
+    **상한 검사는 굴림 도구를 부르기 전에 한다**(T-12-09) — `MAX_DICE_COUNT`·
+    `MAX_DIE_SIDES`를 넘는 주사위식은 `InvalidResourceChange`로 거절하고
+    `roller.roll_die`를 단 한 번도 부르지 않는다. 상한을 넘는 굴림 호출은
+    계산이 아니라 입력 실수로 본다.
+    """
+    if isinstance(amount, int):
+        return amount, ()
+
+    match = _DICE_EXPR.match(amount)
+    if match is None:
+        raise InvalidResourceChange(
+            "amount가 주사위식 문법(NdM, 예: '1d6'·'2d8+1'·'-1d6')을 따르지 않는다",
+            amount=amount,
+        )
+
+    sign = -1 if match.group("sign") == "-" else 1
+    count = int(match.group("count"))
+    sides = int(match.group("sides"))
+    flat = int(match.group("flat")) if match.group("flat") else 0
+
+    if count > MAX_DICE_COUNT or sides > MAX_DIE_SIDES:
+        raise InvalidResourceChange(
+            f"주사위식이 상한을 넘는다(개수 <= {MAX_DICE_COUNT}, 면수 <= {MAX_DIE_SIDES})",
+            amount=amount,
+        )
+
+    rolls = tuple(roller.roll_die(sides) for _ in range(count))
+    return sign * (sum(rolls) + flat), rolls
 
 
 def apply_resource_op(stat: StatEntry, op: ResourceOp) -> StatEntry:

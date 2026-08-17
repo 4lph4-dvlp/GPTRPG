@@ -4,9 +4,9 @@ import secrets
 
 
 class LiveRoller:
-    """secrets 기반 실제 Roller/PercentileRoller 구현체.
+    """secrets 기반 실제 Roller/PercentileRoller/DieRoller 구현체.
 
-    상속 선언 없이 두 프로토콜을 동시에 만족한다(PEP 544 구조적 타이핑).
+    상속 선언 없이 세 프로토콜을 동시에 만족한다(PEP 544 구조적 타이핑).
     """
 
     def roll_d6(self) -> int:
@@ -21,3 +21,11 @@ class LiveRoller:
     def roll_units(self) -> int:
         # roll_tens와 동일 — 0~9가 맞으므로 +1을 하지 않는다.
         return secrets.randbelow(10)
+
+    def roll_die(self, sides: int) -> int:
+        # sides가 1 미만이면 secrets.randbelow가 ValueError를 던지지 않고
+        # 조용히 잘못된 범위를 굴릴 수 있으므로 여기서 먼저 막는다 — 눈에
+        # 0이나 음수가 나오는 것을 방지한다(roll_d6과 같은 +1 규칙).
+        if sides < 1:
+            raise ValueError(f"sides는 1 이상이어야 한다: {sides!r}")
+        return secrets.randbelow(sides) + 1

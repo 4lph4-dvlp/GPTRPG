@@ -51,6 +51,20 @@ class ReplayRoller:
         """기록된 눈에서 일의 자리 하나를 꺼낸다. `roll_tens`와 소비 자리를 공유한다."""
         return self._next_roll()
 
+    def roll_die(self, sides: int) -> int:
+        """기록된 눈에서 임의 면수 굴림 하나를 꺼낸다(12-02, D-06).
+
+        **면수를 무시한다** — 기록된 눈은 이미 그 면수로 굴려진 값이고,
+        `rolls_from_events`가 만든 평평한 목록이 기록된 순서 그대로
+        되먹여져야 하므로, `roll_d6`/`roll_tens`/`roll_units`와 마찬가지로
+        굴림 종류에 따라 소비 자리를 나누지 않는다 — 셋과 **같은 반복자**를
+        공유한다. 실제 굴림 도구(`LiveRoller.roll_die`)와 계약을 맞추기
+        위해 `sides`가 1 미만이면 `ValueError`로 멈춘다.
+        """
+        if sides < 1:
+            raise ValueError(f"sides는 1 이상이어야 한다: {sides!r}")
+        return self._next_roll()
+
     def _next_roll(self) -> int:
         try:
             value = next(self._rolls)
