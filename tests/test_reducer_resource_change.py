@@ -72,8 +72,9 @@ def test_apply_resource_op_does_not_clamp_below_zero():
     assert result.current == -5
 
 
-def test_apply_resource_op_on_non_numeric_form_raises():
-    """이 계획이 다루는 form은 numeric뿐이다 — 나머지는 InvalidResourceChange다."""
+def test_apply_resource_op_mismatched_form_and_operation_raises():
+    """형태와 동작이 어긋나면(예: tag_list에 delta) 조용히 넘어가지 않고
+    InvalidResourceChange다."""
     stat = StatEntry(name="가방", form="tag_list", tags=())
     op = ResourceOp(axis="가방", operation="delta", amount=1)
 
@@ -84,6 +85,260 @@ def test_apply_resource_op_on_non_numeric_form_raises():
 def test_apply_resource_op_axis_mismatch_raises():
     stat = StatEntry(name="체력", form="numeric", current=10)
     op = ResourceOp(axis="STR", operation="delta", amount=1)
+
+    with pytest.raises(InvalidResourceChange):
+        apply_resource_op(stat, op)
+
+
+def test_apply_resource_op_numeric_boundary_exactly_at_max_stays_at_max():
+    """`current=20, max=20`에 `+1` → 20(경계 바로 위는 잘린다, QUAL-06 boundary)."""
+    stat = StatEntry(name="체력", form="numeric", current=20, max=20)
+    op = ResourceOp(axis="체력", operation="delta", amount=1)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == 20
+
+
+def test_apply_resource_op_numeric_boundary_reaching_max_exactly_is_normal():
+    """`current=19, max=20`에 `+1` → 20(경계에 정확히 닿는 것은 정상,
+    QUAL-06 boundary)."""
+    stat = StatEntry(name="체력", form="numeric", current=19, max=20)
+    op = ResourceOp(axis="체력", operation="delta", amount=1)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == 20
+
+
+def test_apply_resource_op_numeric_with_max_none_and_large_positive_amount():
+    """`max=None`인 축에 `+1000`을 적용한 결과 `current`가 시작값 + 1000이다
+    (QUAL-06 empty — 안 자른다)."""
+    stat = StatEntry(name="STR", form="numeric", current=2)
+    op = ResourceOp(axis="STR", operation="delta", amount=1000)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == 1002
+
+
+def test_apply_resource_op_numeric_negative_amount_goes_below_zero_unclamped():
+    """`current=3`인 numeric 축에 `-10`을 적용한 결과 `current`가 `-7`이다
+    (0 아래는 안 자른다)."""
+    stat = StatEntry(name="체력", form="numeric", current=3)
+    op = ResourceOp(axis="체력", operation="delta", amount=-10)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == -7
+
+
+# ---------------------------------------------------------------------------
+# apply_resource_op — clock (11-VERIFICATION RULE-11 3/6, 아직 실제 룰북에
+# 없다 — 시험 픽스처로만 덮는다)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_resource_op_clock_advance_moves_forward_and_stops_at_max():
+    """`clock` + `advance`: `current`가 칸수만큼 나아가고 `max`에서 멈춘다."""
+    stat = StatEntry(name="위협 시계", form="clock", current=2, max=6)
+    op = ResourceOp(axis="위협 시계", operation="advance", amount=3)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == 5
+
+
+def test_apply_resource_op_clock_advance_stops_at_max_when_it_would_overshoot():
+    stat = StatEntry(name="위협 시계", form="clock", current=5, max=6)
+    op = ResourceOp(axis="위협 시계", operation="advance", amount=10)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == 6
+
+
+def test_apply_resource_op_clock_advance_negative_steps_back_and_stops_at_zero():
+    """음수 `advance`는 뒤로 물러나고 0에서 멈춘다(`StatEntry`가
+    `0 <= current <= max`를 이미 강제한다)."""
+    stat = StatEntry(name="위협 시계", form="clock", current=1, max=6)
+    op = ResourceOp(axis="위협 시계", operation="advance", amount=-5)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == 0
+
+
+def test_apply_resource_op_clock_rejects_operations_other_than_advance():
+    stat = StatEntry(name="위협 시계", form="clock", current=1, max=6)
+    op = ResourceOp(axis="위협 시계", operation="delta", amount=1)
+
+    with pytest.raises(InvalidResourceChange):
+        apply_resource_op(stat, op)
+
+
+# ---------------------------------------------------------------------------
+# apply_resource_op — named_slots (RULE-11 3/6)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_resource_op_named_slots_fill_fills_first_empty_slot():
+    """`named_slots` + `fill`: 첫 번째 빈 슬롯에 문자열을 넣는다."""
+    stat = StatEntry(name="소지품", form="named_slots", slot_values=("검", None, None))
+    op = ResourceOp(axis="소지품", operation="fill", amount="랜턴")
+
+    result = apply_resource_op(stat, op)
+
+    assert result.slot_values == ("검", "랜턴", None)
+
+
+def test_apply_resource_op_named_slots_fill_raises_when_no_empty_slot():
+    """빈 슬롯이 없으면 `InvalidResourceChange`."""
+    stat = StatEntry(name="소지품", form="named_slots", slot_values=("검", "랜턴"))
+    op = ResourceOp(axis="소지품", operation="fill", amount="밧줄")
+
+    with pytest.raises(InvalidResourceChange):
+        apply_resource_op(stat, op)
+
+
+def test_apply_resource_op_named_slots_clear_empties_the_matching_slot():
+    """`named_slots` + `clear`: 그 문자열과 완전히 같은 값이 든 첫 슬롯을 비운다."""
+    stat = StatEntry(name="소지품", form="named_slots", slot_values=("검", "랜턴", None))
+    op = ResourceOp(axis="소지품", operation="clear", amount="랜턴")
+
+    result = apply_resource_op(stat, op)
+
+    assert result.slot_values == ("검", None, None)
+
+
+def test_apply_resource_op_named_slots_clear_raises_when_value_not_found():
+    """없으면 `InvalidResourceChange`."""
+    stat = StatEntry(name="소지품", form="named_slots", slot_values=("검", None))
+    op = ResourceOp(axis="소지품", operation="clear", amount="방패")
+
+    with pytest.raises(InvalidResourceChange):
+        apply_resource_op(stat, op)
+
+
+def test_apply_resource_op_named_slots_rejects_operations_other_than_fill_or_clear():
+    stat = StatEntry(name="소지품", form="named_slots", slot_values=(None,))
+    op = ResourceOp(axis="소지품", operation="delta", amount=1)
+
+    with pytest.raises(InvalidResourceChange):
+        apply_resource_op(stat, op)
+
+
+# ---------------------------------------------------------------------------
+# apply_resource_op — tag_list (RULE-11 3/6)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_resource_op_tag_list_add_tag_appends_new_tag():
+    """`tag_list` + `add_tag`: 없으면 뒤에 붙인다."""
+    stat = StatEntry(name="상태 이상", form="tag_list", tags=("젖음",))
+    op = ResourceOp(axis="상태 이상", operation="add_tag", amount="중독")
+
+    result = apply_resource_op(stat, op)
+
+    assert result.tags == ("젖음", "중독")
+
+
+def test_apply_resource_op_tag_list_add_tag_does_not_duplicate_existing_tag():
+    """이미 있으면 중복으로 붙이지 않는다(같은 태그가 두 번 있는 상태를
+    만들지 않는다)."""
+    stat = StatEntry(name="상태 이상", form="tag_list", tags=("젖음",))
+    op = ResourceOp(axis="상태 이상", operation="add_tag", amount="젖음")
+
+    result = apply_resource_op(stat, op)
+
+    assert result.tags == ("젖음",)
+    assert len(result.tags) == 1
+
+
+def test_apply_resource_op_tag_list_remove_tag_removes_matching_tag():
+    """`tag_list` + `remove_tag`: 완전히 같은 문자열을 뗀다."""
+    stat = StatEntry(name="상태 이상", form="tag_list", tags=("젖음", "중독"))
+    op = ResourceOp(axis="상태 이상", operation="remove_tag", amount="젖음")
+
+    result = apply_resource_op(stat, op)
+
+    assert result.tags == ("중독",)
+
+
+def test_apply_resource_op_tag_list_remove_tag_raises_when_not_found():
+    """없으면 `InvalidResourceChange`."""
+    stat = StatEntry(name="상태 이상", form="tag_list", tags=("젖음",))
+    op = ResourceOp(axis="상태 이상", operation="remove_tag", amount="중독")
+
+    with pytest.raises(InvalidResourceChange):
+        apply_resource_op(stat, op)
+
+
+def test_apply_resource_op_tag_list_rejects_operations_other_than_add_or_remove_tag():
+    stat = StatEntry(name="상태 이상", form="tag_list", tags=())
+    op = ResourceOp(axis="상태 이상", operation="fill", amount="젖음")
+
+    with pytest.raises(InvalidResourceChange):
+        apply_resource_op(stat, op)
+
+
+# ---------------------------------------------------------------------------
+# apply_resource_op — usage_die (RULE-11 3/6)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_resource_op_usage_die_step_down_sets_target_sides():
+    """`usage_die` + `step_down`: `current`(면수)가 룰북이 준 목표 면수로
+    내려간다. `amount`가 목표 면수다."""
+    stat = StatEntry(name="사용 주사위", form="usage_die", current=6)
+    op = ResourceOp(axis="사용 주사위", operation="step_down", amount=4)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == 4
+
+
+def test_apply_resource_op_usage_die_step_down_applied_twice_in_sequence():
+    """6 → 4 → 2 처럼, 같은 축에 `step_down`을 순서대로 두 번 적용하면
+    누적이 아니라 목표 면수로 각각 갈아 끼워진다(절대값 연산, 순서
+    의존적)."""
+    stat = StatEntry(name="사용 주사위", form="usage_die", current=6)
+    first = apply_resource_op(stat, ResourceOp(axis="사용 주사위", operation="step_down", amount=4))
+    second = apply_resource_op(
+        first, ResourceOp(axis="사용 주사위", operation="step_down", amount=2)
+    )
+
+    assert second.current == 2
+
+
+def test_apply_resource_op_usage_die_deplete_sets_current_to_zero():
+    """`usage_die` + `deplete`: `current`를 0으로 만든다(0이 소진이라는
+    것은 `entities.py`가 이미 정한 규약)."""
+    stat = StatEntry(name="사용 주사위", form="usage_die", current=6)
+    op = ResourceOp(axis="사용 주사위", operation="deplete", amount=0)
+
+    result = apply_resource_op(stat, op)
+
+    assert result.current == 0
+
+
+def test_apply_resource_op_usage_die_rejects_operations_other_than_step_down_or_deplete():
+    stat = StatEntry(name="사용 주사위", form="usage_die", current=6)
+    op = ResourceOp(axis="사용 주사위", operation="delta", amount=1)
+
+    with pytest.raises(InvalidResourceChange):
+        apply_resource_op(stat, op)
+
+
+# ---------------------------------------------------------------------------
+# apply_resource_op — none (어떤 동작도 적용할 수 없다)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_resource_op_none_form_rejects_any_operation():
+    """`none` 형태 축에는 어떤 동작도 적용할 수 없다 — `InvalidResourceChange`."""
+    stat = StatEntry(name="소지품", form="none", none_kind="discretionary")
+    op = ResourceOp(axis="소지품", operation="delta", amount=1)
 
     with pytest.raises(InvalidResourceChange):
         apply_resource_op(stat, op)
@@ -121,6 +376,32 @@ def test_resolve_character_stats_with_no_ops_returns_starting_values_unchanged()
     result = resolve_character_stats(starting, {})
 
     assert result == starting
+
+
+def test_resolve_character_stats_applies_ops_in_recorded_order_and_order_changes_result():
+    """같은 축에 연산 세 개가 순서대로 쌓였으면 그 순서대로 적용한다 —
+    `step_down`처럼 순서를 바꾸면 결과가 달라지는 연산으로 이 사실을
+    확인한다(RULE-09 ordering)."""
+    starting = (StatEntry(name="사용 주사위", form="usage_die", current=6),)
+    forward_ops = {
+        "사용 주사위": (
+            ResourceOp(axis="사용 주사위", operation="step_down", amount=4),
+            ResourceOp(axis="사용 주사위", operation="step_down", amount=2),
+        )
+    }
+    reversed_ops = {
+        "사용 주사위": (
+            ResourceOp(axis="사용 주사위", operation="step_down", amount=2),
+            ResourceOp(axis="사용 주사위", operation="step_down", amount=4),
+        )
+    }
+
+    forward_result = resolve_character_stats(starting, forward_ops)
+    reversed_result = resolve_character_stats(starting, reversed_ops)
+
+    assert forward_result[0].current == 2
+    assert reversed_result[0].current == 4
+    assert forward_result[0].current != reversed_result[0].current
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +444,60 @@ def test_depleted_axes_ignores_axes_without_effect_ref():
     stats = (StatEntry(name="체력", form="numeric", current=0, max=20),)
 
     assert depleted_axes(stats) == ()
+
+
+def test_depleted_axes_usage_die_is_depleted_only_at_exactly_zero():
+    """`usage_die`는 `current == 0`일 때만 소진이다."""
+    depleted = StatEntry(
+        name="사용 주사위",
+        form="usage_die",
+        current=0,
+        depleted_effect_ref="cairn.usage_die_depleted",
+    )
+    not_depleted = StatEntry(
+        name="사용 주사위 2",
+        form="usage_die",
+        current=2,
+        depleted_effect_ref="cairn.usage_die_depleted",
+    )
+
+    result = depleted_axes((depleted, not_depleted))
+
+    assert result == (DepletedAxis(axis="사용 주사위", effect_ref="cairn.usage_die_depleted"),)
+
+
+def test_depleted_axes_clock_is_depleted_when_current_reaches_max():
+    """`clock`은 `current >= max`(칸이 다 찼다)일 때 소진이다."""
+    full = StatEntry(
+        name="위협 시계", form="clock", current=6, max=6, depleted_effect_ref="threat.clock_full"
+    )
+    not_full = StatEntry(
+        name="위협 시계 2", form="clock", current=3, max=6, depleted_effect_ref="threat.clock_full"
+    )
+
+    result = depleted_axes((full, not_full))
+
+    assert result == (DepletedAxis(axis="위협 시계", effect_ref="threat.clock_full"),)
+
+
+def test_depleted_axes_named_slots_is_depleted_when_no_empty_slot_remains():
+    """`named_slots`는 빈 슬롯이 0개일 때(전부 찼다) 소진이다."""
+    full = StatEntry(
+        name="소지품",
+        form="named_slots",
+        slot_values=("검", "랜턴"),
+        depleted_effect_ref="cairn.inventory_full",
+    )
+    not_full = StatEntry(
+        name="소지품 2",
+        form="named_slots",
+        slot_values=("검", None),
+        depleted_effect_ref="cairn.inventory_full",
+    )
+
+    result = depleted_axes((full, not_full))
+
+    assert result == (DepletedAxis(axis="소지품", effect_ref="cairn.inventory_full"),)
 
 
 # ---------------------------------------------------------------------------

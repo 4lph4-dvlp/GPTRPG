@@ -10,6 +10,7 @@ from gptrpg.rules_core.entities import (
     InvalidStatEntry,
     StatEntry,
 )
+from gptrpg.rules_core.resource_change import ResourceOp, apply_resource_op
 from gptrpg.rulebooks.dungeonworld_like import (
     DUNGEONWORLD_LIKE_ID,
     EXAMPLE_SINGLE_STAT_FOE,
@@ -123,6 +124,25 @@ def test_tag_list_accepts_empty_tags():
     목록이 정상값이라는 것이 RULE-15의 자원 축 쪽 대응이다."""
     entry = StatEntry(name="상태 이상", form="tag_list", tags=())
     assert entry.tags == ()
+
+
+def test_clamped_resource_change_result_still_passes_stat_entry_validation():
+    """`apply_resource_op`이 `dataclasses.replace`로 만든 결과가
+    `StatEntry.__post_init__`(형태 규약 검증)을 다시 통과한다(T-12-06,
+    12-02 Task 2) — `clock`처럼 위아래 양쪽이 다 잘리는 형태에서도 잘린
+    값이 예외 없이 유효한 `StatEntry`로 남는다."""
+    clock = StatEntry(name="위협 시계", form="clock", current=5, max=6)
+    over_max = apply_resource_op(
+        clock, ResourceOp(axis="위협 시계", operation="advance", amount=10)
+    )
+    assert over_max.current == 6
+    assert 0 <= over_max.current <= over_max.max  # __post_init__이 이미 확인했다
+
+    under_zero = apply_resource_op(
+        clock, ResourceOp(axis="위협 시계", operation="advance", amount=-10)
+    )
+    assert under_zero.current == 0
+    assert 0 <= under_zero.current <= under_zero.max
 
 
 def test_entity_with_one_stat_and_entity_with_ten_stats_use_same_class():
