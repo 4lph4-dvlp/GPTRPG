@@ -1411,3 +1411,42 @@ def test_validate_registered_rulebooks_rejects_when_every_rulebook_shares_the_sa
             rulebooks_module.validate_registered_rulebooks()
     finally:
         rulebooks_module.RULEBOOKS = original
+
+
+def test_validate_registered_rulebooks_rejects_a_rulebook_with_no_creation_steps():
+    """「아직 선언하지 않았다」가 조용히 통과하지 않는다(D-02 규율) —
+    `creation_steps`가 빈 룰북은 등록 자체를 멈춘다."""
+    import gptrpg.rulebooks as rulebooks_module
+
+    no_steps = Rulebook(
+        rulebook_id="no-steps", display_name="No Steps", resolution_method=TWO_D6,
+        grade_bands=(GradeBand(name="any", counts_as_failure=False, succeeded=True, costs=False),),
+        resource_axes=(), check_trigger_mode="no_dice",
+        party_size_range=PartySizeRange(1, 4),
+    )
+    original = rulebooks_module.RULEBOOKS
+    rulebooks_module.RULEBOOKS = {"no-steps": no_steps}
+    try:
+        with pytest.raises(InvalidCreationStep):
+            rulebooks_module.validate_registered_rulebooks()
+    finally:
+        rulebooks_module.RULEBOOKS = original
+
+
+def test_validate_registered_rulebooks_rejects_a_rulebook_with_no_party_size_range():
+    """`party_size_range`가 `None`인 룰북도 등록 자체를 멈춘다."""
+    import gptrpg.rulebooks as rulebooks_module
+
+    no_range = Rulebook(
+        rulebook_id="no-range", display_name="No Range", resolution_method=TWO_D6,
+        grade_bands=(GradeBand(name="any", counts_as_failure=False, succeeded=True, costs=False),),
+        resource_axes=(), check_trigger_mode="no_dice",
+        creation_steps=(CreationStepDecl(step_id="x", kind="free_text", label="x"),),
+    )
+    original = rulebooks_module.RULEBOOKS
+    rulebooks_module.RULEBOOKS = {"no-range": no_range}
+    try:
+        with pytest.raises(InvalidPartySizeRange):
+            rulebooks_module.validate_registered_rulebooks()
+    finally:
+        rulebooks_module.RULEBOOKS = original
