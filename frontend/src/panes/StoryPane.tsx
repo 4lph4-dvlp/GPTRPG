@@ -12,10 +12,34 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TurnCard } from "../components/TurnCard.tsx";
+import type { ClockAdvancedEvent } from "../api/types.ts";
 import { COPY } from "../labels.ts";
 import { isVisibleTurn, type Turn } from "../session/groupTurns.ts";
 
 const NEAR_BOTTOM_PX = 48;
+
+/**
+ * 위협 시계가 왜 돌았는지를 사건이 실어 보낸 `trigger` 그대로 옮긴다.
+ *
+ * 2026-08-18 플레이테스트 회귀 — 여기가 원래 실패 문구 하나로 박혀 있어서,
+ * 조건으로 돈 시계에도 「판정 실패가 쌓여」가 나왔다. 완전 성공을 한
+ * 플레이어에게 "네가 실패해서 나빠졌다"고 말하는 셈이라 이유를 안 보여주는
+ * 것보다 나빴다.
+ *
+ * `switch`에 기본 갈래를 두지 않는다 — `trigger`가 닫힌 세 값이므로, 넷째
+ * 값이 생기면 이 함수가 타입 검사에서 걸려야 한다(조용히 실패 문구로
+ * 떨어지는 것이 정확히 이 결함의 모양이었다).
+ */
+export function clockAdvanceReason(trigger: ClockAdvancedEvent["trigger"]): string {
+  switch (trigger) {
+    case "fail_counter":
+      return COPY.clockAdvancedByFailCounter;
+    case "condition":
+      return COPY.clockAdvancedByCondition;
+    case "ai_choice":
+      return COPY.clockAdvancedByAiChoice;
+  }
+}
 
 interface StoryPaneProps {
   turns: Turn[];
@@ -128,7 +152,7 @@ export function StoryPane({
                         {segmentCount}칸으로 넘어갔습니다
                       </div>
                       <div className="clock-banner__sub">
-                        판정 실패가 쌓여 시스템이 진행시켰어요
+                        {clockAdvanceReason(turn.clock.trigger)}
                       </div>
                     </div>
                   </div>

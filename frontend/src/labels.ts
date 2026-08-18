@@ -151,4 +151,15 @@ export const COPY = {
   resourceChangeDecline: "반영 안 함",
   resourceChangeForbidden: "이 캐릭터를 잡은 사람만 반영할 수 있어요",
   resourceChangeFailed: "자원 변화를 반영하지 못했어요. 다시 시도해 주세요",
+  /**
+   * 위협 시계가 왜 돌았는지(`ClockAdvancedEvent.trigger`) — 2026-08-18
+   * 플레이테스트 회귀. 이 문장이 원래 `StoryPane.tsx`에 실패 문구 하나로만
+   * 박혀 있어서, 조건으로 돈 시계에도 「판정 실패가 쌓여」가 나왔다. 완전
+   * 성공을 한 플레이어에게 "네가 실패해서 나빠졌다"고 말하는 셈이라
+   * 안 보여주는 것보다 나빴다. 뒷단은 처음부터 세 갈래를 다 보내고 있었고
+   * (`event_log/schema.py::ClockAdvanced.trigger`) 화면만 안 보고 있었다.
+   */
+  clockAdvancedByFailCounter: "판정 실패가 쌓여 시스템이 진행시켰어요",
+  clockAdvancedByCondition: "이야기가 다음 단계에 닿아 진행됐어요",
+  clockAdvancedByAiChoice: "진행자 판단으로 진행됐어요",
 } as const;
