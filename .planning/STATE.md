@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12
 current_phase_name: stats-resources-inventory
-status: executing
-stopped_at: Completed 12-06-PLAN.md (12-06)
-last_updated: "2026-08-17T14:38:55.114Z"
+status: verifying
+stopped_at: Completed 12-07-PLAN.md (12-07) — Phase 12 전체 완료
+last_updated: "2026-08-18T03:45:29.880Z"
 last_activity: 2026-08-17
 last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
 progress:
   total_phases: 12
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 29
-  completed_plans: 28
-  percent: 33
+  completed_plans: 29
+  percent: 42
 ---
 
 # Project State
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 12 (stats-resources-inventory) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인트 승인 + Task 2·3 커밋)
 
@@ -42,7 +42,7 @@ Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인�
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -119,6 +119,7 @@ Progress: [██████████] 97%
 | Phase 12 P05 | ~35min | 3 tasks | 20 files |
 | Phase 12 P04 | ~40min | 3 tasks | 9 files |
 | Phase 12 P06 | ~4h | 3 tasks | 18 files |
+| Phase 12 P07 | ~2h | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -260,6 +261,9 @@ Progress: [██████████] 97%
 - [Phase ?]: 12-06 Task2: RULE-10 재량 판정의 실제 AI 제안 생성은 파일 범위 밖(Task1의 0회 호출 계약과 충돌) — 서버는 자격 있는 축 이름만 알리고 축·동작·양 제안은 요청 쪽이 만들어 보내면 validate_outcome_list로 재검사(알려진 갭으로 문서화)
 - [Phase ?]: 12-06 Task3: 소지품 판단은 새 AI 역할 없이 action_classifier.Proposal.item_use로 기존 분류기 응답에 얹음 — named_slots 축 없는 룰북은 이 판단 자체가 프롬프트에 안 실림(D-09 적용 범위)
 - [Phase ?]: 12-06 Task3: declare()의 item_use 이중 대조 실패 시 held를 not_held로 낮춘다(안전한 실패 방향) — 소급 선언 축·동작은 룰북이 잠그고 양만 confirm-resource-change의 retro_declaration_amount로 확인 관문을 지남(D-16)
+- [Phase ?]: 12-07: CheckBreakdown(D-04)·ResourceChangeBadge+changeIntensity(RULE-07/D-19)로 검산·자원 변화가 화면에 보이게 함. StatusPane 도크스트링의 '읽기 전용, 한 번만 불러 둔다' 거짓 전제를 제거하고 폴링 재요청 계기를 만들어 RULE-06을 닫음(12-01의 backend 절반에 이어 화면 절반 완성)
+- [Phase ?]: 12-07 체크포인트 확인(4인 실제 브라우저): 여섯 항목 전부 PASS, 특히 D-18(AI가 네 명을 한 사람으로 뭉뚱그림, 세션1 붕괴 지점)이 재현 안 됨을 처음 실측 확인. 확인 중 발견된 결함 2건(캐릭터 미보유 축에 자원 변화 적용 44ed73f, 시계 진행 문구가 trigger 무관하게 항상 실패로 표시 1ad6dcd)을 그 자리에서 수정
+- [Phase ?]: 12-07: 서사가 자원 변화를 모르는 문제(NarrationFacts에 결과 카테고리 칸 없음)와 위협 시계 하나뿐이라 잘해도 나빠지는 쪽으로만 기록되는 문제, 둘 다 Phase 13.1(GM이 이야기를 이끈다)로 미룸 — RULE-06/RULE-07 문자 그대로의 기준은 충족했으나 '보이는데 뜻이 없으면 소용없다'는 더 깊은 문제로 별개 요구사항
 
 ### Pending Todos
 
@@ -316,8 +320,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-17T08:39:47.753Z
-Stopped at: Completed 12-06-PLAN.md (12-06)
+Last session: 2026-08-18T03:45:29.842Z
+Stopped at: Completed 12-07-PLAN.md (12-07) — Phase 12 전체 완료
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
