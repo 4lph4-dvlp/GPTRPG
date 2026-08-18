@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.1
 current_phase_name: character-creation
 status: executing
-stopped_at: Completed 12.1-01-PLAN.md
-last_updated: "2026-08-18T15:55:03.787Z"
+stopped_at: Completed 12.1-02-PLAN.md
+last_updated: "2026-08-18T16:44:41.325Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 12.1 execution started
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 35
-  completed_plans: 30
+  completed_plans: 31
   percent: 38
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.1 (character-creation) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-19 — Phase 12.1 execution started
@@ -42,7 +42,7 @@ Last activity: 2026-08-19 — Phase 12.1 execution started
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -121,6 +121,7 @@ Progress: [█████████░] 86%
 | Phase 12 P06 | ~4h | 3 tasks | 18 files |
 | Phase 12 P07 | ~2h | 3 tasks | 18 files |
 | Phase 12.1 P01 | not tracked (checkpoint-resumed session) | 3 tasks | 11 files |
+| Phase 12.1 P02 | not tracked precisely (single continuous session) | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -269,6 +270,10 @@ Progress: [█████████░] 86%
 - [Phase ?]: [Phase 12.1] 12.1-01: _prepare_occupy의 옛 세션 판별에 created_characters 조건을 더했다 — 판 9부터 만들기 사건은 있는데 점유가 없는 것이 정상 새 세션일 수 있다(CHAR-05 자동 점유)
 - [Phase ?]: [Phase 12.1] 12.1-01: PartySizeFixed.rulebook_min/max는 Rulebook.party_size_range가 아직 없어 1/None 자리표시자다 — 12.1-02가 실제 룰북 범위로 교체해야 한다
 - [Phase ?]: [Phase 12.1] 12.1-01: CHAR-01/04/05는 이 계획이 시작만 열었을 뿐(각각 12.1-02·03·05·04가 마저 닫아야 완결) REQUIREMENTS.md 체크는 그대로 Pending 두었다 — 여러 계획에 걸친 요구사항 조기 완료 표시를 피한다
+- [Phase ?]: [Phase 12.1] 12.1-02 Task 순서 충돌 해소: Task 2의 party_size_range None-검사를 계획대로 넣으면 Task 3까지 미채워진 OpenQuest/Cairn 때문에 등록 시점 필수 검사(계획 액션 ⑤)를 넣을 수 없다 — 등록 시점 필수 검사를 Task 3으로 미루고 던전월드류에만 최종값(3~5)을 Task 2에서 앞당겨 채워 기존 FixPartySize(count=1) 호출들을 count=3으로 옮겼다
+- [Phase ?]: [Phase 12.1] 12.1-02: PARTY_MEMBER_LIMIT 검사는 session_actor가 agents를 import할 수 없다는 층 규약(.importlinter contract:2) 때문에 액터가 아니라 web/routes_creation.py에 둔다 — 계획의 <behavior>와 <action> 절이 서로 다른 자리를 가리키던 자기모순을 아키텍처 규약 우선으로 해소
+- [Phase ?]: [Phase 12.1] 12.1-02: build_creation_stats는 max/depleted_effect_ref를 채우지 않는다 — ResourceAxisDecl에 그 두 칸을 선언할 자리가 아직 없어 축 이름으로 추측하면 축 이름 문자열을 코드가 해석하지 않는다는 규약을 어기게 된다. 알려진 한계로 문서화(기존 _prepare_create_character 손 조립과 동일 동작)
+- [Phase ?]: [Phase 12.1] 12.1-02: PLAN.md frontmatter가 requirements:[CHAR-01, CHAR-04]로 적었지만 REQUIREMENTS.md의 CHAR-04 원문(characters_data.py 대체까지 요구)은 이 계획이 안 건드린 characters_data.py 교체(12.1-05 몫, D-12)를 포함한다 — CHAR-01만 Complete로 남기고 CHAR-04는 되돌려 Pending 유지(여러 계획에 걸친 요구사항 조기 완료 표시 함정 회피, 12.1-01-SUMMARY.md가 이미 경고)
 
 ### Pending Todos
 
@@ -326,8 +331,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-18T15:55:03.745Z
-Stopped at: Completed 12.1-01-PLAN.md
+Last session: 2026-08-18T16:42:53.926Z
+Stopped at: Completed 12.1-02-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
