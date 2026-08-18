@@ -167,6 +167,128 @@ class ResourceAxisDecl:
             )
 
 
+CreationStepKind = Literal[
+    "pick_one", "pick_many", "allocate_points", "place_fixed_values", "roll_to_fill",
+    "free_text", "derive",
+]
+"""캐릭터 만들기 항목 하나가 값을 채우는 **방식** 이름 — `TWO_D6`/`D100_ROLL_UNDER`/
+`D20_ROLL_UNDER`/`StatUsage`와 같은 성격이다: 플랫폼이 제공하는 조작 종류의
+이름이지 룰북 어휘가 아니다(D-01, D-03/D-04, 12.1-CONTEXT.md).
+
+이 일곱 값은 D22 원문이 적은 「캐릭터 값 결정 방식 일곱 가지」의 이름을 그대로
+가져온 것이고, 12.1-RESEARCH.md의 조사 과제가 이 목록이 실제 출간작을 덮는지
+검증한다 — 일곱 가지는 출발점일 뿐 검증 대상이다(D-04).
+
+**루프·조건부 진입(라이프패스형, RQ-1 유형 8)은 이번 범위 밖이다** — 「하위
+절차를 반복하고 매 반복이 이전 결과에 자격이 좌우되며 실패 시 조기 종료」라는
+구조는 평평한 순서 목록(`Rulebook.creation_steps`)으로 표현되지 않는다.
+등록된 세 룰북 중 이 구조가 필요한 것이 없으므로 이번에 만들지 않는다."""
+
+
+@dataclass(frozen=True)
+class CreationStepDecl:
+    """룰북이 선언하는 캐릭터 만들기 항목 하나 — 「무엇이 있어야 캐릭터가
+    완성인가」의 항목 목록 안의 한 줄이다(D-03).
+
+    `step_id`(룰북이 짓는 식별자, 형태는 플랫폼이 강제)와 `kind`(플랫폼
+    어휘)가 `ResourceAxisDecl`의 「이름은 룰북 것, 형태는 플랫폼 것」 분업과
+    같은 자리를 차지한다. `label`은 룰북 어휘 — 사람이 읽는 항목 이름이다.
+
+    **이 계획(12.1-01)은 세 kind(`free_text`·`place_fixed_values`·
+    `pick_one`)만 `__post_init__`에서 완전히 검증한다.** 나머지 네 kind
+    (`pick_many`·`allocate_points`·`roll_to_fill`·`derive`)는 12.1-02가
+    채운다 — 그때까지 이 네 kind로 선언해도 칸 조합 검증이 돌지 않는다.
+
+    **`derive`가 수식 문자열을 쓰지 않는 이유:** 12-CONTEXT가 이미 확정한
+    판단(해석기가 새로 필요하고 사람이 검산하기 어려워진다)을 D-04가
+    물려받는다 — `derive_base_axis`(기준 축) · `derive_multiplier`(배수) ·
+    `derive_offset`(더할 값) 세 칸으로 적는다. `ResourceChangeDecl`의
+    「축 · 동작 · 양」과 같은 형식이다.
+    """
+
+    step_id: str
+    kind: CreationStepKind
+    label: str
+    required: bool = True
+    provides_display_name: bool = False
+    """이 항목의 값이 캐릭터 표시 이름이 된다 — 플랫폼 어휘. 룰북 하나 안에서
+    이 값이 `True`인 항목은 최대 하나여야 한다(`Rulebook.__post_init__`이
+    검사한다)."""
+    axis_names: tuple[str, ...] = ()
+    """이 단계가 채우는 자원 축 이름들(룰북 어휘) — `place_fixed_values`·
+    `allocate_points`·`roll_to_fill` 류가 쓴다."""
+    options: tuple[str, ...] | None = None
+    pick_count: int | None = None
+    fixed_values: tuple[int, ...] | None = None
+    point_budget: int | None = None
+    per_target_max: int | None = None
+    dice_expr: str | None = None
+    derive_base_axis: str | None = None
+    derive_multiplier: int | None = None
+    derive_offset: int | None = None
+    depends_on: tuple[str, ...] = ()
+    default_from: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.step_id.strip():
+            raise InvalidCreationStep("step_id가 비었거나 공백뿐이다", step_id=self.step_id)
+        if not self.label.strip():
+            raise InvalidCreationStep("label이 비었거나 공백뿐이다", step_id=self.step_id)
+        if self.kind == "free_text":
+            self._reject_unused(
+                ("axis_names", "options", "pick_count", "fixed_values", "point_budget",
+                 "per_target_max", "dice_expr", "derive_base_axis", "derive_multiplier",
+                 "derive_offset"),
+            )
+        elif self.kind == "place_fixed_values":
+            if not self.axis_names:
+                raise InvalidCreationStep(
+                    "place_fixed_values는 axis_names가 필수다", step_id=self.step_id
+                )
+            if not self.fixed_values:
+                raise InvalidCreationStep(
+                    "place_fixed_values는 fixed_values가 필수다", step_id=self.step_id
+                )
+            self._reject_unused(
+                ("options", "pick_count", "point_budget", "per_target_max", "dice_expr",
+                 "derive_base_axis", "derive_multiplier", "derive_offset"),
+            )
+        elif self.kind == "pick_one":
+            if not self.options:
+                raise InvalidCreationStep("pick_one은 options가 필수다", step_id=self.step_id)
+            self._reject_unused(
+                ("axis_names", "pick_count", "fixed_values", "point_budget", "per_target_max",
+                 "dice_expr", "derive_base_axis", "derive_multiplier", "derive_offset"),
+            )
+        # pick_many/allocate_points/roll_to_fill/derive — 12.1-02가 이 자리에
+        # 칸 조합 검증을 채운다. 지금은 위 세 kind 밖은 검증하지 않는다.
+
+    def _reject_unused(self, field_names: tuple[str, ...]) -> None:
+        for name in field_names:
+            value = getattr(self, name)
+            empty = value is None or value == () if name != "pick_count" else value is None
+            if not empty:
+                raise InvalidCreationStep(
+                    f"kind={self.kind!r}는 {name}을 채울 수 없다", step_id=self.step_id
+                )
+
+
+class InvalidCreationStep(Exception):
+    """캐릭터 만들기 항목 선언 하나(`CreationStepDecl`) 또는 룰북의 항목
+    목록(`Rulebook.creation_steps`)이 유효하지 않을 때 던진다.
+
+    조용히 통과하면 룰북이 선언한 절차와 실제로 실행되는 절차가 어긋난 채
+    등록되고, 그 어긋남은 만들기 화면·확정 경로에 닿기 전까지 어디서도
+    드러나지 않는다 — `InvalidResourceAxis`가 세운 "조용히 넘기지 않는다"
+    규율을 그대로 따른다.
+    """
+
+    def __init__(self, reason: str, step_id: str | None = None) -> None:
+        super().__init__(f"만들기 항목 선언이 유효하지 않다: {reason} (step_id={step_id!r})")
+        self.reason = reason
+        self.step_id = step_id
+
+
 CheckTriggerMode = Literal["declared_list", "no_dice", "gm_discretion"]
 """판정 트리거 목록이 비어 있는 경우가 두 갈래로 갈린다는 것을 룰북이 명시적으로
 골라야 한다(D-12) — 세 값은 **플랫폼 능력의 이름이지 룰북 어휘가 아니다**(위
@@ -322,6 +444,13 @@ class Rulebook:
     retro_declaration: RetroDeclarationDecl = RetroDeclarationDecl(allowed=False)
     """소급 선언(D-16) 허용 여부. 기본값(`allowed=False`)이 「이 룰북에는
     그 개념이 없다」다."""
+    creation_steps: tuple[CreationStepDecl, ...] = ()
+    """캐릭터 만들기 항목 목록(D-03) — 「무엇이 있어야 캐릭터가 완성인가」의
+    순서 있는 목록. 기본값 빈 튜플의 뜻은 **「아직 선언하지 않았다」**이고
+    「이 룰북에는 그 개념이 없다」가 아니다(`outcome_list`/`retro_declaration`이
+    쓰는 "빈 값 = 개념 없음" 관례와 다르다 — 모든 룰북은 캐릭터 만들기 절차를
+    가지므로 빈 목록이 정상값일 수 없다). 등록 시점 필수 검사(빈 목록이면
+    등록을 거부)는 12.1-02가 `validate_registered_rulebooks`에 붙인다."""
 
     def __post_init__(self) -> None:
         names = [axis.name for axis in self.resource_axes]
@@ -335,6 +464,18 @@ class Rulebook:
             raise InvalidDifficultyLevels(
                 "같은 이름의 난이도가 룰북 안에 두 번 이상 선언됐다 — 이름이 겹치면"
                 " 어느 선언이 이기는지 정해지지 않는다"
+            )
+        step_ids = [step.step_id for step in self.creation_steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise InvalidCreationStep(
+                "같은 step_id의 만들기 항목이 룰북 안에 두 번 이상 선언됐다 — 이름이"
+                " 겹치면 어느 선언이 이기는지 정해지지 않는다"
+            )
+        display_name_steps = [step for step in self.creation_steps if step.provides_display_name]
+        if len(display_name_steps) > 1:
+            raise InvalidCreationStep(
+                "provides_display_name=True인 만들기 항목이 둘 이상이다 — 캐릭터"
+                " 표시 이름의 출처는 하나여야 한다"
             )
 
 

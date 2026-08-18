@@ -8,6 +8,7 @@
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 
+from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.grading import Grade
 from gptrpg.rules_core.resource_change import ResourceOp
 
@@ -26,6 +27,25 @@ class ConfirmedDeclareRecord:
     resolve_seq: int | None
     move: str
     stat: str
+
+
+@dataclass(frozen=True)
+class CreationStepFold:
+    """만들기 항목 하나(`(character_id, step_id)`)가 확정한 값 — 접힌 결과
+    (판 9+, Phase 12.1, D-03/D-07). `ConfirmedDeclareRecord`와 같은 자리·
+    같은 형식이다.
+
+    같은 키로 두 번째 `creation_step_completed` 사건이 오면 이 레코드는
+    통째로 새 값으로 **덮인다** — 앞선 사건은 기록에서 지워지지 않지만
+    (append-only), 접은 결과에서는 나중 것만 남는다(D-07 되돌리기).
+    """
+
+    seq: int
+    kind: str
+    text_value: str | None
+    picked: tuple[str, ...] | None
+    axis_values: tuple[tuple[str, int], ...] | None
+    rolls: tuple[int, ...] | None
 
 
 @dataclass(frozen=True)
@@ -120,6 +140,30 @@ class GameState:
     `SessionActor._prepare_record_resource_change`가 이 표로 재시도를
     단락시킨다 — 같은 원인 사건으로 두 번 제출해도 자원이 두 번 깎이지
     않는다."""
+    party_size_fixed: int | None = None
+    """이 세션의 확정 인원(판 9+, D-01, Phase 12.1). `party_size_fixed`
+    사건에서만 채워진다. `None`은 「아직 인원이 확정되지 않았다」다 —
+    사건에서 다시 접은 값이라 서버 재시작에도 살아남는다."""
+    creation_step_values: dict[tuple[str, str], CreationStepFold] = field(
+        default_factory=dict
+    )
+    """(character_id, step_id) -> 그 항목이 확정한 값(판 9+, D-03/D-07).
+    `creation_step_completed` 사건에서만 채워진다. 같은 키로 다시 오면
+    나중 값으로 덮인다 — 앞선 사건은 기록에 남지만 접은 결과는 나중 것만
+    반영한다. 액터 메모리가 아니라 사건에서 다시 접은 값이라 만들기 도중
+    서버가 재시작해도 그대로 복원된다(D-11 부분 재진행의 전제)."""
+    created_characters: dict[str, Entity] = field(default_factory=dict)
+    """character_id -> 완성된 `Entity`(판 9+, D-03/CHAR-04). `character_created`
+    사건에서만 채워진다 — 만들기 산출물이 지금 `Entity`/`StatEntry` 그릇에
+    그대로 들어간다는 CHAR-04의 무변경이 이 칸에서 성립한다.
+    `_prepare_occupy`의 옛 세션 판별(판 9부터는 이 칸도 함께 본다)이 이
+    칸에 의존한다."""
+    party_roster: tuple[str, ...] | None = None
+    """잠긴 파티 명단(판 9+, D-08). `party_roster_locked` 사건에서만
+    채워진다. **`None`과 빈 튜플의 뜻이 다르다** — `None`은 「아직 안
+    잠겼다」이고, 빈 튜플은 나오지 않는다(잠금 명령이 빈 명단을 거절한다,
+    `LockPartyRoster`). 한 번 채워지면 다시 `None`으로 돌아가지 않는다 —
+    푸는 사건이 없다(D-08)."""
 
 
 def initial_state(session_id: str) -> GameState:
@@ -169,8 +213,8 @@ def _legacy_v1_counts_as_failure(grade: str) -> bool:
 def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameState:
     """사건 하나를 이전 상태에 접어 새 상태를 돌려준다.
 
-    열 종류를 전부 다룬다(판 7, `action_classified` 추가). 모르는 종류가
-    오면 UnknownEventType을 던진다 — 조용히 넘어가지 않는다.
+    열여섯 종류를 전부 다룬다(판 9, 캐릭터 만들기 다섯 종류 추가). 모르는
+    종류가 오면 UnknownEventType을 던진다 — 조용히 넘어가지 않는다.
     """
     seq = payload["seq"]
     if event_type == "action_declared":
@@ -343,6 +387,76 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
             character_resource_ops=character_resource_ops,
             resource_change_by_cause=resource_change_by_cause,
         )
+    if event_type == "party_size_fixed":
+        # 인원 확정 기록(판 9, Phase 12.1 D-01)은 `party_size_fixed` 한
+        # 칸만 채운다. **그래도 분기가 있어야 한다:** 이 분기가 없으면 이
+        # 종류가 하나라도 있는 세션이 폴링마다 UnknownEventType을 맞고
+        # 영구히 안 열린다(08-CONTEXT.md D-06, 이미 여러 번 난 사고 —
+        # `resource_changed`에 이어 이번이 다섯 번째 사례).
+        return replace(state, last_seq=seq, party_size_fixed=payload["player_character_count"])
+    if event_type == "creation_step_completed":
+        # 만들기 항목 값 확정(판 9, D-03/D-07)은 (character_id, step_id)
+        # 키로 **덮어쓴다** — 앞선 사건은 기록에서 지워지지 않고, 접은
+        # 결과에서만 나중 것이 이긴다(D-07).
+        key = (payload["character_id"], payload["step_id"])
+        creation_step_values = dict(state.creation_step_values)
+        axis_values_payload = payload.get("axis_values")
+        picked_payload = payload.get("picked")
+        rolls_payload = payload.get("rolls")
+        creation_step_values[key] = CreationStepFold(
+            seq=seq,
+            kind=payload["kind"],
+            text_value=payload.get("text_value"),
+            picked=tuple(picked_payload) if picked_payload is not None else None,
+            axis_values=(
+                tuple((v["axis_name"], v["value"]) for v in axis_values_payload)
+                if axis_values_payload is not None
+                else None
+            ),
+            rolls=tuple(rolls_payload) if rolls_payload is not None else None,
+        )
+        return replace(state, last_seq=seq, creation_step_values=creation_step_values)
+    if event_type == "creation_interjection":
+        # 끼어든 말(판 9, D-09)은 어느 캐릭터의 구조화된 데이터도 바꾸지
+        # 않는다 — `scene_illustrated`/`safety_flagged`와 같은 최소 모양
+        # (last_seq만 갱신). **그래도 분기가 있어야 한다** — 없으면 이
+        # 종류가 하나라도 있는 세션이 폴링마다 UnknownEventType을 맞고
+        # 영구히 안 열린다.
+        return replace(state, last_seq=seq)
+    if event_type == "character_created":
+        # 캐릭터 완성(판 9, D-03/CHAR-04) — 페이로드의 stats를
+        # StatEntry(...)로 되살려 Entity(...)를 만든다. StatEntry의
+        # __post_init__이 다시 돌아 형태 규약(D-13)이 접는 시점에도
+        # 강제된다.
+        stats = tuple(
+            StatEntry(
+                name=entry["name"],
+                form=entry["form"],
+                current=entry.get("current"),
+                max=entry.get("max"),
+                depleted_effect_ref=entry.get("depleted_effect_ref"),
+                slot_values=(
+                    tuple(entry["slot_values"]) if entry.get("slot_values") is not None else None
+                ),
+                tags=tuple(entry["tags"]) if entry.get("tags") is not None else None,
+                none_kind=entry.get("none_kind"),
+            )
+            for entry in payload["stats"]
+        )
+        entity = Entity(
+            entity_id=payload["character_id"],
+            display_name=payload["display_name"],
+            rulebook_id=payload["rulebook_id"],
+            stats=stats,
+        )
+        created_characters = dict(state.created_characters)
+        created_characters[payload["character_id"]] = entity
+        return replace(state, last_seq=seq, created_characters=created_characters)
+    if event_type == "party_roster_locked":
+        # 명단 잠금(판 9, D-08) — party_roster가 None에서 튜플로 바뀐다.
+        # 이 이후로는 이 칸이 다시 None으로 돌아가지 않는다(푸는 사건이
+        # 없다).
+        return replace(state, last_seq=seq, party_roster=tuple(payload["character_ids"]))
     raise UnknownEventType(event_type)
 
 

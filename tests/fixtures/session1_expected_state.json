@@ -276,6 +276,8 @@
       "stat": "CON"
     }
   },
+  "created_characters": {},
+  "creation_step_values": {},
   "declare_no_check": {},
   "declare_owners": {},
   "fails_since_clock": 0,
@@ -284,6 +286,8 @@
   "last_seq": 894,
   "narration_count": 682,
   "occupied_by": {},
+  "party_roster": null,
+  "party_size_fixed": null,
   "prompt_tokens": 87701,
   "resource_change_by_cause": {},
   "session_id": "session1",

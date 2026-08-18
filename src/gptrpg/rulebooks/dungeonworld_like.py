@@ -16,6 +16,7 @@ from gptrpg.rules_core.resource_change import ResourceChangeDecl
 from gptrpg.rules_core.rulebook import (
     NO_CHANGE_CATEGORY_ID,
     TWO_D6,
+    CreationStepDecl,
     GradeBand,
     OutcomeCategory,
     OutcomeList,
@@ -118,6 +119,26 @@ DUNGEONWORLD_OUTCOME_LIST = OutcomeList(
     max_picks=1,
 )
 
+DUNGEONWORLD_CREATION_STEPS: tuple[CreationStepDecl, ...] = (
+    # 트레이서용 최소 선언 두 항목만(12.1-01) — 나머지(왜 여기 있는가·체력
+    # 자동 계산·방어구 등)는 12.1-02가 채운다.
+    CreationStepDecl(
+        step_id="name", kind="free_text", label="이름", required=True,
+        provides_display_name=True,
+    ),
+    CreationStepDecl(
+        step_id="ability_array",
+        kind="place_fixed_values",
+        label="능력치 배치",
+        required=True,
+        axis_names=("STR", "DEX", "CON", "INT", "WIS", "CHA"),
+        # 이 여섯 숫자는 룰북 콘텐츠이고 지금 web/characters_data.py:32의
+        # NEW_CHARACTER_STAT_ARRAY와 같은 값이다 — 같은 값이 두 곳에 있는
+        # 것은 12.1-05가 그 정적 상수를 지울 때 해소된다.
+        fixed_values=(2, 1, 1, 0, 0, -1),
+    ),
+)
+
 DUNGEONWORLD_LIKE = Rulebook(
     rulebook_id=DUNGEONWORLD_LIKE_ID,
     display_name="Dungeonworld-like",
@@ -126,6 +147,7 @@ DUNGEONWORLD_LIKE = Rulebook(
     resource_axes=DUNGEONWORLD_RESOURCE_AXES,
     check_trigger_mode="declared_list",
     outcome_list=DUNGEONWORLD_OUTCOME_LIST,
+    creation_steps=DUNGEONWORLD_CREATION_STEPS,
 )
 
 # 자체 작성 예시 — 어떤 룰북 원문에서도 오지 않았다(D-18이 배제한 자체 창작

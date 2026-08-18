@@ -41,6 +41,7 @@ from gptrpg.web.cookie_auth import COOKIE_SECRET_FILENAME, load_or_create_secret
 from gptrpg.web.media import MEDIA_URL_PREFIX
 from gptrpg.web.routes_actions import router as actions_router
 from gptrpg.web.routes_characters import router as characters_router
+from gptrpg.web.routes_creation import router as creation_router
 from gptrpg.web.routes_events import router as events_router
 
 DEFAULT_DB_ENV = "GPTRPG_DB"
@@ -133,6 +134,11 @@ def create_app(
     )
     app.include_router(
         characters_router,
+        prefix="/api",
+        dependencies=[Depends(validate_session_id)],
+    )
+    app.include_router(
+        creation_router,
         prefix="/api",
         dependencies=[Depends(validate_session_id)],
     )

@@ -16,8 +16,34 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
-EVENT_SCHEMA_VERSION = 8
-"""판 7 -> 판 8: 능력치가 판정에 실리고 판정에 딸린 자원 변화가 기록에
+EVENT_SCHEMA_VERSION = 9
+"""판 8 -> 판 9: 캐릭터 만들기(Phase 12.1, D-03~D-09)가 사건 형식에 닿았다.
+새 사건 종류가 다섯 늘었다 — `PartySizeFixed`(방을 여는 사람이 인원을
+확정했다) · `CreationStepCompleted`(만들기 항목 하나의 값이 확정됐다,
+같은 (character_id, step_id)가 다시 오면 나중 것이 이기고 `superseded_seq`가
+앞선 순번을 가리킨다) · `CreationInterjection`(자기소개를 듣던 다른 사람이
+끼어들었다 — 어느 캐릭터의 구조화된 데이터도 안 바꾼다, D-09) ·
+`CharacterCreated`(캐릭터 하나가 완성되어 `Entity`/`StatEntry` 그릇으로
+기록에 남았다) · `PartyRosterLocked`(파티 명단이 잠겼다 — 푸는 사건은
+없다, D-08. `CharacterOccupied`가 「놓기 사건은 없다」를 적은 것과 같은
+형식).
+
+`caused_by_seq`는 다섯 다 대체로 `None`이다(각각 그 자체가 최초 원인
+사건이다) — 유일한 예외는 없다, 이 다섯은 서로를 `caused_by_seq`로
+가리키지 않는다(순서는 사건 `seq` 자체가 이미 보장한다).
+
+**`rules_core/reducer.py`의 다섯 신설 분기(`party_size_fixed`·
+`creation_step_completed`·`creation_interjection`·`character_created`·
+`party_roster_locked`)는 이 판 올리기와 반드시 같은 커밋이다**
+(08-CONTEXT.md D-06, 이미 여러 번 난 사고 — `scene_illustrated`·
+`character_occupied`·`action_classified`·`resource_changed`에 이어 이번이
+다섯 번째 사례).
+
+기존 열한 종류의 칸은 하나도 바뀌지 않았으므로 판 1~8로 쓰인 기록은 글자
+그대로 다시 읽힌다(늘어난 것이 「새 종류」일 뿐이라 옛 기록에는 그 종류의
+사건이 없다).
+
+판 7 -> 판 8: 능력치가 판정에 실리고 판정에 딸린 자원 변화가 기록에
 남는 첫 줄기(Phase 12, D-05/D-65)가 사건 형식에 닿았다. 새 사건 종류가
 하나 늘었다 — `ResourceChanged`(캐릭터 하나의 자원 축 여러 개가 「축 ·
 동작 · 양」 세 칸짜리 항목 목록으로 한 번에 바뀌었다는 사실). `caused_by_seq`가
@@ -410,6 +436,131 @@ class ResourceChanged(EventEnvelope):
     source: Literal["outcome_list", "discretionary_ruling", "retro_declaration"]
 
 
+class CreationAxisValueRecord(BaseModel):
+    """만들기 항목 하나가 확정한 자원 축 값 하나 — 축 이름과 그 값(판 9,
+    Phase 12.1).
+
+    `ModifierRecord`/`ResourceChangeRecord`와 같은 `extra="forbid",
+    frozen=True` 설정이다."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    axis_name: str
+    value: int
+
+
+class CreationStatEntryRecord(BaseModel):
+    """`rules_core.entities.StatEntry`의 여덟 칸을 그대로 옮긴 것(판 9,
+    Phase 12.1) — `event_log`는 `rules_core`를 import할 수 없으므로
+    (모듈 도크스트링 3~5행) 여기서 다시 선언한다.
+
+    두 곳이 갈리면 `tests/test_entities.py`의 `STAT_ENTRY_FIELD_NAMES`
+    고정 시험과 `tests/test_event_schema_migration.py`의 이 모델 필드
+    개수 시험이 동시에 깨진다."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    form: str
+    current: int | None = None
+    max: int | None = None
+    depleted_effect_ref: str | None = None
+    slot_values: list[str | None] | None = None
+    tags: list[str] | None = None
+    none_kind: str | None = None
+
+
+class PartySizeFixed(EventEnvelope):
+    """방을 여는 사람이 이 세션의 인원을 확정했다(D-01, 판 9).
+
+    `rulebook_min`/`rulebook_max`는 이 사건이 기록될 때 룰북이 알린 권장
+    범위다 — 실제 범위 선언(`Rulebook.party_size_range`)과 검증
+    (`validate_party_size`)은 12.1-02가 붙인다. 이 계획(12.1-01)은 그
+    선언이 아직 없으므로 `rulebook_min=1`·`rulebook_max=None`(하한만 있고
+    범위 검증은 안 한다)으로 적는다 — 「검증하지 않았다」와 「범위가
+    1~무제한이다」가 사건 기록에서는 구분되지 않으니, 12.1-02가 실제
+    선언을 붙인 뒤에는 그 선언에서 읽은 값을 적어야 한다.
+    """
+
+    event_type: Literal["party_size_fixed"]
+    player_character_count: int
+    rulebook_id: str
+    rulebook_min: int
+    rulebook_max: int | None = None
+
+
+class CreationStepCompleted(EventEnvelope):
+    """만들기 항목 하나(`step_id`)의 값이 캐릭터 하나(`character_id`)에
+    대해 확정됐다(D-03, 판 9).
+
+    같은 `(character_id, step_id)`로 다시 오면 나중 것이 이긴다(D-07) —
+    앞선 사건은 기록에서 지워지지 않고, `superseded_seq`가 그 앞선 사건의
+    순번을 가리킨다(`None`이면 이 (character_id, step_id)의 첫 확정이다).
+    `kind`가 `CreationStepDecl.kind`를 그대로 옮긴다 — 접는 쪽
+    (`rules_core.reducer`)이 룰북을 다시 찾지 않고도 값의 모양을 안다.
+    """
+
+    event_type: Literal["creation_step_completed"]
+    character_id: str
+    browser_id: str
+    step_id: str
+    kind: str
+    text_value: str | None = None
+    picked: tuple[str, ...] | None = None
+    axis_values: tuple[CreationAxisValueRecord, ...] | None = None
+    rolls: tuple[int, ...] | None = None
+    superseded_seq: int | None = None
+
+
+class CreationInterjection(EventEnvelope):
+    """자기소개 자리에서 다른 사람의 차례에 끼어든 말 하나(D-09, 판 9).
+
+    **어느 캐릭터의 구조화된 데이터도 바꾸지 않는다** — CHAR-04가 관계
+    칸을 금지하고 D-07이 지난 차례를 잠근다. 화자(`speaker_character_id`)와
+    언급 대상(`mentioned_character_ids`)을 같이 남기는 것은 Phase 14
+    (관계 장부)가 사건 스키마를 다시 손대지 않고 이 사건들을 색인할 수
+    있게 하기 위해서다.
+    """
+
+    event_type: Literal["creation_interjection"]
+    speaker_character_id: str
+    browser_id: str
+    during_character_id: str
+    mentioned_character_ids: tuple[str, ...] = ()
+    text: str
+
+
+class CharacterCreated(EventEnvelope):
+    """캐릭터 하나가 완성됐다(D-03/CHAR-04, 판 9).
+
+    `stats`가 완성된 `Entity`의 `StatEntry` 여덟-칸 목록을 그대로 싣는다
+    — CHAR-04가 요구하는 「만들기 산출물이 지금 그릇에 그대로 들어간다」가
+    사건 기록에서도 성립한다. `one_line_intro`는 GM이 쓴 산문이고 숫자에
+    관여하지 않는다(D-10, CHAR-03의 재료).
+    """
+
+    event_type: Literal["character_created"]
+    character_id: str
+    browser_id: str
+    display_name: str
+    rulebook_id: str
+    one_line_intro: str
+    stats: tuple[CreationStatEntryRecord, ...] = ()
+
+
+class PartyRosterLocked(EventEnvelope):
+    """파티 명단이 잠겼다(D-08, 판 9).
+
+    놓기(추가·제외) 사건은 없다 — 한 번 잠그면 중간에 바꿀 수 없다는
+    결정이 사건 종류 목록에도 그대로 반영된다. `CharacterOccupied`가
+    「놓기 사건은 없다(D-07)」를 적은 것과 같은 형식이다.
+    """
+
+    event_type: Literal["party_roster_locked"]
+    character_ids: tuple[str, ...]
+    player_character_count: int
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -423,6 +574,11 @@ GameEvent = Annotated[
         SafetyFlagged,
         ActionClassified,
         ResourceChanged,
+        PartySizeFixed,
+        CreationStepCompleted,
+        CreationInterjection,
+        CharacterCreated,
+        PartyRosterLocked,
     ],
     Field(discriminator="event_type"),
 ]
@@ -442,10 +598,15 @@ _KNOWN_EVENT_TYPES = frozenset(
         "safety_flagged",
         "action_classified",
         "resource_changed",
+        "party_size_fixed",
+        "creation_step_completed",
+        "creation_interjection",
+        "character_created",
+        "party_roster_locked",
     }
 )
-"""`GameEvent` 판별 유니온이 아는 열한 사건 종류 — `parse_event`가 이 목록
-밖의 `event_type`을 `CorruptEventRecord`로 분류하는 데 쓴다."""
+"""`GameEvent` 판별 유니온이 아는 열여섯 사건 종류 — `parse_event`가 이
+목록 밖의 `event_type`을 `CorruptEventRecord`로 분류하는 데 쓴다."""
 
 
 class CorruptEventRecord(Exception):
@@ -454,7 +615,7 @@ class CorruptEventRecord(Exception):
 
     **정확히 이 셋만 잡는다** — ⓐ `schema_version` 칸 자체가 없다 ⓑ
     `schema_version`이 정수가 아니다 ⓒ `event_type`이 `_KNOWN_EVENT_TYPES`
-    열한 종류 밖이다. 「값이 작은 옛 판」(`schema_version`이 작은 정수)은
+    열여섯 종류 밖이다. 「값이 작은 옛 판」(`schema_version`이 작은 정수)은
     여기 포함되지 않는다 — `rules_core/reducer.py`의
     `if schema_version >= N` 분기가 이미 정상 처리하는 별개의 경로다. 이
     셋 밖의 다른 pydantic 검증 실패(예: 알려진 사건 종류인데 그 종류
@@ -478,7 +639,7 @@ def parse_event(raw: str) -> GameEvent:
     """JSON 문자열을 사건 객체로 되돌린다. 순수 JSON 파서만 쓴다 — pickle/eval 없음.
 
     형식 표시 칸이 아예 없거나(ⓐ) 정수가 아니거나(ⓑ), 사건 종류가 알려진
-    열한 종류 밖이면(ⓒ) pydantic의 일반 `ValidationError`가 그대로 새어
+    열여섯 종류 밖이면(ⓒ) pydantic의 일반 `ValidationError`가 그대로 새어
     나가지 않고 `CorruptEventRecord`로 멈춘다(QUAL-02) — 이 저장소의
     예외 관례(사유·식별자를 속성으로, 자유 문자열은 문구에 안 싣는다)를
     따른다. **「칸은 있는데 값이 옛것」은 구멍이 아니다** — `schema_version`이

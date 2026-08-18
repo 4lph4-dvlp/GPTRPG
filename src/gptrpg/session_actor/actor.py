@@ -20,11 +20,15 @@ from gptrpg.event_log.schema import (
     ActionConfirmed,
     ActionDeclared,
     AiInvoked,
+    CharacterCreated,
     CharacterOccupied,
     CheckResolved,
     ClockAdvanced,
+    CreationStepCompleted,
     ModifierRecord,
     NarrationAppended,
+    PartyRosterLocked,
+    PartySizeFixed,
     ResourceChanged,
     SafetyFlagged,
     SceneIllustrated,
@@ -32,7 +36,7 @@ from gptrpg.event_log.schema import (
 )
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.dice import Roller
-from gptrpg.rules_core.entities import StatEntry
+from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.grading import DEFAULT_TARGET
 from gptrpg.rules_core.reducer import ConfirmedDeclareRecord, GameState, apply_event
 from gptrpg.rules_core.resolution import (
@@ -54,6 +58,7 @@ from gptrpg.rules_core.rulebook import (
     UnknownGradeName,
     require_band,
     require_difficulty,
+    validate_entity_axes,
 )
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
@@ -109,6 +114,54 @@ class OccupyCharacter:
 
     character_id: str
     browser_id: str
+
+
+@dataclass(frozen=True)
+class FixPartySize:
+    """방을 여는 사람이 이 세션의 인원을 확정하는 명령(D-01, Phase 12.1).
+
+    재확정은 없다 — 이미 확정된 세션에서 다시 부르면 `CommandRejected`다.
+    룰북 범위 대조(시나리오 범위 밖 거절, D-02)는 12.1-02가 붙인다."""
+
+    player_character_count: int
+    rulebook_id: str
+
+
+@dataclass(frozen=True)
+class CompleteCreationStep:
+    """만들기 항목 하나의 값을 확정하는 명령(D-03, Phase 12.1).
+
+    `axis_values`는 `place_fixed_values` 류가 쓰는 (축 이름, 값) 짝의
+    튜플이다. 같은 `(character_id, step_id)`로 다시 제출하면 이전 값이
+    `superseded_seq`로 남고 나중 값이 이긴다(D-07)."""
+
+    character_id: str
+    browser_id: str
+    step_id: str
+    rulebook_id: str
+    text_value: str | None = None
+    picked: tuple[str, ...] | None = None
+    axis_values: tuple[tuple[str, int], ...] | None = None
+
+
+@dataclass(frozen=True)
+class CreateCharacter:
+    """확정된 만들기 항목 값들을 `Entity`/`StatEntry`로 조립해 캐릭터
+    하나를 완성하는 명령(D-03/CHAR-04, Phase 12.1). `one_line_intro`는
+    GM이 쓴 산문이고 숫자에 관여하지 않는다(CHAR-03)."""
+
+    character_id: str
+    browser_id: str
+    rulebook_id: str
+    one_line_intro: str
+
+
+@dataclass(frozen=True)
+class LockPartyRoster:
+    """파티 명단을 잠그는 명령(D-08, Phase 12.1) — 잠근 뒤에는 되돌릴 수
+    없다(푸는 명령이 없다)."""
+
+    character_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -290,6 +343,10 @@ Command = (
     | RecordActionClassification
     | VerifyProceedEligibility
     | RecordResourceChange
+    | FixPartySize
+    | CompleteCreationStep
+    | CreateCharacter
+    | LockPartyRoster
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
@@ -314,6 +371,10 @@ _EVENT_CLASSES: dict[str, type] = {
     "safety_flagged": SafetyFlagged,
     "action_classified": ActionClassified,
     "resource_changed": ResourceChanged,
+    "party_size_fixed": PartySizeFixed,
+    "creation_step_completed": CreationStepCompleted,
+    "character_created": CharacterCreated,
+    "party_roster_locked": PartyRosterLocked,
 }
 
 
@@ -384,6 +445,12 @@ class AlreadyChanged(CommandRejected):
     def __init__(self, resource_seq: int) -> None:
         super().__init__("이미 기록된 자원 변화다")
         self.resource_seq = resource_seq
+
+
+class RosterAlreadyLocked(CommandRejected):
+    """파티 명단이 이미 잠긴 뒤 만들기 관련 명령이 들어왔다(D-08) — 중간에
+    추가·제외는 없다. `CommandRejected`의 하위 클래스라 기존
+    `except CommandRejected` 경로가 그대로 잡는다."""
 
 
 class ProceedEligible(CommandRejected):
@@ -570,6 +637,14 @@ class SessionActor:
             return self._prepare_verify_proceed_eligibility(command)
         if isinstance(command, RecordResourceChange):
             return self._prepare_record_resource_change(command)
+        if isinstance(command, FixPartySize):
+            return self._prepare_fix_party_size(command)
+        if isinstance(command, CompleteCreationStep):
+            return self._prepare_complete_creation_step(command)
+        if isinstance(command, CreateCharacter):
+            return self._prepare_create_character(command)
+        if isinstance(command, LockPartyRoster):
+            return self._prepare_lock_roster(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -654,11 +729,24 @@ class SessionActor:
             raise CommandRejected("browser_id는 비어 있을 수 없다")
 
         # D-14: 사건이 존재하는데(last_seq >= 0) 점유 사건이 하나도 없으면
-        # 옛 세션(판 5 미만 기록)이다 — 다시보기만 된다. **두 조건을 반드시
+        # 옛 세션(판 5 미만 기록)이다 — 다시보기만 된다. **세 조건을 반드시
         # 함께 본다** — occupied_by가 비었다는 사실 하나만으로 판정하면
         # 사건이 하나도 없는 새 세션도 같은 조건을 만족해 아무도 시작하지
         # 못하게 된다(D-14가 못박은 그 실수).
-        if self.state.last_seq >= 0 and not self.state.occupied_by:
+        #
+        # **판 9부터 이 전제가 다시 깨진다(12.1-01 트레이서가 잡아낸 충돌).**
+        # 만들기 사건 셋(party_size_fixed/creation_step_completed/
+        # character_created)을 먼저 쌓은 **새** 세션은 정확히 "사건은 있는데
+        # 점유가 없는" 모양이 된다 — CHAR-05가 요구하는 자동 점유(만들기
+        # 완료 사건이 점유보다 먼저 기록된다)가 이 검사에 정면으로 걸린다.
+        # `created_characters`가 하나라도 있으면 그것은 판 9 이후의 새
+        # 세션이라는 뜻이므로 세 번째 조건으로 더한다 — 판 9가 "사건은
+        # 있는데 점유가 없는 정상 상태"를 처음 만들었다.
+        if (
+            self.state.last_seq >= 0
+            and not self.state.occupied_by
+            and not self.state.created_characters
+        ):
             raise CommandRejected("이 세션은 점유 기록이 없는 옛 세션이다 — 다시보기만 된다")
 
         holder = self.state.occupied_by.get(command.character_id)
@@ -1058,6 +1146,213 @@ class SessionActor:
                 "changes": changes_payload,
                 "category_id": command.category_id,
                 "source": command.source,
+            },
+        )
+
+    def _prepare_fix_party_size(self, command: FixPartySize) -> tuple[str, int | None, dict]:
+        """인원 확정 — 재확정은 없다(D-01, Phase 12.1). 룰북 범위 대조는
+        12.1-02가 붙인다."""
+        if command.player_character_count < 1:
+            raise CommandRejected("인원은 1명 이상이어야 한다")
+        if self.state.party_size_fixed is not None:
+            raise CommandRejected("인원은 이미 확정됐다 — 재확정은 없다")
+        get_rulebook(command.rulebook_id)  # UnknownRulebook을 그대로 올린다.
+        return (
+            "party_size_fixed",
+            None,
+            {
+                "player_character_count": command.player_character_count,
+                "rulebook_id": command.rulebook_id,
+                # `Rulebook.party_size_range`가 아직 없다(12.1-02가 붙인다)
+                # — 이 계획은 하한 1·상한 없음(검증하지 않음)으로 적는다.
+                "rulebook_min": 1,
+                "rulebook_max": None,
+            },
+        )
+
+    def _prepare_complete_creation_step(
+        self, command: CompleteCreationStep
+    ) -> tuple[str, int | None, dict]:
+        """만들기 항목 하나의 값을 확정한다(D-03, Phase 12.1).
+
+        이 계획은 두 kind(`free_text`·`place_fixed_values`)만 값의 모양을
+        검증한다 — 나머지는 12.1-02가 채운다. `place_fixed_values`는
+        배치된 값 묶음이 선언된 `fixed_values`와 다중집합으로 같은지
+        검사한다(사람이 없는 숫자를 만들어 넣는 경로를 막는다, T-12.1-04).
+        """
+        if self.state.party_roster is not None:
+            raise RosterAlreadyLocked("파티 명단이 이미 잠겨 만들기를 더 진행할 수 없다")
+        rulebook = get_rulebook(command.rulebook_id)
+        step = next(
+            (decl for decl in rulebook.creation_steps if decl.step_id == command.step_id),
+            None,
+        )
+        if step is None:
+            raise CommandRejected(f"룰북 선언에 없는 만들기 단계다: {command.step_id!r}")
+
+        text_value = command.text_value
+        picked = command.picked
+        axis_values_payload: list[dict] | None = None
+        if step.kind == "free_text":
+            if command.text_value is None or not command.text_value.strip():
+                raise CommandRejected("free_text 단계는 text_value가 필요하다")
+            picked = None
+        elif step.kind == "place_fixed_values":
+            if not command.axis_values:
+                raise CommandRejected("place_fixed_values 단계는 axis_values가 필요하다")
+            provided_names = {name for name, _ in command.axis_values}
+            if provided_names != set(step.axis_names):
+                raise CommandRejected("배치한 축 이름이 룰북 선언과 다르다")
+            provided_values = sorted(value for _, value in command.axis_values)
+            expected_values = sorted(step.fixed_values or ())
+            if provided_values != expected_values:
+                raise CommandRejected(
+                    "배치된 값 묶음이 선언된 fixed_values와 다르다 — 사람이 없는"
+                    " 숫자를 만들어 넣을 수 없다"
+                )
+            axis_values_payload = [
+                {"axis_name": name, "value": value} for name, value in command.axis_values
+            ]
+            text_value = None
+            picked = None
+        else:
+            raise CommandRejected(
+                f"이 계획은 kind={step.kind!r} 단계를 아직 처리하지 않는다 — 12.1-02가 붙인다"
+            )
+
+        key = (command.character_id, command.step_id)
+        prior = self.state.creation_step_values.get(key)
+        superseded_seq = prior.seq if prior is not None else None
+
+        return (
+            "creation_step_completed",
+            None,
+            {
+                "character_id": command.character_id,
+                "browser_id": command.browser_id,
+                "step_id": command.step_id,
+                "kind": step.kind,
+                "text_value": text_value,
+                "picked": list(picked) if picked is not None else None,
+                "axis_values": axis_values_payload,
+                "rolls": None,
+                "superseded_seq": superseded_seq,
+            },
+        )
+
+    def _prepare_create_character(
+        self, command: CreateCharacter
+    ) -> tuple[str, int | None, dict]:
+        """확정된 만들기 항목 값들을 `Entity`/`StatEntry`로 조립한다(D-03/
+        CHAR-04, Phase 12.1). AI가 이 지점에 닿지 않는다(D14) — 값 조립은
+        전부 이미 확정된 사건 값을 그대로 옮기는 코드다.
+        """
+        if self.state.party_roster is not None:
+            raise RosterAlreadyLocked("파티 명단이 이미 잠겨 새 캐릭터를 만들 수 없다")
+        rulebook = get_rulebook(command.rulebook_id)
+
+        folds = {
+            step_id: fold
+            for (character_id, step_id), fold in self.state.creation_step_values.items()
+            if character_id == command.character_id
+        }
+        if not folds:
+            raise CommandRejected("확정된 만들기 단계 값이 하나도 없다")
+
+        for step in rulebook.creation_steps:
+            if step.required and step.step_id not in folds:
+                raise CommandRejected(f"필수 단계가 채워지지 않았다: {step.step_id!r}")
+
+        display_name: str | None = None
+        stats: list[StatEntry] = []
+        for step in rulebook.creation_steps:
+            fold = folds.get(step.step_id)
+            if fold is None:
+                continue
+            if step.provides_display_name:
+                if fold.text_value:
+                    display_name = fold.text_value
+                elif fold.picked:
+                    display_name = ", ".join(fold.picked)
+            if step.axis_names and fold.axis_values:
+                values_by_axis = dict(fold.axis_values)
+                for axis_name in step.axis_names:
+                    axis_decl = next(
+                        (axis for axis in rulebook.resource_axes if axis.name == axis_name),
+                        None,
+                    )
+                    if axis_decl is None:
+                        raise CommandRejected(
+                            f"룰북에 선언되지 않은 자원 축이다: {axis_name!r}"
+                        )
+                    stats.append(
+                        StatEntry(
+                            name=axis_name,
+                            form=axis_decl.form,
+                            current=values_by_axis.get(axis_name),
+                        )
+                    )
+
+        if display_name is None:
+            raise CommandRejected("표시 이름을 만들 확정된 단계 값이 없다")
+
+        entity = Entity(
+            entity_id=command.character_id,
+            display_name=display_name,
+            rulebook_id=command.rulebook_id,
+            stats=tuple(stats),
+        )
+        # 조립한 Entity가 룰북 선언과 어긋나면 EntityAxisMismatch가 그대로
+        # 위로 올라간다(D-01) — 여기서 삼키지 않는다.
+        validate_entity_axes(entity, rulebook)
+
+        stats_payload = [
+            {
+                "name": stat.name,
+                "form": stat.form,
+                "current": stat.current,
+                "max": stat.max,
+                "depleted_effect_ref": stat.depleted_effect_ref,
+                "slot_values": list(stat.slot_values) if stat.slot_values is not None else None,
+                "tags": list(stat.tags) if stat.tags is not None else None,
+                "none_kind": stat.none_kind,
+            }
+            for stat in entity.stats
+        ]
+        return (
+            "character_created",
+            None,
+            {
+                "character_id": command.character_id,
+                "browser_id": command.browser_id,
+                "display_name": display_name,
+                "rulebook_id": command.rulebook_id,
+                "one_line_intro": command.one_line_intro,
+                "stats": stats_payload,
+            },
+        )
+
+    def _prepare_lock_roster(self, command: LockPartyRoster) -> tuple[str, int | None, dict]:
+        """파티 명단을 잠근다(D-08) — 빈 명단은 잠글 수 없고, 이미 잠긴
+        세션에서 다시 부르면 `RosterAlreadyLocked`다."""
+        if self.state.party_roster is not None:
+            raise RosterAlreadyLocked("파티 명단이 이미 잠겼다")
+        if not command.character_ids:
+            raise CommandRejected(
+                "명단이 비어 있으면 잠글 수 없다 — 빈 명단 잠금은 「아직 아무도 안"
+                " 만들었다」와 구분되지 않는다"
+            )
+        for character_id in command.character_ids:
+            if character_id not in self.state.created_characters:
+                raise CommandRejected(
+                    f"만들어지지 않은 캐릭터는 명단에 넣을 수 없다: {character_id!r}"
+                )
+        return (
+            "party_roster_locked",
+            None,
+            {
+                "character_ids": list(command.character_ids),
+                "player_character_count": len(command.character_ids),
             },
         )
 

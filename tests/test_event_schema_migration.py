@@ -314,11 +314,18 @@ def test_event_schema_version_was_not_bumped_for_corrupted_glyph_alone():
     assert EVENT_SCHEMA_VERSION >= 7
 
 
-def test_event_schema_version_is_eight():
-    """판 8 못박기(Phase 12, D-05) — `ResourceChanged`가 사건 형식에 닿은
-    현재 판이다. 누가 무심코 판을 또 올리거나 내리면 이 값이 바뀌어 이
-    시험이 잡는다."""
-    assert EVENT_SCHEMA_VERSION == 8
+def test_event_schema_version_was_eight_before_phase_12_1():
+    """판 8 시절의 사실만 남긴다(Phase 12, D-05) — `ResourceChanged`가
+    사건 형식에 닿았을 때의 판이다. 그 이후 12.1-01이 캐릭터 만들기 다섯
+    사건으로 판을 9로 올렸다(아래 시험)."""
+    assert EVENT_SCHEMA_VERSION >= 8
+
+
+def test_event_schema_version_is_nine():
+    """판 9 못박기(Phase 12.1, D-03~D-09) — 캐릭터 만들기 다섯 사건이
+    사건 형식에 닿은 현재 판이다. 누가 무심코 판을 또 올리거나 내리면 이
+    값이 바뀌어 이 시험이 잡는다."""
+    assert EVENT_SCHEMA_VERSION == 9
 
 
 def _tuple_key_to_str(key: tuple) -> str:
