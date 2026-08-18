@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 12
-current_phase_name: stats-resources-inventory
-status: verifying
+current_phase: 12.1
+current_phase_name: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+status: planning
 stopped_at: Completed 12-07-PLAN.md (12-07) — Phase 12 전체 완료
-last_updated: "2026-08-18T05:37:16.880Z"
-last_activity: 2026-08-17
-last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
+last_updated: "2026-08-18T08:17:29.383Z"
+last_activity: 2026-08-18
+last_activity_desc: Phase 12 complete, transitioned to Phase 12.1
 progress:
   total_phases: 13
   completed_phases: 5
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 12 (stats-resources-inventory) — EXECUTING
-Plan: 7 of 7
-Status: Phase complete — ready for verification
+Phase: 12.1 — 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+Plan: Not started
+Status: Ready to plan
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-17 — 12-01-PLAN.md 실행 완료 (Task 1 체크포인트 승인 + Task 2·3 커밋)
+Last activity: 2026-08-18 — Phase 12 complete, transitioned to Phase 12.1
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -48,7 +48,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 40 (M0 누적)
+- Total plans completed: 47 (M0 누적)
 - Average duration: -
 - Total execution time: 0.0 hours (v1.1 기준 — 아직 실행 없음)
 
@@ -64,7 +64,7 @@ Progress: [██████████] 100%
 | 08 | 4 | - | - |
 | 10 | 7 | - | - |
 | 11 | 7 | - | - |
-| 12 | 1/7 | - | - |
+| 12 | 7 | - | - |
 
 **Recent Trend:**
 
