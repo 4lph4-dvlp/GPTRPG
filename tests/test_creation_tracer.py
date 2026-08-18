@@ -16,6 +16,8 @@ FastAPI 클라이언트)를 그대로 쓴다.
 (`GET /events`)과 쿠키로 「자동 점유가 실제로 일어났다」를 확인한다.
 """
 
+from gptrpg.agents.context import PARTY_MEMBER_LIMIT
+
 SESSION_ID = "creation-s1"
 CHARACTER_ID = "hero-1"
 BROWSER_ID = "b-hero-1"
@@ -27,7 +29,7 @@ def _events_of_type(client, event_type: str, session_id: str = SESSION_ID) -> li
     return [event for event in response.json()["events"] if event["event_type"] == event_type]
 
 
-def _fix_party_size(client, count: int = 1, session_id: str = SESSION_ID):
+def _fix_party_size(client, count: int = 3, session_id: str = SESSION_ID):
     return client.post(
         f"/api/sessions/{session_id}/creation/party-size",
         json={"player_character_count": count, "rulebook_id": "dungeonworld_like"},
@@ -62,7 +64,7 @@ def test_creation_end_to_end_through_lock_and_rejection_after_lock(web_client) -
     client = web_client
 
     # ① 인원 확정(D-01)
-    party_size_response = _fix_party_size(client, count=1)
+    party_size_response = _fix_party_size(client, count=3)
     assert party_size_response.status_code == 200
 
     # ② 단계 둘 확정 — 자유 서술(이름) + 정해진 숫자 배치(능력치)
@@ -187,7 +189,7 @@ def test_occupy_succeeds_for_a_fresh_session_with_only_creation_events(web_clien
     client = web_client
     session_id = f"{SESSION_ID}-fresh-occupy"
 
-    assert _fix_party_size(client, count=1, session_id=session_id).status_code == 200
+    assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
     assert (
         _complete_step(client, session_id=session_id, step_id="name", text_value="선").status_code
         == 200
@@ -214,3 +216,15 @@ def test_occupy_succeeds_for_a_fresh_session_with_only_creation_events(web_clien
 
     occupied_events = _events_of_type(client, "character_occupied", session_id=session_id)
     assert len(occupied_events) == 1
+
+
+def test_fix_party_size_rejects_a_count_over_the_absolute_safety_valve(web_client) -> None:
+    """T-12.1-13 — `PARTY_MEMBER_LIMIT`은 어떤 룰북도 넘을 수 없는 절대
+    상한이다. 이 검사는 액터가 아니라 이 호출부(web/routes_creation.py)가
+    한다(`session_actor`는 `agents`를 import할 수 없다, `.importlinter`
+    contract:2)."""
+    client = web_client
+    response = _fix_party_size(
+        client, count=PARTY_MEMBER_LIMIT + 1, session_id=f"{SESSION_ID}-over-limit"
+    )
+    assert response.status_code == 400

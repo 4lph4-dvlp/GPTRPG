@@ -517,6 +517,121 @@ class RetroDeclarationDecl:
             )
 
 
+class InvalidPartySizeRange(Exception):
+    """`PartySizeRange` 선언 자체가 유효하지 않을 때 던진다(D-01) —
+    `InvalidResourceAxis`와 같은 모양(사유를 속성으로 노출)이다.
+
+    조용히 통과하면 최소가 1 미만이거나 최소가 최대보다 큰 범위가 등록되고,
+    그 범위로는 어떤 인원도 유효하게 통과할 수 없거나(경계가 뒤집혔다)
+    「0명」이라는 뜻 없는 값이 조용히 허용된다.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"인원 범위 선언이 유효하지 않다: {reason}")
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class PartySizeRange:
+    """룰북(또는 시나리오)이 적는 권장 인원 범위 하나 — 「몇 명인가」의 뜻은
+    플랫폼 어휘, 실제 숫자는 룰북/시나리오 콘텐츠다(`ResourceAxisDecl`의
+    「이름은 룰북 것, 형태는 플랫폼 것」과 같은 분업, D-01).
+
+    **이름에 「player characters」를 명시한다** — 조사한 모든 출간 사례가
+    플레이어(캐릭터) 수를 가리키고, 이 플랫폼은 GM이 AI이므로 「진행자를
+    세지 않는다」가 이름에서 드러나야 한다(`min_players` 같은 모호한 이름을
+    피한다).
+
+    `max_player_characters=None`은 「상한 없음」이다 — 조사에서 실제 사례는
+    못 찾았지만, 조용한 기본값을 만들지 않기 위해 열어 둔다. 경계 판정은
+    양쪽 포함이다(`validate_party_size` 참조).
+    """
+
+    min_player_characters: int
+    max_player_characters: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.min_player_characters < 1:
+            raise InvalidPartySizeRange("min_player_characters는 1 이상이어야 한다")
+        if (
+            self.max_player_characters is not None
+            and self.max_player_characters < self.min_player_characters
+        ):
+            raise InvalidPartySizeRange(
+                "max_player_characters가 min_player_characters보다 작다"
+            )
+
+
+class PartySizeOutOfRange(Exception):
+    """확정하려는(또는 좁히려는) 인원이 룰북이 정한 범위 밖일 때 던진다
+    (D-01/D-02).
+
+    시나리오는 룰북 위에 쓰이므로 정상 관계는 **좁히기**다 — 다툰다면
+    시나리오 데이터가 틀린 것이고, 그것을 정책으로 중재하지 않고 **적재
+    시점에 거절하고 멈춘다**. `UnknownEventType`/`NoMatchingGradeBand`/
+    `InvalidStatEntry`/`EntityAxisMismatch`가 세운 「모르는 것·어긋난 것을
+    조용히 기본값으로 넘기지 않는다」를 그대로 따른다.
+    """
+
+    def __init__(self, reason: str, allowed: PartySizeRange, requested: "PartySizeRange | int") -> None:
+        super().__init__(
+            f"인원 범위가 어긋난다: {reason} (allowed={allowed!r}, requested={requested!r})"
+        )
+        self.reason = reason
+        self.allowed = allowed
+        self.requested = requested
+
+
+def validate_party_size(allowed: PartySizeRange, requested_count: int) -> None:
+    """확정하려는 인원(`requested_count`)이 룰북 범위(`allowed`) 안인지
+    검사한다 — 경계는 양쪽 포함이다. 범위 밖이면 `PartySizeOutOfRange`."""
+    if requested_count < allowed.min_player_characters:
+        raise PartySizeOutOfRange(
+            f"{requested_count}명은 최소 {allowed.min_player_characters}명보다 적다",
+            allowed,
+            requested_count,
+        )
+    if allowed.max_player_characters is not None and requested_count > allowed.max_player_characters:
+        raise PartySizeOutOfRange(
+            f"{requested_count}명은 최대 {allowed.max_player_characters}명보다 많다",
+            allowed,
+            requested_count,
+        )
+
+
+def narrow_party_size_range(
+    rulebook_range: PartySizeRange, narrower: PartySizeRange
+) -> PartySizeRange:
+    """`narrower`(시나리오 범위 등)가 `rulebook_range`의 부분집합이면 그대로
+    돌려준다 — 아니면 `PartySizeOutOfRange`(D-02).
+
+    **이 저장소에는 아직 구조화된 시나리오 타입이 없다**(`grep -rn "class
+    Scenario" src/gptrpg/` 0건, 2026-08-19 확인). 이 함수는 `Scenario`를
+    몰라도 되도록 범위 둘만 받는다 — Phase 13이 시나리오를 무엇으로 볼지
+    정할 때 이 순수 함수를 그대로 재사용한다. D-01의 「룰북·시나리오가 둘
+    다 범위를 적는다」 중 시나리오 절반이 그때 닫힌다.
+    """
+    if narrower.min_player_characters < rulebook_range.min_player_characters:
+        raise PartySizeOutOfRange(
+            "좁히려는 범위의 최소가 룰북 범위의 최소보다 작다 — 좁히기가 아니라"
+            " 넓히기다",
+            rulebook_range,
+            narrower,
+        )
+    if rulebook_range.max_player_characters is not None:
+        if (
+            narrower.max_player_characters is None
+            or narrower.max_player_characters > rulebook_range.max_player_characters
+        ):
+            raise PartySizeOutOfRange(
+                "좁히려는 범위의 최대가 룰북 범위의 최대보다 크다(또는 상한이"
+                " 없다) — 좁히기가 아니라 넓히기다",
+                rulebook_range,
+                narrower,
+            )
+    return narrower
+
+
 @dataclass(frozen=True)
 class Rulebook:
     """룰북 하나의 선언 전체 — 어떤 판정 방식을 쓰고 어떤 등급 밴드/자원
@@ -547,7 +662,13 @@ class Rulebook:
     「이 룰북에는 그 개념이 없다」가 아니다(`outcome_list`/`retro_declaration`이
     쓰는 "빈 값 = 개념 없음" 관례와 다르다 — 모든 룰북은 캐릭터 만들기 절차를
     가지므로 빈 목록이 정상값일 수 없다). 등록 시점 필수 검사(빈 목록이면
-    등록을 거부)는 12.1-02가 `validate_registered_rulebooks`에 붙인다."""
+    등록을 거부)는 12.1-02 Task 3가 `validate_registered_rulebooks`에 붙인다."""
+    party_size_range: PartySizeRange | None = None
+    """룰북이 권장하는 인원 범위(D-01). 기본값 `None`의 뜻은
+    **「아직 선언하지 않았다」**이고 「이 룰북에는 그 개념이 없다」가
+    **아니다** — 모든 룰북은 사람 수를 갖는다(`creation_steps`와 같은
+    성격의 기본값). 등록된 세 룰북 전부에 이 칸이 채워졌는지는 12.1-02
+    Task 3의 `validate_registered_rulebooks`가 강제한다."""
 
     def __post_init__(self) -> None:
         names = [axis.name for axis in self.resource_axes]

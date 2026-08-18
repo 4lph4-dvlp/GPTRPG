@@ -28,6 +28,7 @@ import sys
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from gptrpg.agents.context import PARTY_MEMBER_LIMIT
 from gptrpg.event_log.store import SequenceConflict
 from gptrpg.rules_core.rulebook import EntityAxisMismatch, InvalidCreationStep, InvalidResourceAxis
 from gptrpg.rulebooks import UnknownRulebook
@@ -65,7 +66,19 @@ class SeqResponse(BaseModel):
 async def fix_party_size(
     session_id: str, body: FixPartySizeRequest, request: Request
 ) -> SeqResponse:
-    """방을 여는 사람이 이 세션의 인원을 확정한다(D-01). 재확정은 없다."""
+    """방을 여는 사람이 이 세션의 인원을 확정한다(D-01). 재확정은 없다.
+
+    **`PARTY_MEMBER_LIMIT` 절대 안전 밸브(T-12.1-13)를 여기서 검사한다** —
+    `session_actor`는 `agents`를 import할 수 없으므로(`.importlinter`
+    contract:2) 이 상한 검사는 액터가 아니라 이 호출부의 몫이다. 룰북
+    범위 대조(액터, `validate_party_size`)와 이 상한은 서로 다른 층에
+    있는 두 관문이다 — 어떤 룰북도 이 상한을 넘을 수 없다.
+    """
+    if body.player_character_count > PARTY_MEMBER_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"인원은 {PARTY_MEMBER_LIMIT}명을 넘을 수 없다(안전 상한)",
+        )
     actor = request.app.state.registry.get_or_create(session_id)
     try:
         seq = await actor.submit(

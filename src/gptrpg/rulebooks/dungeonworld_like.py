@@ -20,6 +20,7 @@ from gptrpg.rules_core.rulebook import (
     GradeBand,
     OutcomeCategory,
     OutcomeList,
+    PartySizeRange,
     ResourceAxisDecl,
     Rulebook,
 )
@@ -139,6 +140,14 @@ DUNGEONWORLD_CREATION_STEPS: tuple[CreationStepDecl, ...] = (
     ),
 )
 
+DUNGEONWORLD_PARTY_SIZE_RANGE = PartySizeRange(
+    min_player_characters=3, max_player_characters=5
+)
+"""던전월드 계열 출간작이 실제로 적는 권장 인원(D-01) — `docs/experiment/
+character-creation-script.md`가 이 실험의 참가자 규모(둘)로 진행됐다고
+해서 룰북 콘텐츠 자체의 권장 범위가 바뀌지는 않는다(그 대본은 「시간이
+모자랄 때」 절에서 이미 시간 예산을 줄여 진행하는 것을 명시한다)."""
+
 DUNGEONWORLD_LIKE = Rulebook(
     rulebook_id=DUNGEONWORLD_LIKE_ID,
     display_name="Dungeonworld-like",
@@ -148,6 +157,7 @@ DUNGEONWORLD_LIKE = Rulebook(
     check_trigger_mode="declared_list",
     outcome_list=DUNGEONWORLD_OUTCOME_LIST,
     creation_steps=DUNGEONWORLD_CREATION_STEPS,
+    party_size_range=DUNGEONWORLD_PARTY_SIZE_RANGE,
 )
 
 # 자체 작성 예시 — 어떤 룰북 원문에서도 오지 않았다(D-18이 배제한 자체 창작

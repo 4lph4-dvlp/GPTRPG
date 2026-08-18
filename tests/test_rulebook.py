@@ -29,10 +29,13 @@ from gptrpg.rules_core.rulebook import (
     GradeBand,
     InvalidCreationStep,
     InvalidOutcomeList,
+    InvalidPartySizeRange,
     InvalidResourceAxis,
     InvalidTriggerMode,
     OutcomeCategory,
     OutcomeList,
+    PartySizeOutOfRange,
+    PartySizeRange,
     ResourceAxisDecl,
     RetroDeclarationDecl,
     Rulebook,
@@ -42,6 +45,7 @@ from gptrpg.rules_core.rulebook import (
     build_creation_stats,
     character_axis_names,
     eligible_categories,
+    narrow_party_size_range,
     ordered_categories,
     require_axes_on_character,
     require_band,
@@ -50,6 +54,7 @@ from gptrpg.rules_core.rulebook import (
     validate_grade_bands,
     validate_move_stats,
     validate_outcome_list,
+    validate_party_size,
     validate_trigger_mode,
 )
 from gptrpg.rulebooks import RULEBOOKS, get_rulebook, validate_registered_rulebooks
@@ -1221,3 +1226,92 @@ def test_build_creation_stats_rejects_axis_not_declared_by_rulebook():
     axes = (ResourceAxisDecl(name="STR", form="numeric"),)
     with pytest.raises(InvalidResourceAxis):
         build_creation_stats({"모르는축": 1}, axes)
+
+
+# ---------------------------------------------------------------------------
+# PartySizeRange / validate_party_size / narrow_party_size_range (12.1-02
+# Task 2, D-01/D-02)
+# ---------------------------------------------------------------------------
+
+
+def test_party_size_range_accepts_a_normal_range():
+    r = PartySizeRange(min_player_characters=3, max_player_characters=5)
+    assert r.min_player_characters == 3
+    assert r.max_player_characters == 5
+
+
+def test_party_size_range_accepts_solo_only_min_equals_max():
+    """최소=최대=1인 룰북(1인 전용)이 정상값이다 — 조용히 다른 기본값으로
+    대체되지 않는다."""
+    r = PartySizeRange(min_player_characters=1, max_player_characters=1)
+    assert r.min_player_characters == r.max_player_characters == 1
+
+
+def test_party_size_range_accepts_no_upper_bound():
+    """최대가 없는(상한 없음) 룰북도 정상값이다."""
+    r = PartySizeRange(min_player_characters=3, max_player_characters=None)
+    assert r.max_player_characters is None
+
+
+def test_party_size_range_rejects_min_below_one():
+    with pytest.raises(InvalidPartySizeRange):
+        PartySizeRange(min_player_characters=0)
+
+
+def test_party_size_range_rejects_max_below_min():
+    with pytest.raises(InvalidPartySizeRange):
+        PartySizeRange(min_player_characters=5, max_player_characters=3)
+
+
+def test_validate_party_size_accepts_both_boundaries_inclusive():
+    r = PartySizeRange(min_player_characters=3, max_player_characters=5)
+    validate_party_size(r, 3)
+    validate_party_size(r, 5)
+
+
+def test_validate_party_size_rejects_outside_range():
+    r = PartySizeRange(min_player_characters=3, max_player_characters=5)
+    with pytest.raises(PartySizeOutOfRange):
+        validate_party_size(r, 2)
+    with pytest.raises(PartySizeOutOfRange):
+        validate_party_size(r, 6)
+
+
+def test_validate_party_size_with_no_upper_bound_accepts_any_large_count():
+    r = PartySizeRange(min_player_characters=3, max_player_characters=None)
+    validate_party_size(r, 99)
+
+
+def test_narrow_party_size_range_accepts_a_true_subset():
+    rulebook_range = PartySizeRange(3, 5)
+    narrower = PartySizeRange(4, 4)
+    assert narrow_party_size_range(rulebook_range, narrower) == narrower
+
+
+def test_narrow_party_size_range_rejects_a_wider_min():
+    rulebook_range = PartySizeRange(3, 5)
+    with pytest.raises(PartySizeOutOfRange):
+        narrow_party_size_range(rulebook_range, PartySizeRange(2, 5))
+
+
+def test_narrow_party_size_range_rejects_a_wider_max():
+    rulebook_range = PartySizeRange(3, 5)
+    with pytest.raises(PartySizeOutOfRange):
+        narrow_party_size_range(rulebook_range, PartySizeRange(3, 6))
+
+
+def test_narrow_party_size_range_with_unbounded_rulebook_range_accepts_a_bounded_narrower():
+    rulebook_range = PartySizeRange(3, None)
+    narrower = PartySizeRange(4, 10)
+    assert narrow_party_size_range(rulebook_range, narrower) == narrower
+
+
+# ---------------------------------------------------------------------------
+# Rulebook.party_size_range — 실제 등록된 룰북(Task 2 시점)
+# ---------------------------------------------------------------------------
+
+
+def test_dungeonworld_like_declares_a_party_size_range():
+    assert DUNGEONWORLD_LIKE.party_size_range == PartySizeRange(
+        min_player_characters=3, max_player_characters=5
+    )

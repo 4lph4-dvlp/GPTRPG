@@ -697,7 +697,7 @@ async def _submit_minimal_creation(actor, character_id: str, browser_id: str) ->
     character_created)만 쌓고 점유는 아직 제출하지 않는다 — 아래 두 시험이
     「만들기 사건은 있는데 점유가 없는」 정확한 판 9 새 세션 모양을 만드는
     공용 도우미다."""
-    await actor.submit(FixPartySize(player_character_count=1, rulebook_id=DUNGEONWORLD_LIKE_ID))
+    await actor.submit(FixPartySize(player_character_count=3, rulebook_id=DUNGEONWORLD_LIKE_ID))
     await actor.submit(
         CompleteCreationStep(
             character_id=character_id,
@@ -836,6 +836,77 @@ _CREATION_KIND_TEST_RULEBOOK = Rulebook(
         ),
     ),
 )
+
+
+# ---------------------------------------------------------------------------
+# 12.1-02 Task 2 — FixPartySize의 룰북 범위 대조(D-01/D-02). 던전월드류가
+# 이제 실제 범위(3~5)를 선언하므로 그 범위로 직접 시험한다.
+# ---------------------------------------------------------------------------
+
+
+async def test_fix_party_size_accepts_a_count_within_the_rulebook_range(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        seq = await actor.submit(
+            FixPartySize(player_character_count=3, rulebook_id=DUNGEONWORLD_LIKE_ID)
+        )
+    finally:
+        await actor.stop()
+        store.close()
+    assert seq >= 0
+
+
+async def test_fix_party_size_rejects_a_count_below_the_rulebook_minimum(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                FixPartySize(player_character_count=2, rulebook_id=DUNGEONWORLD_LIKE_ID)
+            )
+    finally:
+        await actor.stop()
+        store.close()
+    assert _read_events(tmp_db_path) == []
+
+
+async def test_fix_party_size_rejects_a_count_above_the_rulebook_maximum(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                FixPartySize(player_character_count=6, rulebook_id=DUNGEONWORLD_LIKE_ID)
+            )
+    finally:
+        await actor.stop()
+        store.close()
+    assert _read_events(tmp_db_path) == []
+
+
+async def test_fix_party_size_rejects_when_rulebook_has_no_party_size_range(tmp_db_path):
+    """`party_size_range`가 `None`이면(「아직 선언하지 않았다」) 확정 자체를
+    거절한다 — 조용히 통과시키지 않는다."""
+    no_range_rulebook_id = "no-party-size-range-test-only"
+    RULEBOOKS[no_range_rulebook_id] = Rulebook(
+        rulebook_id=no_range_rulebook_id,
+        display_name="인원 범위 미선언 시험 전용",
+        resolution_method=TWO_D6,
+        grade_bands=(),
+        resource_axes=(),
+        check_trigger_mode="no_dice",
+    )
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            with pytest.raises(CommandRejected):
+                await actor.submit(
+                    FixPartySize(player_character_count=3, rulebook_id=no_range_rulebook_id)
+                )
+        finally:
+            await actor.stop()
+            store.close()
+        assert _read_events(tmp_db_path) == []
+    finally:
+        del RULEBOOKS[no_range_rulebook_id]
 
 
 def _register_creation_kind_test_rulebook():

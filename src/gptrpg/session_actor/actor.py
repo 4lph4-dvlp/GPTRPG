@@ -53,6 +53,7 @@ from gptrpg.rules_core.rulebook import (
     D100_ROLL_UNDER,
     TWO_D6,
     NoMatchingGradeBand,
+    PartySizeOutOfRange,
     Rulebook,
     UnknownDifficultyLevel,
     UnknownGradeName,
@@ -60,6 +61,7 @@ from gptrpg.rules_core.rulebook import (
     require_band,
     require_difficulty,
     validate_entity_axes,
+    validate_party_size,
 )
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
@@ -1152,22 +1154,36 @@ class SessionActor:
 
     def _prepare_fix_party_size(self, command: FixPartySize) -> tuple[str, int | None, dict]:
         """인원 확정 — 재확정은 없다(D-01, Phase 12.1). 룰북 범위 대조는
-        12.1-02가 붙인다."""
+        `validate_party_size`가 한다(D-02, 12.1-02 Task 2).
+
+        `PARTY_MEMBER_LIMIT`(절대 안전 밸브)은 여기서 검사하지 않는다 —
+        `session_actor`는 `agents`를 import할 수 없다(`.importlinter`
+        contract:2, `agents`가 `session_actor` 위 층이다). 그 상한은 이
+        명령을 만드는 호출부(`web/routes_creation.py`)가 검사해 400으로
+        거절한다 — 룰북이 인원을 데이터로 정하므로 이 상한은 이제 인원의
+        출처가 아니라 프롬프트 폭주를 막는 코드 상한이다.
+        """
         if command.player_character_count < 1:
             raise CommandRejected("인원은 1명 이상이어야 한다")
         if self.state.party_size_fixed is not None:
             raise CommandRejected("인원은 이미 확정됐다 — 재확정은 없다")
-        get_rulebook(command.rulebook_id)  # UnknownRulebook을 그대로 올린다.
+        rulebook = get_rulebook(command.rulebook_id)  # UnknownRulebook을 그대로 올린다.
+        if rulebook.party_size_range is None:
+            raise CommandRejected(
+                f"룰북 {command.rulebook_id!r}은 권장 인원을 아직 선언하지 않았다"
+            )
+        try:
+            validate_party_size(rulebook.party_size_range, command.player_character_count)
+        except PartySizeOutOfRange as exc:
+            raise CommandRejected(str(exc)) from exc
         return (
             "party_size_fixed",
             None,
             {
                 "player_character_count": command.player_character_count,
                 "rulebook_id": command.rulebook_id,
-                # `Rulebook.party_size_range`가 아직 없다(12.1-02가 붙인다)
-                # — 이 계획은 하한 1·상한 없음(검증하지 않음)으로 적는다.
-                "rulebook_min": 1,
-                "rulebook_max": None,
+                "rulebook_min": rulebook.party_size_range.min_player_characters,
+                "rulebook_max": rulebook.party_size_range.max_player_characters,
             },
         )
 
