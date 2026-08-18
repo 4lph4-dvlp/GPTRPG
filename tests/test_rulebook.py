@@ -24,8 +24,10 @@ from gptrpg.rules_core.rulebook import (
     NO_CHANGE_CATEGORY_ID,
     TWO_D6,
     AxisNotOnCharacter,
+    CreationStepDecl,
     EntityAxisMismatch,
     GradeBand,
+    InvalidCreationStep,
     InvalidOutcomeList,
     InvalidResourceAxis,
     InvalidTriggerMode,
@@ -37,6 +39,7 @@ from gptrpg.rules_core.rulebook import (
     ShadowedGradeBand,
     UncoveredOutcomeGap,
     UnknownOutcomeCategory,
+    build_creation_stats,
     character_axis_names,
     eligible_categories,
     ordered_categories,
@@ -1009,3 +1012,212 @@ def test_require_axes_on_character_rejects_axis_the_character_lacks():
     with pytest.raises(AxisNotOnCharacter) as excinfo:
         require_axes_on_character((decl,), PLAYER_CHARACTERS["nari"].stats)
     assert excinfo.value.axis == "방어구"
+
+
+# ---------------------------------------------------------------------------
+# CreationStepDecl — 일곱 kind 전부 선언 시점 검증 (12.1-02 Task 1, D-04)
+# ---------------------------------------------------------------------------
+
+
+def test_creation_step_decl_pick_many_requires_options_and_pick_count():
+    decl = CreationStepDecl(
+        step_id="loadout", kind="pick_many", label="장비", options=("검", "방패", "활"),
+        pick_count=2,
+    )
+    assert decl.pick_count == 2
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(step_id="x", kind="pick_many", label="x", pick_count=2)
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(step_id="x", kind="pick_many", label="x", options=("A", "B"))
+
+
+def test_creation_step_decl_pick_many_rejects_pick_count_over_options_length():
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(
+            step_id="x", kind="pick_many", label="x", options=("A", "B"), pick_count=3,
+        )
+
+
+def test_creation_step_decl_allocate_points_requires_axis_names_and_budget():
+    decl = CreationStepDecl(
+        step_id="skills", kind="allocate_points", label="스킬 배분",
+        axis_names=("A", "B"), point_budget=50, per_target_max=30,
+    )
+    assert decl.point_budget == 50
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(step_id="x", kind="allocate_points", label="x", point_budget=50)
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(
+            step_id="x", kind="allocate_points", label="x", axis_names=("A",)
+        )
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(
+            step_id="x", kind="allocate_points", label="x", axis_names=("A",),
+            point_budget=0,
+        )
+
+
+def test_creation_step_decl_roll_to_fill_requires_axis_names_and_valid_dice_expr():
+    decl = CreationStepDecl(
+        step_id="abilities", kind="roll_to_fill", label="능력치 굴리기",
+        axis_names=("STR",), dice_expr="4d6k3",
+    )
+    assert decl.dice_expr == "4d6k3"
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(step_id="x", kind="roll_to_fill", label="x", axis_names=("STR",))
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(
+            step_id="x", kind="roll_to_fill", label="x", axis_names=("STR",),
+            dice_expr="not-a-dice-expr",
+        )
+
+
+def test_creation_step_decl_derive_requires_all_four_derive_fields_and_depends_on():
+    decl = CreationStepDecl(
+        step_id="hp", kind="derive", label="체력", axis_names=("체력",),
+        derive_base_axis="CON", derive_multiplier=2, derive_offset=16,
+        depends_on=("ability_array",),
+    )
+    assert decl.derive_base_axis == "CON"
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(
+            step_id="x", kind="derive", label="x", axis_names=("체력", "방어구"),
+            derive_base_axis="CON", derive_multiplier=2, derive_offset=16,
+            depends_on=("ability_array",),
+        )  # axis_names 길이가 1이 아니다
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(
+            step_id="x", kind="derive", label="x", axis_names=("체력",),
+            derive_multiplier=2, derive_offset=16, depends_on=("ability_array",),
+        )  # derive_base_axis 없음
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(
+            step_id="x", kind="derive", label="x", axis_names=("체력",),
+            derive_base_axis="CON", derive_multiplier=2, derive_offset=16,
+        )  # depends_on 없음
+
+    with pytest.raises(InvalidCreationStep):
+        CreationStepDecl(
+            step_id="x", kind="derive", label="x", axis_names=("체력",),
+            derive_base_axis="CON", derive_multiplier=2, derive_offset=16,
+            depends_on=("ability_array",), dice_expr="1d6",
+        )  # derive가 안 쓰는 칸(dice_expr)
+
+
+def test_rulebook_rejects_depends_on_pointing_to_unknown_or_later_step():
+    """`depends_on`이 존재하지 않거나 뒤에 선언된 단계를 가리키면 등록 시점에
+    거절된다 — 순서가 곧 의존 방향이라 순환을 만들 자리가 구조적으로 없다."""
+    ability_step = CreationStepDecl(
+        step_id="ability_array", kind="place_fixed_values", label="능력치 배치",
+        axis_names=("STR",), fixed_values=(2,),
+    )
+    hp_step = CreationStepDecl(
+        step_id="hp", kind="derive", label="체력", axis_names=("체력",),
+        derive_base_axis="STR", derive_multiplier=2, derive_offset=16,
+        depends_on=("does_not_exist",),
+    )
+    with pytest.raises(InvalidCreationStep):
+        Rulebook(
+            rulebook_id="r1", display_name="R1", resolution_method=TWO_D6,
+            grade_bands=(), resource_axes=(ResourceAxisDecl(name="STR", form="numeric"),),
+            check_trigger_mode="no_dice",
+            creation_steps=(ability_step, hp_step),
+        )
+
+
+def test_rulebook_rejects_depends_on_pointing_to_a_later_step():
+    hp_step = CreationStepDecl(
+        step_id="hp", kind="derive", label="체력", axis_names=("체력",),
+        derive_base_axis="STR", derive_multiplier=2, derive_offset=16,
+        depends_on=("ability_array",),
+    )
+    ability_step = CreationStepDecl(
+        step_id="ability_array", kind="place_fixed_values", label="능력치 배치",
+        axis_names=("STR",), fixed_values=(2,),
+    )
+    with pytest.raises(InvalidCreationStep):
+        Rulebook(
+            rulebook_id="r1", display_name="R1", resolution_method=TWO_D6,
+            grade_bands=(), resource_axes=(ResourceAxisDecl(name="STR", form="numeric"),),
+            check_trigger_mode="no_dice",
+            creation_steps=(hp_step, ability_step),  # hp가 ability_array보다 먼저다
+        )
+
+
+def test_rulebook_rejects_depends_on_pointing_to_self():
+    self_ref_step = CreationStepDecl(
+        step_id="hp", kind="derive", label="체력", axis_names=("체력",),
+        derive_base_axis="STR", derive_multiplier=2, derive_offset=16,
+        depends_on=("hp",),
+    )
+    with pytest.raises(InvalidCreationStep):
+        Rulebook(
+            rulebook_id="r1", display_name="R1", resolution_method=TWO_D6,
+            grade_bands=(), resource_axes=(ResourceAxisDecl(name="STR", form="numeric"),),
+            check_trigger_mode="no_dice",
+            creation_steps=(self_ref_step,),
+        )
+
+
+def test_rulebook_rejects_default_from_pointing_to_unknown_step():
+    ability_step = CreationStepDecl(
+        step_id="ability_array", kind="place_fixed_values", label="능력치 배치",
+        axis_names=("STR",), fixed_values=(2,), default_from="does_not_exist",
+    )
+    with pytest.raises(InvalidCreationStep):
+        Rulebook(
+            rulebook_id="r1", display_name="R1", resolution_method=TWO_D6,
+            grade_bands=(), resource_axes=(ResourceAxisDecl(name="STR", form="numeric"),),
+            check_trigger_mode="no_dice",
+            creation_steps=(ability_step,),
+        )
+
+
+def test_rulebook_accepts_default_from_pointing_to_an_earlier_step():
+    archetype_step = CreationStepDecl(
+        step_id="archetype", kind="pick_one", label="사람됨", options=("A", "B"),
+    )
+    ability_step = CreationStepDecl(
+        step_id="ability_array", kind="place_fixed_values", label="능력치 배치",
+        axis_names=("STR",), fixed_values=(2,), default_from="archetype",
+    )
+    rulebook = Rulebook(
+        rulebook_id="r1", display_name="R1", resolution_method=TWO_D6,
+        grade_bands=(), resource_axes=(ResourceAxisDecl(name="STR", form="numeric"),),
+        check_trigger_mode="no_dice",
+        creation_steps=(archetype_step, ability_step),
+    )
+    assert rulebook.creation_steps[1].default_from == "archetype"
+
+
+# ---------------------------------------------------------------------------
+# build_creation_stats — 확정된 값들 + 룰북 축 선언 → StatEntry 튜플
+# ---------------------------------------------------------------------------
+
+
+def test_build_creation_stats_assembles_stat_entries_from_axis_values():
+    axes = (
+        ResourceAxisDecl(name="STR", form="numeric"),
+        ResourceAxisDecl(name="체력", form="numeric"),
+    )
+    stats = build_creation_stats({"STR": 2, "체력": 18}, axes)
+    by_name = {stat.name: stat for stat in stats}
+    assert by_name["STR"].current == 2
+    assert by_name["STR"].form == "numeric"
+    assert by_name["체력"].current == 18
+
+
+def test_build_creation_stats_rejects_axis_not_declared_by_rulebook():
+    axes = (ResourceAxisDecl(name="STR", form="numeric"),)
+    with pytest.raises(InvalidResourceAxis):
+        build_creation_stats({"모르는축": 1}, axes)

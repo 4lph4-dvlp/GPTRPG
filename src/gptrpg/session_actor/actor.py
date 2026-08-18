@@ -48,7 +48,7 @@ from gptrpg.rules_core.resolution import (
     resolve_2d6,
 )
 from gptrpg.rules_core.resolution_d100 import resolve_d100
-from gptrpg.rules_core.resource_change import ResourceOp
+from gptrpg.rules_core.resource_change import ResourceOp, roll_amount
 from gptrpg.rules_core.rulebook import (
     D100_ROLL_UNDER,
     TWO_D6,
@@ -56,6 +56,7 @@ from gptrpg.rules_core.rulebook import (
     Rulebook,
     UnknownDifficultyLevel,
     UnknownGradeName,
+    build_creation_stats,
     require_band,
     require_difficulty,
     validate_entity_axes,
@@ -1175,10 +1176,15 @@ class SessionActor:
     ) -> tuple[str, int | None, dict]:
         """만들기 항목 하나의 값을 확정한다(D-03, Phase 12.1).
 
-        이 계획은 두 kind(`free_text`·`place_fixed_values`)만 값의 모양을
-        검증한다 — 나머지는 12.1-02가 채운다. `place_fixed_values`는
+        일곱 kind 전부 값의 모양을 검증한다(12.1-02). `place_fixed_values`는
         배치된 값 묶음이 선언된 `fixed_values`와 다중집합으로 같은지
         검사한다(사람이 없는 숫자를 만들어 넣는 경로를 막는다, T-12.1-04).
+        `pick_one`/`pick_many`는 `web/routes_actions.py:603-663`의
+        `_pending_resource_changes`가 쓰는 「AI/바깥이 고른 것을 코드가 닫힌
+        목록으로 다시 대조」 패턴을 그대로 쓴다. `roll_to_fill`은 브라우저가
+        보낸 값을 무시하고 주입된 `Roller`로 직접 굴린다(D14) — 에이전트가
+        값을 만들 수 있는 경로가 없다. `derive`는 `depends_on` 단계의 확정된
+        축 값을 찾아 `기준값 × derive_multiplier + derive_offset`으로 계산한다.
         """
         if self.state.party_roster is not None:
             raise RosterAlreadyLocked("파티 명단이 이미 잠겨 만들기를 더 진행할 수 없다")
@@ -1193,6 +1199,8 @@ class SessionActor:
         text_value = command.text_value
         picked = command.picked
         axis_values_payload: list[dict] | None = None
+        rolls_payload: tuple[int, ...] | None = None
+
         if step.kind == "free_text":
             if command.text_value is None or not command.text_value.strip():
                 raise CommandRejected("free_text 단계는 text_value가 필요하다")
@@ -1215,10 +1223,101 @@ class SessionActor:
             ]
             text_value = None
             picked = None
+        elif step.kind in ("pick_one", "pick_many"):
+            if not command.picked:
+                raise CommandRejected(f"{step.kind} 단계는 picked가 필요하다")
+            if len(command.picked) != len(set(command.picked)):
+                raise CommandRejected("같은 선택지를 두 번 골랐다")
+            allowed_options = set(step.options or ())
+            unknown = [item for item in command.picked if item not in allowed_options]
+            if unknown:
+                raise CommandRejected(f"룰북 선언에 없는 선택지다: {unknown!r}")
+            if step.kind == "pick_one":
+                if len(command.picked) != 1:
+                    raise CommandRejected("pick_one은 정확히 하나만 골라야 한다")
+            else:
+                if len(command.picked) != step.pick_count:
+                    raise CommandRejected(
+                        f"pick_many는 정확히 {step.pick_count}개를 골라야 한다"
+                        f" (받은 개수: {len(command.picked)})"
+                    )
+            text_value = None
+        elif step.kind == "allocate_points":
+            if not command.axis_values:
+                raise CommandRejected("allocate_points 단계는 axis_values가 필요하다")
+            provided_names = [name for name, _ in command.axis_values]
+            if len(provided_names) != len(set(provided_names)):
+                raise CommandRejected("같은 축에 배분을 두 번 제출했다")
+            outside_axes = [name for name in provided_names if name not in step.axis_names]
+            if outside_axes:
+                raise CommandRejected(f"룰북 선언에 없는 축에 배분했다: {outside_axes!r}")
+            if any(value < 0 for _, value in command.axis_values):
+                raise CommandRejected("배분 값은 음수일 수 없다")
+            total = sum(value for _, value in command.axis_values)
+            if total != step.point_budget:
+                raise CommandRejected(
+                    f"배분 합계({total})가 예산({step.point_budget})과 다르다 —"
+                    " 남는 점수를 조용히 버릴 수 없다"
+                )
+            if step.per_target_max is not None:
+                over_cap = [
+                    (name, value)
+                    for name, value in command.axis_values
+                    if value > step.per_target_max
+                ]
+                if over_cap:
+                    raise CommandRejected(
+                        f"배분 값이 항목별 상한({step.per_target_max})을 넘는다:"
+                        f" {over_cap!r}"
+                    )
+            axis_values_payload = [
+                {"axis_name": name, "value": value} for name, value in command.axis_values
+            ]
+            text_value = None
+            picked = None
+        elif step.kind == "roll_to_fill":
+            # 브라우저/에이전트가 보낸 값을 무시하고 주입된 Roller로 직접
+            # 굴린다 — AI가 이 값을 만들 수 있는 경로가 없다(D14). 에이전트는
+            # 굴려서 나온 결과를 서술로 옮기기만 한다.
+            assert step.dice_expr is not None  # CreationStepDecl 선언 시점 규약
+            all_rolls: list[int] = []
+            filled_axis_values: list[dict] = []
+            for axis_name in step.axis_names:
+                total, rolls = roll_amount(self._roller, step.dice_expr)
+                all_rolls.extend(rolls)
+                filled_axis_values.append({"axis_name": axis_name, "value": total})
+            axis_values_payload = filled_axis_values
+            rolls_payload = tuple(all_rolls)
+            text_value = None
+            picked = None
+        elif step.kind == "derive":
+            for dep_step_id in step.depends_on:
+                if (command.character_id, dep_step_id) not in self.state.creation_step_values:
+                    raise CommandRejected(
+                        f"의존 단계가 아직 채워지지 않았다: {dep_step_id!r}"
+                    )
+            base_value: int | None = None
+            for dep_step_id in step.depends_on:
+                dep_fold = self.state.creation_step_values[(command.character_id, dep_step_id)]
+                for axis_name, value in dep_fold.axis_values or ():
+                    if axis_name == step.derive_base_axis:
+                        base_value = value
+                        break
+                if base_value is not None:
+                    break
+            if base_value is None:
+                raise CommandRejected(
+                    f"기준 축 {step.derive_base_axis!r}의 값을 의존 단계에서 찾을 수 없다"
+                )
+            assert step.derive_multiplier is not None and step.derive_offset is not None
+            derived_value = base_value * step.derive_multiplier + step.derive_offset
+            axis_values_payload = [
+                {"axis_name": step.axis_names[0], "value": derived_value}
+            ]
+            text_value = None
+            picked = None
         else:
-            raise CommandRejected(
-                f"이 계획은 kind={step.kind!r} 단계를 아직 처리하지 않는다 — 12.1-02가 붙인다"
-            )
+            raise CommandRejected(f"알 수 없는 만들기 단계 kind다: {step.kind!r}")
 
         key = (command.character_id, command.step_id)
         prior = self.state.creation_step_values.get(key)
@@ -1235,7 +1334,7 @@ class SessionActor:
                 "text_value": text_value,
                 "picked": list(picked) if picked is not None else None,
                 "axis_values": axis_values_payload,
-                "rolls": None,
+                "rolls": list(rolls_payload) if rolls_payload is not None else None,
                 "superseded_seq": superseded_seq,
             },
         )
@@ -1264,7 +1363,7 @@ class SessionActor:
                 raise CommandRejected(f"필수 단계가 채워지지 않았다: {step.step_id!r}")
 
         display_name: str | None = None
-        stats: list[StatEntry] = []
+        axis_value_map: dict[str, int] = {}
         for step in rulebook.creation_steps:
             fold = folds.get(step.step_id)
             if fold is None:
@@ -1274,33 +1373,22 @@ class SessionActor:
                     display_name = fold.text_value
                 elif fold.picked:
                     display_name = ", ".join(fold.picked)
-            if step.axis_names and fold.axis_values:
-                values_by_axis = dict(fold.axis_values)
-                for axis_name in step.axis_names:
-                    axis_decl = next(
-                        (axis for axis in rulebook.resource_axes if axis.name == axis_name),
-                        None,
-                    )
-                    if axis_decl is None:
-                        raise CommandRejected(
-                            f"룰북에 선언되지 않은 자원 축이다: {axis_name!r}"
-                        )
-                    stats.append(
-                        StatEntry(
-                            name=axis_name,
-                            form=axis_decl.form,
-                            current=values_by_axis.get(axis_name),
-                        )
-                    )
+            if fold.axis_values:
+                for axis_name, value in fold.axis_values:
+                    axis_value_map[axis_name] = value
 
         if display_name is None:
             raise CommandRejected("표시 이름을 만들 확정된 단계 값이 없다")
+
+        # 조립 규칙이 한 자리(build_creation_stats)에만 있다 — 룰북에 선언되지
+        # 않은 축을 가리키면 InvalidResourceAxis가 그대로 위로 올라간다.
+        stats = build_creation_stats(axis_value_map, rulebook.resource_axes)
 
         entity = Entity(
             entity_id=command.character_id,
             display_name=display_name,
             rulebook_id=command.rulebook_id,
-            stats=tuple(stats),
+            stats=stats,
         )
         # 조립한 Entity가 룰북 선언과 어긋나면 EntityAxisMismatch가 그대로
         # 위로 올라간다(D-01) — 여기서 삼키지 않는다.

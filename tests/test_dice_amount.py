@@ -12,6 +12,7 @@ from gptrpg.rules_core.resource_change import (
     MAX_DICE_COUNT,
     MAX_DIE_SIDES,
     InvalidResourceChange,
+    parse_dice_expr,
     roll_amount,
 )
 from gptrpg.session_actor.live_roller import LiveRoller
@@ -125,6 +126,72 @@ def test_roll_amount_with_999d6_and_1d9999_both_exceed_limits_without_rolling():
     with pytest.raises(InvalidResourceChange):
         roll_amount(roller_b, "1d9999")
     assert roller_b.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# keep 표기(12.1-02, D-04) — parse_dice_expr
+# ---------------------------------------------------------------------------
+
+
+def test_parse_dice_expr_with_keep_highest_returns_count_sides_keep_and_flat():
+    assert parse_dice_expr("4d6k3") == (4, 6, 3, True, 0)
+
+
+def test_parse_dice_expr_with_keep_lowest_returns_keep_highest_false():
+    assert parse_dice_expr("4d6kl3") == (4, 6, 3, False, 0)
+
+
+def test_parse_dice_expr_without_keep_returns_none_for_keep_count():
+    assert parse_dice_expr("1d6") == (1, 6, None, True, 0)
+
+
+def test_parse_dice_expr_with_keep_exceeding_roll_count_raises():
+    with pytest.raises(InvalidResourceChange):
+        parse_dice_expr("4d6k5")
+
+
+def test_parse_dice_expr_with_keep_count_over_max_dice_count_raises():
+    with pytest.raises(InvalidResourceChange):
+        parse_dice_expr(f"{MAX_DICE_COUNT + 1}d6k3")
+
+
+def test_parse_dice_expr_with_flat_modifier_after_keep():
+    assert parse_dice_expr("4d6k3+1") == (4, 6, 3, True, 1)
+
+
+# ---------------------------------------------------------------------------
+# roll_amount에 keep 표기 — D22 원문 예시 4d6k3(넷 굴려 높은 셋)
+# ---------------------------------------------------------------------------
+
+
+def test_roll_amount_with_keep_highest_sums_only_top_k_but_returns_all_rolls():
+    """`4d6k3` — 합계는 높은 셋의 합, 반환된 눈 튜플은 네 개 전부다(D-04)."""
+    roller = ReplayRoller([1, 5, 3, 6])
+    total, rolls = roll_amount(roller, "4d6k3")
+    assert rolls == (1, 5, 3, 6)  # 굴린 순서 그대로, 전부
+    assert total == 5 + 3 + 6  # 낮은 1을 뺀 높은 셋
+
+
+def test_roll_amount_with_keep_lowest_sums_only_bottom_k():
+    roller = ReplayRoller([1, 5, 3, 6])
+    total, rolls = roll_amount(roller, "4d6kl3")
+    assert rolls == (1, 5, 3, 6)
+    assert total == 1 + 5 + 3  # 높은 6을 뺀 낮은 셋
+
+
+def test_roll_amount_with_keep_and_replay_is_deterministic():
+    """같은 눈을 되먹이면 `4d6k3`의 합계가 항상 같다(D-04, ReplayRoller)."""
+    recorded = [2, 4, 6, 1]
+    first = roll_amount(ReplayRoller(list(recorded)), "4d6k3")
+    second = roll_amount(ReplayRoller(list(recorded)), "4d6k3")
+    assert first == second
+
+
+def test_roll_amount_with_2d8_plus_1_still_reads_as_ndm_flat_no_keep():
+    """하위 호환 — 기존 `NdM±flat` 식은 keep 없이 그대로 동작한다."""
+    roller = ReplayRoller([3, 5])
+    total, rolls = roll_amount(roller, "2d8+1")
+    assert (total, rolls) == (3 + 5 + 1, (3, 5))
 
 
 # ---------------------------------------------------------------------------

@@ -57,10 +57,18 @@ MAX_DIE_SIDES = 1000
 근거 — 굴림 도구 호출 자체는 면수와 무관하게 한 번이지만, 비정상적으로
 큰 면수도 입력 실수로 본다."""
 
-_DICE_EXPR = re.compile(r"^(?P<sign>[+-]?)(?P<count>\d+)d(?P<sides>\d+)(?P<flat>[+-]\d+)?$")
-"""`NdM` 문법에 앞 부호와 뒤 고정 가감을 붙인 모양만 받는다(예: `"1d6"`,
-`"-1d6"`, `"2d8+1"`). 그 밖(`"d6"`·`"1d"`·`"abc"`·`""` 등)은 전부
-`InvalidResourceChange`다."""
+_DICE_EXPR = re.compile(
+    r"^(?P<sign>[+-]?)(?P<count>\d+)d(?P<sides>\d+)"
+    r"(?:k(?P<keep_lowest>l)?(?P<keep_count>\d+))?"
+    r"(?P<flat>[+-]\d+)?$"
+)
+"""`NdM` 문법에 앞 부호·keep 표기·뒤 고정 가감을 붙인 모양만 받는다(예:
+`"1d6"`, `"-1d6"`, `"2d8+1"`, `"4d6k3"`, `"4d6kl3"`). 그 밖(`"d6"`·`"1d"`·
+`"abc"`·`""` 등)은 전부 `InvalidResourceChange`다.
+
+**keep 표기(12.1-02, D-04):** `k<K>`는 굴린 것 중 높은 `K`개를 남기고,
+`kl<K>`는 낮은 `K`개를 남긴다 — D22 원문이 예시로 든 `4d6k3`(넷 굴려 높은
+셋)이 여기로 들어온다. keep 표기는 `sides` 다음·`flat` 앞에 온다."""
 
 
 class InvalidResourceChange(Exception):
@@ -135,33 +143,25 @@ class ResourceOp:
             raise InvalidResourceChange("axis가 비었거나 공백뿐이다", axis=self.axis)
 
 
-def roll_amount(roller: DieRoller, amount: int | str) -> tuple[int, tuple[int, ...]]:
-    """변화량 하나를 실제 정수로 만든다 — 고정 정수는 그대로, 주사위식은
-    굴려서(D-06).
-
-    고정 정수면 `(amount, ())`를 그대로 돌려준다(굴림 도구를 한 번도 안
-    부른다). 주사위식(`NdM` 문법)이면 개수만큼 `roller.roll_die(sides)`를
-    불러 `(부호 × (눈 합 + 고정 가감), 굴린 눈 튜플)`을 돌려준다.
-
-    **눈은 부호를 붙이지 않은 굴린 값 그대로 돌려준다** — 화면에서
-    「1d6 = 4 → 체력 −4」로 검산되어야 한다(D-04). 부호는 결과값에만 붙는다.
-
-    **상한 검사는 굴림 도구를 부르기 전에 한다**(T-12-09) — `MAX_DICE_COUNT`·
-    `MAX_DIE_SIDES`를 넘는 주사위식은 `InvalidResourceChange`로 거절하고
-    `roller.roll_die`를 단 한 번도 부르지 않는다. 상한을 넘는 굴림 호출은
-    계산이 아니라 입력 실수로 본다.
-    """
-    if isinstance(amount, int):
-        return amount, ()
-
-    match = _DICE_EXPR.match(amount)
+def _require_dice_match(expr: str) -> re.Match[str]:
+    """`_DICE_EXPR`에 매치되는지만 확인한다 — `roll_amount`/`parse_dice_expr`이
+    이 한 자리를 공유해 두 곳이 서로 다른 문법을 갖는 어긋남을 막는다."""
+    match = _DICE_EXPR.match(expr)
     if match is None:
         raise InvalidResourceChange(
-            "amount가 주사위식 문법(NdM, 예: '1d6'·'2d8+1'·'-1d6')을 따르지 않는다",
-            amount=amount,
+            "amount가 주사위식 문법(NdM, 예: '1d6'·'2d8+1'·'-1d6'·'4d6k3'·'4d6kl3')을"
+            " 따르지 않는다",
+            amount=expr,
         )
+    return match
 
-    sign = -1 if match.group("sign") == "-" else 1
+
+def _validated_dice_components(
+    match: re.Match[str], expr: str
+) -> tuple[int, int, int | None, bool, int]:
+    """매치된 식에서 (개수, 면수, keep 개수, keep이 높은 쪽인가, 고정 가감)을
+    뽑고 상한·keep 범위를 검사한다 — `roll_amount`/`parse_dice_expr`이 이
+    한 자리를 공유한다."""
     count = int(match.group("count"))
     sides = int(match.group("sides"))
     flat = int(match.group("flat")) if match.group("flat") else 0
@@ -169,11 +169,74 @@ def roll_amount(roller: DieRoller, amount: int | str) -> tuple[int, tuple[int, .
     if count > MAX_DICE_COUNT or sides > MAX_DIE_SIDES:
         raise InvalidResourceChange(
             f"주사위식이 상한을 넘는다(개수 <= {MAX_DICE_COUNT}, 면수 <= {MAX_DIE_SIDES})",
-            amount=amount,
+            amount=expr,
         )
 
+    keep_count_group = match.group("keep_count")
+    if keep_count_group is None:
+        return count, sides, None, True, flat
+
+    keep_count = int(keep_count_group)
+    keep_highest = match.group("keep_lowest") is None
+    if keep_count < 1 or keep_count > count:
+        raise InvalidResourceChange(
+            f"keep 개수가 굴림 개수({count}) 범위를 벗어난다: {keep_count}",
+            amount=expr,
+        )
+    return count, sides, keep_count, keep_highest, flat
+
+
+def parse_dice_expr(expr: str) -> tuple[int, int, int | None, bool, int]:
+    """주사위식 하나를 (개수, 면수, keep 개수, keep이 높은 쪽인가, 고정
+    가감)으로 분해한다(12.1-02, D-04) — `CreationStepDecl`이 선언 시점에
+    이 함수를 불러 `dice_expr`이 실제로 유효한지 미리 검사한다.
+
+    **부호(`sign`)는 반환값에 없다** — 부호는 `roll_amount`가 결과값에만
+    붙이는 것이지 식 자체의 모양이 아니다(D22 원문 예시 `4d6k3`도 부호가
+    없다). keep이 없는 식(예: `"1d6"`)은 세 번째 자리가 `None`이다.
+
+    상한(`MAX_DICE_COUNT`·`MAX_DIE_SIDES`)과 keep 범위(1 이상, 굴림
+    개수 이하)를 `roll_amount`와 똑같이 여기서도 검사한다 — 선언 시점에
+    걸러야 실행 시점까지 잘못된 식이 살아남지 않는다.
+    """
+    match = _require_dice_match(expr)
+    return _validated_dice_components(match, expr)
+
+
+def roll_amount(roller: DieRoller, amount: int | str) -> tuple[int, tuple[int, ...]]:
+    """변화량 하나를 실제 정수로 만든다 — 고정 정수는 그대로, 주사위식은
+    굴려서(D-06).
+
+    고정 정수면 `(amount, ())`를 그대로 돌려준다(굴림 도구를 한 번도 안
+    부른다). 주사위식(`NdM` 문법, keep 표기 가능)이면 개수만큼
+    `roller.roll_die(sides)`를 불러 `(부호 × (keep 합 + 고정 가감), 굴린
+    눈 튜플)`을 돌려준다.
+
+    **눈은 부호를 붙이지 않은 굴린 값 그대로, 개수 전부를 돌려준다** —
+    화면에서 「1d6 = 4 → 체력 −4」로 검산되어야 하고(D-04), keep이 걸러낸
+    나머지 눈도 사람이 검산할 수 있어야 한다. 기록된 눈을 되먹이면
+    (`ReplayRoller`) 같은 합계가 나온다 — keep은 「기록된 눈에서 합계를
+    어떻게 뽑는가」만 바꾸므로 결정성이 그대로 유지된다.
+
+    **상한 검사는 굴림 도구를 부르기 전에 한다**(T-12-09) — `MAX_DICE_COUNT`·
+    `MAX_DIE_SIDES`를 넘거나 keep 개수가 굴림 개수 범위를 벗어나는 식은
+    `InvalidResourceChange`로 거절하고 `roller.roll_die`를 단 한 번도 부르지
+    않는다. 상한을 넘는 굴림 호출은 계산이 아니라 입력 실수로 본다.
+    """
+    if isinstance(amount, int):
+        return amount, ()
+
+    match = _require_dice_match(amount)
+    sign = -1 if match.group("sign") == "-" else 1
+    count, sides, keep_count, keep_highest, flat = _validated_dice_components(match, amount)
+
     rolls = tuple(roller.roll_die(sides) for _ in range(count))
-    return sign * (sum(rolls) + flat), rolls
+    if keep_count is None:
+        kept_sum = sum(rolls)
+    else:
+        ordered = sorted(rolls, reverse=keep_highest)
+        kept_sum = sum(ordered[:keep_count])
+    return sign * (kept_sum + flat), rolls
 
 
 def _require_int_amount(op: ResourceOp) -> int:

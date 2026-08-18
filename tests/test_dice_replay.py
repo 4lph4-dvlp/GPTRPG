@@ -91,3 +91,18 @@ def test_replaying_same_recorded_rolls_twice_gives_same_roll_amount_result():
     second_result = roll_amount(second_run, "2d8+1")
 
     assert first_result == second_result
+
+
+def test_replaying_same_recorded_rolls_twice_gives_same_keep_highest_result():
+    """`4d6k3`(D22 원문 예시, 12.1-02)도 같은 눈을 되먹이면 항상 같은
+    합계를 낸다 — keep 표기가 결정성을 깨지 않는다(D-04)."""
+    recorded_rolls = [2, 6, 1, 4]
+
+    first_run = ReplayRoller(list(recorded_rolls))
+    second_run = ReplayRoller(list(recorded_rolls))
+
+    first_result = roll_amount(first_run, "4d6k3")
+    second_result = roll_amount(second_run, "4d6k3")
+
+    assert first_result == second_result
+    assert first_result == (6 + 4 + 2, (2, 6, 1, 4))  # 낮은 1을 뺀 높은 셋

@@ -7,12 +7,17 @@
 몰라도 같은 수치 구간 어휘로 등급을 선언할 수 있다.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal
 
 from gptrpg.rules_core.entities import Entity, NoneKind, ResourceAxisForm, StatEntry
-from gptrpg.rules_core.resource_change import ResourceChangeDecl, ResourceOperation
+from gptrpg.rules_core.resource_change import (
+    InvalidResourceChange,
+    ResourceChangeDecl,
+    ResourceOperation,
+    parse_dice_expr,
+)
 
 TWO_D6 = "2d6"
 """판정 **방식** 이름 — 플랫폼이 제공하는 계산 능력의 이름이지 룰북 어휘가 아니다."""
@@ -194,16 +199,22 @@ class CreationStepDecl:
     어휘)가 `ResourceAxisDecl`의 「이름은 룰북 것, 형태는 플랫폼 것」 분업과
     같은 자리를 차지한다. `label`은 룰북 어휘 — 사람이 읽는 항목 이름이다.
 
-    **이 계획(12.1-01)은 세 kind(`free_text`·`place_fixed_values`·
-    `pick_one`)만 `__post_init__`에서 완전히 검증한다.** 나머지 네 kind
-    (`pick_many`·`allocate_points`·`roll_to_fill`·`derive`)는 12.1-02가
-    채운다 — 그때까지 이 네 kind로 선언해도 칸 조합 검증이 돌지 않는다.
+    **일곱 kind 전부가 `__post_init__`에서 완전히 검증된다(12.1-02).**
+    12.1-01은 세 kind(`free_text`·`place_fixed_values`·`pick_one`)만
+    채웠고, 이 계획이 나머지 넷(`pick_many`·`allocate_points`·`roll_to_fill`·
+    `derive`)을 마저 채운다 — 이제 일곱 kind 전부가 선언 시점에 필수/금지
+    칸 조합을 검사받는다(D-04).
 
     **`derive`가 수식 문자열을 쓰지 않는 이유:** 12-CONTEXT가 이미 확정한
     판단(해석기가 새로 필요하고 사람이 검산하기 어려워진다)을 D-04가
     물려받는다 — `derive_base_axis`(기준 축) · `derive_multiplier`(배수) ·
     `derive_offset`(더할 값) 세 칸으로 적는다. `ResourceChangeDecl`의
     「축 · 동작 · 양」과 같은 형식이다.
+
+    **`roll_to_fill`이 `dice_expr`을 선언 시점에 검사하는 이유:** `dice_expr`이
+    `parse_dice_expr`(`resource_change.py`)을 통과하지 못하면 실행 시점까지
+    잘못된 식이 살아남지 않고 여기서 바로 `InvalidCreationStep`으로 멈춘다
+    (원 예외 `InvalidResourceChange`를 사유로 감싼다).
     """
 
     step_id: str
@@ -260,8 +271,94 @@ class CreationStepDecl:
                 ("axis_names", "pick_count", "fixed_values", "point_budget", "per_target_max",
                  "dice_expr", "derive_base_axis", "derive_multiplier", "derive_offset"),
             )
-        # pick_many/allocate_points/roll_to_fill/derive — 12.1-02가 이 자리에
-        # 칸 조합 검증을 채운다. 지금은 위 세 kind 밖은 검증하지 않는다.
+        elif self.kind == "pick_many":
+            if not self.options:
+                raise InvalidCreationStep("pick_many는 options가 필수다", step_id=self.step_id)
+            if self.pick_count is None:
+                raise InvalidCreationStep(
+                    "pick_many는 pick_count가 필수다", step_id=self.step_id
+                )
+            if self.pick_count < 1:
+                raise InvalidCreationStep(
+                    "pick_many의 pick_count는 1 이상이어야 한다", step_id=self.step_id
+                )
+            if self.pick_count > len(self.options):
+                raise InvalidCreationStep(
+                    "pick_many의 pick_count가 options 길이보다 크다", step_id=self.step_id
+                )
+            self._reject_unused(
+                ("axis_names", "fixed_values", "point_budget", "per_target_max", "dice_expr",
+                 "derive_base_axis", "derive_multiplier", "derive_offset"),
+            )
+        elif self.kind == "allocate_points":
+            if not self.axis_names:
+                raise InvalidCreationStep(
+                    "allocate_points는 axis_names가 필수다", step_id=self.step_id
+                )
+            if self.point_budget is None:
+                raise InvalidCreationStep(
+                    "allocate_points는 point_budget이 필수다", step_id=self.step_id
+                )
+            if self.point_budget < 1:
+                raise InvalidCreationStep(
+                    "allocate_points의 point_budget은 1 이상이어야 한다", step_id=self.step_id
+                )
+            self._reject_unused(
+                ("options", "pick_count", "fixed_values", "dice_expr", "derive_base_axis",
+                 "derive_multiplier", "derive_offset"),
+            )
+        elif self.kind == "roll_to_fill":
+            if not self.axis_names:
+                raise InvalidCreationStep(
+                    "roll_to_fill은 axis_names가 필수다", step_id=self.step_id
+                )
+            if not self.dice_expr:
+                raise InvalidCreationStep(
+                    "roll_to_fill은 dice_expr이 필수다", step_id=self.step_id
+                )
+            try:
+                parse_dice_expr(self.dice_expr)
+            except InvalidResourceChange as exc:
+                raise InvalidCreationStep(
+                    f"dice_expr이 유효하지 않다: {exc}", step_id=self.step_id
+                ) from exc
+            self._reject_unused(
+                ("options", "pick_count", "fixed_values", "point_budget", "per_target_max",
+                 "derive_base_axis", "derive_multiplier", "derive_offset"),
+            )
+        elif self.kind == "derive":
+            if not self.axis_names:
+                raise InvalidCreationStep("derive는 axis_names가 필수다", step_id=self.step_id)
+            if len(self.axis_names) != 1:
+                raise InvalidCreationStep(
+                    "derive의 axis_names는 정확히 하나여야 한다(자동 계산은 축 하나를"
+                    " 채운다)",
+                    step_id=self.step_id,
+                )
+            if self.derive_base_axis is None:
+                raise InvalidCreationStep(
+                    "derive는 derive_base_axis가 필수다", step_id=self.step_id
+                )
+            if self.derive_multiplier is None:
+                raise InvalidCreationStep(
+                    "derive는 derive_multiplier가 필수다", step_id=self.step_id
+                )
+            if self.derive_offset is None:
+                raise InvalidCreationStep(
+                    "derive는 derive_offset이 필수다", step_id=self.step_id
+                )
+            if not self.depends_on:
+                raise InvalidCreationStep(
+                    "derive는 depends_on이 필수다 — 기준 축 값을 어느 단계에서"
+                    " 찾을지 알아야 한다",
+                    step_id=self.step_id,
+                )
+            self._reject_unused(
+                ("options", "pick_count", "fixed_values", "point_budget", "per_target_max",
+                 "dice_expr"),
+            )
+        else:
+            raise InvalidCreationStep(f"알 수 없는 kind: {self.kind!r}", step_id=self.step_id)
 
     def _reject_unused(self, field_names: tuple[str, ...]) -> None:
         for name in field_names:
@@ -477,6 +574,38 @@ class Rulebook:
                 "provides_display_name=True인 만들기 항목이 둘 이상이다 — 캐릭터"
                 " 표시 이름의 출처는 하나여야 한다"
             )
+        # depends_on/default_from이 가리키는 step_id가 실재하는지는
+        # CreationStepDecl 혼자서는 알 수 없다(같은 룰북의 다른 단계 목록을
+        # 모른다) — 여기서 검사한다. `step_ids_seen`은 지금까지(이 단계
+        # 앞에) 선언된 step_id만 담으므로, "없는 step_id"와 "뒤에 선언된
+        # 단계를 가리킨다"를 한 검사로 함께 잡는다 — 순서가 곧 의존
+        # 방향이라 순환을 만들 자리를 구조적으로 없앤다.
+        step_ids_seen: list[str] = []
+        for step in self.creation_steps:
+            for dep in step.depends_on:
+                if dep == step.step_id:
+                    raise InvalidCreationStep(
+                        f"depends_on이 자기 자신을 가리킨다: {dep!r}", step_id=step.step_id
+                    )
+                if dep not in step_ids_seen:
+                    raise InvalidCreationStep(
+                        f"depends_on이 존재하지 않거나 뒤에 선언된 단계를 가리킨다:"
+                        f" {dep!r}",
+                        step_id=step.step_id,
+                    )
+            if step.default_from is not None:
+                if step.default_from == step.step_id:
+                    raise InvalidCreationStep(
+                        f"default_from이 자기 자신을 가리킨다: {step.default_from!r}",
+                        step_id=step.step_id,
+                    )
+                if step.default_from not in step_ids_seen:
+                    raise InvalidCreationStep(
+                        f"default_from이 존재하지 않거나 뒤에 선언된 단계를 가리킨다:"
+                        f" {step.default_from!r}",
+                        step_id=step.step_id,
+                    )
+            step_ids_seen.append(step.step_id)
 
 
 class InvalidResourceAxis(Exception):
@@ -493,6 +622,39 @@ class InvalidResourceAxis(Exception):
         super().__init__(f"자원 축 선언이 유효하지 않다: {reason} (name={name!r})")
         self.reason = reason
         self.name = name
+
+
+def build_creation_stats(
+    axis_values: Mapping[str, int], resource_axes: tuple[ResourceAxisDecl, ...]
+) -> tuple[StatEntry, ...]:
+    """확정된 만들기 단계 값들(축 이름 → 정수)과 룰북의 자원 축 선언을
+    묶어 `StatEntry` 튜플을 만든다(D-03, CHAR-04) — 12.1-01의
+    `_prepare_create_character`가 손으로 하던 조립을 이 한 함수로 옮긴다
+    (조립 규칙이 한 자리에만 있어야 한다).
+
+    각 축의 `form`은 룰북 선언(`ResourceAxisDecl.form`)에서 그대로
+    가져온다 — 축 이름 문자열을 코드가 해석하지 않는다(`validate_entity_axes`가
+    세운 규약, D-06). `axis_values`에 있는 이름이 `resource_axes`에 없으면
+    `InvalidResourceAxis`다 — 조용히 버리지 않는다.
+
+    **`max`/`depleted_effect_ref`는 이 함수가 채우지 않는다(알려진 한계).**
+    `ResourceAxisDecl`에는 아직 이 둘을 선언할 칸이 없다 — 상한이 있는
+    자원(체력 등)과 없는 자원(능력치 등)을 가르는 정보가 지금 플랫폼에
+    없으므로, 여기서 축 이름으로 추측하면(예: "체력"이면 상한 있음) 바로
+    위 문단이 세운 "축 이름 문자열을 코드가 해석하지 않는다" 규약을
+    어기게 된다. 두 칸은 `None`으로 남긴다 — 기존 `_prepare_create_character`의
+    손 조립과 같은 동작이라 이번 변경으로 새로 생긴 한계가 아니다.
+    """
+    axes_by_name = {axis.name: axis for axis in resource_axes}
+    stats: list[StatEntry] = []
+    for axis_name, value in axis_values.items():
+        axis = axes_by_name.get(axis_name)
+        if axis is None:
+            raise InvalidResourceAxis(
+                f"확정된 축 {axis_name!r}이 룰북의 자원 축 목록에 없다", name=axis_name
+            )
+        stats.append(StatEntry(name=axis_name, form=axis.form, current=value))
+    return tuple(stats)
 
 
 class InvalidStatUsage(Exception):

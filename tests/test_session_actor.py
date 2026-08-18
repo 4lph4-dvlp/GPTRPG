@@ -21,7 +21,15 @@ from gptrpg.rulebooks import RULEBOOKS
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.resolution import Modifier
-from gptrpg.rules_core.rulebook import D20_ROLL_UNDER, D100_ROLL_UNDER, GradeBand, Rulebook
+from gptrpg.rules_core.rulebook import (
+    D20_ROLL_UNDER,
+    D100_ROLL_UNDER,
+    TWO_D6,
+    CreationStepDecl,
+    GradeBand,
+    ResourceAxisDecl,
+    Rulebook,
+)
 from gptrpg.session_actor.actor import (
     AdvanceClock,
     AlreadyConfirmed,
@@ -770,6 +778,273 @@ async def test_occupy_still_rejected_in_old_session_with_unrelated_events_and_no
 
     events = _read_events(tmp_db_path)
     assert len(events) == 1  # 점유 사건은 추가되지 않았다
+
+
+# ---------------------------------------------------------------------------
+# 12.1-02 Task 1 — 나머지 네 kind(pick_many/allocate_points/roll_to_fill/
+# derive)의 실행 시점 검증. 등록된 세 룰북은 아직 이 kind들을 쓰지 않으므로
+# (Task 3가 채운다), `_GAPPED_RULEBOOK` 패턴대로 시험 전용 룰북을 RULEBOOKS에
+# 직접 꽂아 넣는다.
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedDieRoller:
+    """`roll_die`만 구현하는 즉석 굴림 도구 — `roll_to_fill` 시험 전용."""
+
+    def __init__(self, values: list[int]) -> None:
+        self._values = iter(values)
+
+    def roll_die(self, sides: int) -> int:
+        return next(self._values)
+
+
+_CREATION_KIND_TEST_RULEBOOK_ID = "creation-kind-test-only"
+_CREATION_KIND_TEST_RULEBOOK = Rulebook(
+    rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+    display_name="만들기 kind 시험 전용",
+    resolution_method=TWO_D6,
+    grade_bands=(),
+    resource_axes=(
+        ResourceAxisDecl(name="A", form="numeric"),
+        ResourceAxisDecl(name="B", form="numeric"),
+        ResourceAxisDecl(name="STR", form="numeric"),
+        ResourceAxisDecl(name="CON", form="numeric"),
+        ResourceAxisDecl(name="체력", form="numeric"),
+    ),
+    check_trigger_mode="no_dice",
+    creation_steps=(
+        CreationStepDecl(
+            step_id="traits", kind="pick_many", label="특성", required=False,
+            options=("brave", "clever", "kind"), pick_count=2,
+        ),
+        CreationStepDecl(
+            step_id="skills", kind="allocate_points", label="스킬 배분", required=False,
+            axis_names=("A", "B"), point_budget=10, per_target_max=8,
+        ),
+        CreationStepDecl(
+            step_id="abilities", kind="roll_to_fill", label="능력치 굴리기",
+            required=False, axis_names=("STR",), dice_expr="1d6",
+        ),
+        CreationStepDecl(
+            step_id="con", kind="place_fixed_values", label="체질", required=False,
+            axis_names=("CON",), fixed_values=(3,),
+        ),
+        CreationStepDecl(
+            step_id="hp", kind="derive", label="체력", required=False,
+            axis_names=("체력",), derive_base_axis="CON", derive_multiplier=2,
+            derive_offset=10, depends_on=("con",),
+        ),
+    ),
+)
+
+
+def _register_creation_kind_test_rulebook():
+    RULEBOOKS[_CREATION_KIND_TEST_RULEBOOK_ID] = _CREATION_KIND_TEST_RULEBOOK
+
+
+def _unregister_creation_kind_test_rulebook():
+    del RULEBOOKS[_CREATION_KIND_TEST_RULEBOOK_ID]
+
+
+async def test_pick_many_step_accepts_exact_pick_count_from_options(tmp_db_path):
+    _register_creation_kind_test_rulebook()
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            seq = await actor.submit(
+                CompleteCreationStep(
+                    character_id="c1", browser_id="b1", step_id="traits",
+                    rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                    picked=("brave", "clever"),
+                )
+            )
+        finally:
+            await actor.stop()
+            store.close()
+        assert seq >= 0
+        events = _read_events(tmp_db_path)
+        assert events[-1].picked == ("brave", "clever")
+    finally:
+        _unregister_creation_kind_test_rulebook()
+
+
+async def test_pick_many_step_rejects_wrong_count(tmp_db_path):
+    _register_creation_kind_test_rulebook()
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            with pytest.raises(CommandRejected):
+                await actor.submit(
+                    CompleteCreationStep(
+                        character_id="c1", browser_id="b1", step_id="traits",
+                        rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                        picked=("brave",),
+                    )
+                )
+        finally:
+            await actor.stop()
+            store.close()
+    finally:
+        _unregister_creation_kind_test_rulebook()
+
+
+async def test_pick_many_step_rejects_option_outside_declared_list(tmp_db_path):
+    _register_creation_kind_test_rulebook()
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            with pytest.raises(CommandRejected):
+                await actor.submit(
+                    CompleteCreationStep(
+                        character_id="c1", browser_id="b1", step_id="traits",
+                        rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                        picked=("brave", "sneaky"),
+                    )
+                )
+        finally:
+            await actor.stop()
+            store.close()
+    finally:
+        _unregister_creation_kind_test_rulebook()
+
+
+async def test_allocate_points_step_accepts_exact_budget_within_per_target_max(tmp_db_path):
+    _register_creation_kind_test_rulebook()
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            seq = await actor.submit(
+                CompleteCreationStep(
+                    character_id="c1", browser_id="b1", step_id="skills",
+                    rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                    axis_values=(("A", 6), ("B", 4)),
+                )
+            )
+        finally:
+            await actor.stop()
+            store.close()
+        assert seq >= 0
+    finally:
+        _unregister_creation_kind_test_rulebook()
+
+
+async def test_allocate_points_step_rejects_sum_not_matching_budget(tmp_db_path):
+    _register_creation_kind_test_rulebook()
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            with pytest.raises(CommandRejected):
+                await actor.submit(
+                    CompleteCreationStep(
+                        character_id="c1", browser_id="b1", step_id="skills",
+                        rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                        axis_values=(("A", 6), ("B", 3)),  # 합계 9 != 예산 10
+                    )
+                )
+        finally:
+            await actor.stop()
+            store.close()
+    finally:
+        _unregister_creation_kind_test_rulebook()
+
+
+async def test_allocate_points_step_rejects_value_over_per_target_max(tmp_db_path):
+    _register_creation_kind_test_rulebook()
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            with pytest.raises(CommandRejected):
+                await actor.submit(
+                    CompleteCreationStep(
+                        character_id="c1", browser_id="b1", step_id="skills",
+                        rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                        axis_values=(("A", 9), ("B", 1)),  # A가 상한(8)을 넘는다
+                    )
+                )
+        finally:
+            await actor.stop()
+            store.close()
+    finally:
+        _unregister_creation_kind_test_rulebook()
+
+
+async def test_roll_to_fill_step_ignores_client_payload_and_uses_injected_roller(tmp_db_path):
+    """T-12.1-11 — 브라우저가 보낸 값이 아니라 주입된 Roller로 직접 굴린다."""
+    _register_creation_kind_test_rulebook()
+    try:
+        store = EventStore(tmp_db_path)
+        store.initialize()
+        actor = SessionActor(store, "s1", _ScriptedDieRoller([5]))
+        actor.start()
+        try:
+            seq = await actor.submit(
+                CompleteCreationStep(
+                    character_id="c1", browser_id="b1", step_id="abilities",
+                    rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                    # 클라이언트가 뭘 보내든(axis_values로 위조 시도) 무시된다 —
+                    # 이 kind는 axis_values를 아예 안 받는다.
+                )
+            )
+        finally:
+            await actor.stop()
+            store.close()
+        assert seq >= 0
+        events = _read_events(tmp_db_path)
+        recorded = events[-1]
+        assert recorded.rolls == (5,)
+        assert recorded.axis_values[0].axis_name == "STR"
+        assert recorded.axis_values[0].value == 5
+    finally:
+        _unregister_creation_kind_test_rulebook()
+
+
+async def test_derive_step_computes_from_dependency_axis_value(tmp_db_path):
+    _register_creation_kind_test_rulebook()
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            await actor.submit(
+                CompleteCreationStep(
+                    character_id="c1", browser_id="b1", step_id="con",
+                    rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                    axis_values=(("CON", 3),),
+                )
+            )
+            seq = await actor.submit(
+                CompleteCreationStep(
+                    character_id="c1", browser_id="b1", step_id="hp",
+                    rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                )
+            )
+        finally:
+            await actor.stop()
+            store.close()
+        assert seq >= 0
+        events = _read_events(tmp_db_path)
+        recorded = events[-1]
+        assert recorded.axis_values[0].axis_name == "체력"
+        assert recorded.axis_values[0].value == 3 * 2 + 10  # CON(3) * 2 + 10 = 16
+    finally:
+        _unregister_creation_kind_test_rulebook()
+
+
+async def test_derive_step_rejects_when_dependency_not_yet_filled(tmp_db_path):
+    _register_creation_kind_test_rulebook()
+    try:
+        store, actor = _make_actor(tmp_db_path)
+        try:
+            with pytest.raises(CommandRejected):
+                await actor.submit(
+                    CompleteCreationStep(
+                        character_id="c1", browser_id="b1", step_id="hp",
+                        rulebook_id=_CREATION_KIND_TEST_RULEBOOK_ID,
+                    )
+                )
+        finally:
+            await actor.stop()
+            store.close()
+    finally:
+        _unregister_creation_kind_test_rulebook()
 
 
 async def test_occupation_survives_a_fresh_session_registry_over_the_same_store(tmp_db_path):

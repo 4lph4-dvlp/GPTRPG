@@ -29,7 +29,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from gptrpg.event_log.store import SequenceConflict
-from gptrpg.rules_core.rulebook import EntityAxisMismatch, InvalidCreationStep
+from gptrpg.rules_core.rulebook import EntityAxisMismatch, InvalidCreationStep, InvalidResourceAxis
 from gptrpg.rulebooks import UnknownRulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.session_actor.actor import (
@@ -188,7 +188,7 @@ async def complete_creation(
         )
     except UnknownRulebook as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except EntityAxisMismatch as exc:
+    except (EntityAxisMismatch, InvalidResourceAxis) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RosterAlreadyLocked as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
