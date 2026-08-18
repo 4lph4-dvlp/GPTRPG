@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.1
-current_phase_name: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
+current_phase_name: character-creation
 status: executing
-stopped_at: Phase 12.1 context gathered
-last_updated: "2026-08-18T12:20:36.143Z"
-last_activity: 2026-08-18
-last_activity_desc: Phase 12 complete, transitioned to Phase 12.1
+stopped_at: Completed 12.1-01-PLAN.md
+last_updated: "2026-08-18T15:55:03.787Z"
+last_activity: 2026-08-19
+last_activity_desc: Phase 12.1 execution started
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 35
-  completed_plans: 29
+  completed_plans: 30
   percent: 38
 ---
 
@@ -24,17 +24,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 12 — stats-resources-inventory
+**Current focus:** Phase 12.1 — character-creation
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 12.1 — 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
-Plan: Not started
+Phase: 12.1 (character-creation) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-18 — Phase 12.1 planning complete
+Last activity: 2026-08-19 — Phase 12.1 execution started
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -42,7 +42,7 @@ Last activity: 2026-08-18 — Phase 12.1 planning complete
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [██████████] 100%
+Progress: [█████████░] 86%
 
 ## Performance Metrics
 
@@ -120,6 +120,7 @@ Progress: [██████████] 100%
 | Phase 12 P04 | ~40min | 3 tasks | 9 files |
 | Phase 12 P06 | ~4h | 3 tasks | 18 files |
 | Phase 12 P07 | ~2h | 3 tasks | 18 files |
+| Phase 12.1 P01 | not tracked (checkpoint-resumed session) | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -264,6 +265,10 @@ Progress: [██████████] 100%
 - [Phase ?]: 12-07: CheckBreakdown(D-04)·ResourceChangeBadge+changeIntensity(RULE-07/D-19)로 검산·자원 변화가 화면에 보이게 함. StatusPane 도크스트링의 '읽기 전용, 한 번만 불러 둔다' 거짓 전제를 제거하고 폴링 재요청 계기를 만들어 RULE-06을 닫음(12-01의 backend 절반에 이어 화면 절반 완성)
 - [Phase ?]: 12-07 체크포인트 확인(4인 실제 브라우저): 여섯 항목 전부 PASS, 특히 D-18(AI가 네 명을 한 사람으로 뭉뚱그림, 세션1 붕괴 지점)이 재현 안 됨을 처음 실측 확인. 확인 중 발견된 결함 2건(캐릭터 미보유 축에 자원 변화 적용 44ed73f, 시계 진행 문구가 trigger 무관하게 항상 실패로 표시 1ad6dcd)을 그 자리에서 수정
 - [Phase ?]: 12-07: 서사가 자원 변화를 모르는 문제(NarrationFacts에 결과 카테고리 칸 없음)와 위협 시계 하나뿐이라 잘해도 나빠지는 쪽으로만 기록되는 문제, 둘 다 Phase 13.1(GM이 이야기를 이끈다)로 미룸 — RULE-06/RULE-07 문자 그대로의 기준은 충족했으나 '보이는데 뜻이 없으면 소용없다'는 더 깊은 문제로 별개 요구사항
+- [Phase ?]: [Phase 12.1] 12.1-01 Task 1 체크포인트(option-a, 사용자 승인): 사건 판 8->9를 한 번에 올리고 캐릭터 만들기 다섯 사건(끼어들기 포함)을 같은 커밋에 연다 — 명단 잠금에 푸는 사건을 만들지 않는다(D-08)
+- [Phase ?]: [Phase 12.1] 12.1-01: _prepare_occupy의 옛 세션 판별에 created_characters 조건을 더했다 — 판 9부터 만들기 사건은 있는데 점유가 없는 것이 정상 새 세션일 수 있다(CHAR-05 자동 점유)
+- [Phase ?]: [Phase 12.1] 12.1-01: PartySizeFixed.rulebook_min/max는 Rulebook.party_size_range가 아직 없어 1/None 자리표시자다 — 12.1-02가 실제 룰북 범위로 교체해야 한다
+- [Phase ?]: [Phase 12.1] 12.1-01: CHAR-01/04/05는 이 계획이 시작만 열었을 뿐(각각 12.1-02·03·05·04가 마저 닫아야 완결) REQUIREMENTS.md 체크는 그대로 Pending 두었다 — 여러 계획에 걸친 요구사항 조기 완료 표시를 피한다
 
 ### Pending Todos
 
@@ -321,10 +326,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-18T10:49:51.994Z
-Stopped at: Phase 12.1 context gathered
+Last session: 2026-08-18T15:55:03.745Z
+Stopped at: Completed 12.1-01-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
-Resume file: .planning/phases/12.1-character-creation/12.1-CONTEXT.md
+Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
 `resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
