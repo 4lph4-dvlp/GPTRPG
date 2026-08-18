@@ -707,3 +707,43 @@ def test_fold_folding_same_event_list_twice_gives_same_result():
     first = fold("s1", events)
     second = fold("s1", events)
     assert first == second
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-18 코드 리뷰 CR-01 회귀 — 「쓰기 전 시연 적용」이 막는 것.
+#
+# 재량 판정·소급 선언의 `amount`는 요청 모델에서 `int`로 못박혀 있는데,
+# `named_slots`(Cairn의 `Inventory` — 소급 선언이 유일하게 물려 있는 축)와
+# `tag_list`는 **문자열** 양이 필요하다. 축 이름·형태·동작 세 검사는 전부
+# 통과하고 양의 타입만 어긋난다.
+#
+# 고치기 전에는 사건이 먼저 기록되고 **그 뒤** 시트를 접을 때 터졌다. 시트
+# 조립이 세션의 캐릭터 전원을 한 번에 접으므로 한 사람의 잘못된 기록 하나가
+# 그 세션의 모든 요청을 영구히 500으로 만들었다.
+#
+# 지금 이 조합은 웹 경로에서 **도달 불가**다 — 출하되는 캐릭터 중 칸 형태
+# 축을 가진 사람이 없어(`PLAYER_CHARACTERS`는 전부 numeric),
+# `require_axes_on_character`가 먼저 막는다. 칸 형태 축을 가진 캐릭터가
+# 생기는 순간(Cairn 계열) 열리므로, 그 앞을 지키는 것이 라우트의 시연
+# 적용이다. 그래서 이 시험은 웹이 아니라 **그 시연이 쓰는 함수 자체**를
+# 직접 확인한다 — 웹으로 쓰면 축 검사에 걸려 엉뚱한 이유로 통과한다.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_character_stats_rejects_int_amount_on_a_slot_axis():
+    """칸 형태 축에 숫자 양을 접으면 `InvalidResourceChange`로 멈춘다 —
+    라우트가 사건을 쓰기 전에 이 함수를 시연 삼아 부르는 이유다."""
+    stats = (
+        StatEntry(name="Inventory", form="named_slots", slot_values=(None, None, None)),
+    )
+    ops = {"Inventory": (ResourceOp(axis="Inventory", operation="fill", amount=1),)}
+
+    with pytest.raises(InvalidResourceChange):
+        resolve_character_stats(stats, ops)
+
+    # 같은 자리에 문자열 양이면 정상으로 접힌다 — 막은 것이 「칸 형태 전부」가
+    # 아니라 「양의 타입이 어긋난 경우」임을 이 짝이 보인다.
+    ok = resolve_character_stats(
+        stats, {"Inventory": (ResourceOp(axis="Inventory", operation="fill", amount="밧줄"),)}
+    )
+    assert "밧줄" in ok[0].slot_values

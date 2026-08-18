@@ -24,7 +24,6 @@ from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore
 from gptrpg.rulebooks import get_rulebook
 from gptrpg.rulebooks.moves import get_moves
-from gptrpg.rules_core.resource_change import ResourceOp, roll_amount
 from gptrpg.rules_core.rulebook import (
     GradeBand,
     OutcomeList,
@@ -33,21 +32,18 @@ from gptrpg.rules_core.rulebook import (
     require_band,
 )
 from gptrpg.session_actor.actor import (
-    AlreadyChanged,
     AppendNarration,
     ConfirmAction,
     DeclareAction,
     ProceedEligible,
     RecordActionClassification,
     RecordAiCall,
-    RecordResourceChange,
     RecordSafetyFlag,
     ResolveCheck,
     SessionActor,
     SessionRegistry,
     VerifyProceedEligibility,
 )
-from gptrpg.session_actor.live_roller import LiveRoller
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
@@ -766,31 +762,29 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             change for category in picked_categories for change in category.changes
         ]
         if pending_changes:
-            print("자원 변화 제안:")
+            # 이 경로는 **이 캐릭터가 어느 축을 실제로 가졌는지 모른다.**
+            # 명령줄에는 캐릭터 선택 개념이 없어 `args.player`를 식별자로만
+            # 쓰고(D-42), `build_turn_context`에 파티를 안 넘기므로
+            # `ctx.party_state`가 비어 있다. 실제 수치가 담긴
+            # `web.characters_data`는 계층 규칙상 여기서 볼 수 없다
+            # (`cli`와 `web`은 같은 층의 형제라 서로 import 못 한다,
+            # `.importlinter` contract:2).
+            #
+            # 웹 경로는 이 자리에서 `eligible_categories`로 걸러 내고
+            # `require_axes_on_character`로 다시 막는다. 여기서는 그 검사를
+            # **할 수 없으므로 적용하지 않는다** — 2026-08-18 플레이테스트가
+            # 보여준 그대로, 캐릭터가 안 가진 축에 변화를 기록하면 사건은
+            # 남고 접기는 조용히 버려서 「변했다」는 표시만 남는다. 확인할
+            # 수 없는 것을 적용하는 것보다 안 하고 말하는 쪽이 낫다
+            # (2026-08-18 코드 리뷰 CR-03).
+            print("자원 변화 제안 (명령줄에서는 적용하지 않습니다):")
             for change in pending_changes:
                 print(f"  - {change.axis} {change.operation} {change.amount}")
-            print("[Enter=확인 / n=아니오]")
-            answer = input().strip().lower()
-            if answer not in ("n", "no"):
-                roller = LiveRoller()
-                ops = tuple(
-                    ResourceOp(axis=decl.axis, operation=decl.operation, amount=rolled, rolls=rolls)
-                    for decl in pending_changes
-                    for rolled, rolls in (roll_amount(roller, decl.amount),)
-                )
-                try:
-                    await actor.submit(
-                        RecordResourceChange(
-                            character_id=args.player,
-                            changes=ops,
-                            source="outcome_list",
-                            caused_by_seq=resolve_seq,
-                        )
-                    )
-                except AlreadyChanged:
-                    pass  # 재시도 — 이미 기록된 변화를 다시 깎지 않는다.
-            else:
-                print("자원 변화를 적용하지 않습니다.")
+            print(
+                "  → 이 경로는 캐릭터가 어느 축을 실제로 가졌는지 알 수 없어,\n"
+                "    적용하면 기록만 남고 값은 안 변할 수 있습니다.\n"
+                "    자원 변화는 브라우저 화면에서 확인해 주세요."
+            )
     elif not rulebook.outcome_list.categories and grade_band.costs:
         # RULE-10 — 결과 목록이 없어도 재량 판정 여지가 있다는 것만
         # 안내한다. 실제 제안(축·동작·양)을 만드는 AI 호출은 이 계획의

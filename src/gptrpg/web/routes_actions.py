@@ -50,6 +50,7 @@ from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.entities import Entity
 from gptrpg.rules_core.resource_change import (
+    InvalidResourceChange,
     ResourceChangeDecl,
     ResourceOp,
     resolve_character_stats,
@@ -1315,6 +1316,29 @@ async def confirm_resource_change(
         for decl in decls
         for rolled_amount, rolls in (roll_amount(roller, decl.amount),)
     )
+
+    # 쓰기 전 시연 적용 — 이 연산들을 **실제로 접어 본다**. 여기서 터지는
+    # 것이 사건이 기록된 뒤에 터지면 그 세션은 영구히 복구 불가가 된다:
+    # 시트 조립(`_current_party_state`)이 세션의 캐릭터 **전원**을 한 번에
+    # 접으므로, 한 사람의 잘못된 기록 하나가 그 세션의 모든 요청을 500으로
+    # 만든다. 기록을 손대는 것 말고는 되돌릴 방법이 없다.
+    #
+    # 위의 검증들이 못 잡는 조합이 실재한다(2026-08-18 코드 리뷰 CR-01):
+    # 재량 판정·소급 선언의 `amount`는 요청 모델에서 `int`로 못박혀 있는데,
+    # `named_slots`(예: Cairn의 `Inventory` — 소급 선언이 유일하게 물려 있는
+    # 축)와 `tag_list`는 **문자열** 양이 필요하다. 축 이름·형태·동작 세
+    # 검사(`validate_outcome_list`)는 전부 통과하고 양의 타입만 어긋난다.
+    #
+    # 개별 검사를 새로 만들지 않고 `apply_resource_op` 자체를 재사용한다 —
+    # 「적용해서 되는가」가 곧 「기록해도 되는가」이므로 두 판정이 갈릴 수
+    # 없다. 시작값으로 접어도 형태·동작·양 타입 검증은 동일하다(그 셋은
+    # 현재 값과 무관하다).
+    try:
+        resolve_character_stats(
+            actor_entity.stats, {op.axis: (op,) for op in ops}
+        )
+    except InvalidResourceChange as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         await actor.submit(
