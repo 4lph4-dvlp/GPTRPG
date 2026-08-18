@@ -503,11 +503,22 @@ Phase 11 (담을 그릇 — 자원 축 표현), Phase 12 (`StatEntry` 쓰기 경
 **Plans**: 6 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 12.1-01-PLAN.md — 뼈대: 선언 최소 골격 + 사건 판 9 + 리듀서 + 자동 점유 + 명단 잠금을 HTTP 한 경로로 뚫는다 (tracer)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 12.1-02-PLAN.md — 선언 형식 완성: 일곱 조작 · 인원 범위(D-01/D-02) · `4d6k3` · 세 룰북이 서로 다른 조합 · Format Test
 - [ ] 12.1-03-PLAN.md — GM 진행 자기소개: `creation_gm` 역할 · 안내 · 차례 지목(D-06) · 갈고리 목적의 되묻기(D-05)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 12.1-04-PLAN.md — 대화 완성: 되돌리기(D-07) · 끼어들기(D-09) · GM 정리와 한 줄 소개(CHAR-03/D-10) · 동의 관문과 부분 재진행(D-11)
 - [ ] 12.1-05-PLAN.md — 정적 넷 제거: `characters_data.py` → 시험 재료 · 세 호출부 전환 · `PARTY_MEMBER_LIMIT` 정정 · CLI 예외 근거
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 12.1-06-PLAN.md — 화면 두 결함(접힌 할 일) + 쿠키 분실 한계 명시
 
 > **왜 여기 끼워졌나.** Phase 8 논의 중 사용자가 「캐릭터를 생성하는 기능이 안

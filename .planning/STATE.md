@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.1
 current_phase_name: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
-status: planning
+status: executing
 stopped_at: Phase 12.1 context gathered
-last_updated: "2026-08-18T10:49:52.033Z"
+last_updated: "2026-08-18T12:20:36.143Z"
 last_activity: 2026-08-18
+last_activity_desc: Phase 12 complete, transitioned to Phase 12.1
 progress:
   total_phases: 13
   completed_phases: 5
-  total_plans: 29
+  total_plans: 35
   completed_plans: 29
   percent: 38
-last_activity_desc: Phase 12 complete, transitioned to Phase 12.1
 ---
 
 # Project State
@@ -32,9 +32,9 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 12.1 — 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
 Plan: Not started
-Status: Ready to plan
+Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-18
+Last activity: 2026-08-18 — Phase 12.1 planning complete
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
