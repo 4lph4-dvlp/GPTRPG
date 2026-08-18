@@ -6,15 +6,15 @@ current_phase: 12
 current_phase_name: stats-resources-inventory
 status: verifying
 stopped_at: Completed 12-07-PLAN.md (12-07) — Phase 12 전체 완료
-last_updated: "2026-08-18T03:45:29.880Z"
+last_updated: "2026-08-18T05:37:16.880Z"
 last_activity: 2026-08-17
 last_activity_desc: 12-01-PLAN.md executed (checkpoint approved, Task 2+3 committed)
 progress:
-  total_phases: 12
+  total_phases: 13
   completed_phases: 5
   total_plans: 29
   completed_plans: 29
-  percent: 42
+  percent: 38
 ---
 
 # Project State
@@ -309,6 +309,7 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 - Phase 12.1 inserted after Phase 12: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22). Phase 8 논의 중 사용자가 지적해 발견: D22가 잠긴 결정인데도 v1.1·M1~M4 어디에도 배정된 적이 없었음. CHAR-01~05 요구사항 신설, REQUIREMENTS.md 69→74건 (URGENT)
 - Phase 13.1 inserted after Phase 13: GM이 이야기를 이끈다 — 2026-08-17 플레이테스트에서 발견한 빈칸: 진행자가 반응만 하고 이야기를 밀지 않는다 (URGENT)
+- Phase 12.2 inserted after Phase 12: 판정 합계를 서버가 보낸다 — 2026-08-18 코드 리뷰 CR-02: 화면이 눈을 더해 d100에서 틀린 검산을 보여준다 (URGENT)
 
 ## Deferred Items
 
