@@ -702,9 +702,18 @@ async def _submit_minimal_creation(actor, character_id: str, browser_id: str) ->
         CompleteCreationStep(
             character_id=character_id,
             browser_id=browser_id,
-            step_id="name",
+            step_id="archetype",
             rulebook_id=DUNGEONWORLD_LIKE_ID,
-            text_value="브람",
+            picked=("몸으로 먼저 막아선다",),
+        )
+    )
+    await actor.submit(
+        CompleteCreationStep(
+            character_id=character_id,
+            browser_id=browser_id,
+            step_id="backstory",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            text_value="우물 마을 순찰대에 뒤늦게 합류한 떠돌이 검객",
         )
     )
     await actor.submit(
@@ -716,6 +725,23 @@ async def _submit_minimal_creation(actor, character_id: str, browser_id: str) ->
             axis_values=(
                 ("STR", 2), ("DEX", 1), ("CON", 1), ("INT", 0), ("WIS", 0), ("CHA", -1),
             ),
+        )
+    )
+    await actor.submit(
+        CompleteCreationStep(
+            character_id=character_id,
+            browser_id=browser_id,
+            step_id="hp",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+        )
+    )
+    await actor.submit(
+        CompleteCreationStep(
+            character_id=character_id,
+            browser_id=browser_id,
+            step_id="name",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            text_value="브람",
         )
     )
     await actor.submit(

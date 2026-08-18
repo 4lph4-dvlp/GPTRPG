@@ -2,6 +2,8 @@
 
 from gptrpg.rules_core.entities import Entity
 from gptrpg.rules_core.rulebook import (
+    InvalidCreationStep,
+    InvalidPartySizeRange,
     Rulebook,
     validate_entity_axes,
     validate_grade_bands,
@@ -57,11 +59,15 @@ import하면 층 방향이 뒤집힌다(`.importlinter` contract 2) — 대신
 
 
 def validate_registered_rulebooks() -> None:
-    """`RULEBOOKS`에 등록된 각 룰북에 네 검사를 돌린다 — 등급 밴드의
+    """`RULEBOOKS`에 등록된 각 룰북에 여섯 검사를 돌린다 — 등급 밴드의
     가려짐/구멍(D-15), 무브 `default_stat`이 실재하는 축인지(T-11-07),
-    이 모듈이 아는 개체들의 `StatEntry`가 그 룰북 축과 맞는지(D-01), 그리고
-    `check_trigger_mode`가 무브 목록 길이와 어긋나지 않는지(D-12, T-11-14).
-    위반이 있으면 이 모듈이 임포트되는 순간 예외로 죽는다.
+    이 모듈이 아는 개체들의 `StatEntry`가 그 룰북 축과 맞는지(D-01),
+    `check_trigger_mode`가 무브 목록 길이와 어긋나지 않는지(D-12, T-11-14),
+    만들기 항목(`creation_steps`)·인원 범위(`party_size_range`)를 실제로
+    선언했는지(D-02, 12.1-02 Task 3), 그리고 등록된 룰북들이 만들기 값
+    결정 방식(`kind`)의 조합을 서로 다르게 쓰는지(D-04, 12.1-CONTEXT.md
+    「셋 다 같은 방식이면 형식이 검증되지 않는다」). 위반이 있으면 이
+    모듈이 임포트되는 순간 예외로 죽는다.
 
     **등록 시점 검사는 런타임 방어선을 대체하지 않는다.**
     `tests/test_session_actor.py`의 `_GAPPED_RULEBOOK`은 `RULEBOOKS`에
@@ -75,6 +81,7 @@ def validate_registered_rulebooks() -> None:
     # 이 모듈(gptrpg.rulebooks)을 최상단에서 import하므로, 여기서 최상단에
     # 두면 순환 import가 생긴다.
 
+    all_kind_sets: list[frozenset[str]] = []
     for rulebook_id, rulebook in RULEBOOKS.items():
         validate_grade_bands(rulebook.grade_bands)
         moves = MOVE_CATALOGS.get(rulebook_id, ())
@@ -83,6 +90,27 @@ def validate_registered_rulebooks() -> None:
         validate_trigger_mode(rulebook.check_trigger_mode, len(moves))
         for entity in _REGISTERED_ENTITIES_FOR_AXIS_CHECK.get(rulebook_id, ()):
             validate_entity_axes(entity, rulebook)
+        # D-02 규율 그대로 — 「아직 선언하지 않았다」가 조용히 통과하면
+        # 게임 중에 발견된다. 두 필드 모두 기본값 None/빈 튜플이 「아직
+        # 선언하지 않았다」의 뜻이므로 여기서 필수화한다.
+        if not rulebook.creation_steps:
+            raise InvalidCreationStep(
+                f"룰북 {rulebook_id!r}이 creation_steps를 선언하지 않았다"
+            )
+        if rulebook.party_size_range is None:
+            raise InvalidPartySizeRange(
+                f"룰북 {rulebook_id!r}이 party_size_range를 선언하지 않았다"
+            )
+        all_kind_sets.append(frozenset(step.kind for step in rulebook.creation_steps))
+
+    # 「셋 다 같은 방식이면 형식이 검증되지 않는다」(D-04, 12.1-CONTEXT.md) —
+    # 등록된 룰북이 둘 이상인데 모든 kind 집합이 완전히 같으면 값 결정
+    # 방식이 여러 룰북을 담을 수 있다는 것이 실제로 증명되지 않는다.
+    if len(all_kind_sets) > 1 and len(set(all_kind_sets)) == 1:
+        raise InvalidCreationStep(
+            "등록된 룰북이 전부 같은 값 결정 조합을 쓰면 이 형식이 여러"
+            " 룰북을 담을 수 있다는 것이 검증되지 않는다(D-04)"
+        )
 
 
 validate_registered_rulebooks()

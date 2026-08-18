@@ -10,9 +10,11 @@ from gptrpg.rules_core.resolution import Modifier
 from gptrpg.rules_core.resolution_d100 import TARGET_SHIFT
 from gptrpg.rules_core.rulebook import (
     D100_ROLL_UNDER,
+    CreationStepDecl,
     DifficultyLevelDecl,
     GradeBand,
     OutcomeList,
+    PartySizeRange,
     ResourceAxisDecl,
     Rulebook,
     require_difficulty,
@@ -122,6 +124,57 @@ OPENQUEST_OUTCOME_LIST = OutcomeList(categories=())
 아니라 정상값이고, OpenQuest의 판정 결과는 전부 재량 판정(12-06)으로
 간다(RULE-13, D-07의 귀결)."""
 
+OPENQUEST_CREATION_STEPS: tuple[CreationStepDecl, ...] = (
+    # 능력치 일곱을 한 단계로 굴린다 — `roll_to_fill`은 `axis_names`
+    # 각각에 대해 독립적으로 `dice_expr`을 굴리므로(session_actor.actor),
+    # 일곱 축을 한 선언 안에 나란히 두는 것으로 "능력치마다 3d6을 각각
+    # 굴린다"가 표현된다. 3d6은 이 계열 크리에이터가 흔히 쓰는 값이고
+    # (12.1-RESEARCH.md § 플래그된 가정 A2, 웹 검색으로 확인 — 원문 PDF
+    # 직접 확인은 아니다) 값 자체는 룰북 콘텐츠라 틀려도 형식은 영향받지
+    # 않는다.
+    CreationStepDecl(
+        step_id="attributes", kind="roll_to_fill", label="능력치 굴리기",
+        required=True,
+        axis_names=("STR", "CON", "DEX", "SIZ", "INT", "POW", "CHA"),
+        dice_expr="3d6",
+    ),
+    # 스킬 예산을 **네 개의 독립 단계**로 나눠 표현한다(단계 하나 = 풀
+    # 하나, 12.1-CONTEXT.md 「결정한 열린 지점 ③」) — `allocate_points`에
+    # 「풀 목록」을 중첩시키지 않는다. 네 풀(Resistances/Combat/Knowledge/
+    # Practical, 각 50/50/50/75, 스킬당 상한 30)은 SRD가 실제로 쓰는
+    # 다중 예산 형태다(웹 검색으로 확인, 원문 PDF 직접 확인은 아니다).
+    CreationStepDecl(
+        step_id="skills_resistances", kind="allocate_points", label="저항 기술 배분",
+        required=True, axis_names=("회피 기술", "의지 기술"),
+        point_budget=50, per_target_max=30,
+    ),
+    CreationStepDecl(
+        step_id="skills_combat", kind="allocate_points", label="전투 기술 배분",
+        required=True, axis_names=("근접 무기 기술", "원거리 무기 기술"),
+        point_budget=50, per_target_max=30,
+    ),
+    CreationStepDecl(
+        step_id="skills_knowledge", kind="allocate_points", label="지식 기술 배분",
+        required=True, axis_names=("지각 기술", "일반 지식 기술"),
+        point_budget=50, per_target_max=30,
+    ),
+    CreationStepDecl(
+        step_id="skills_practical", kind="allocate_points", label="실용 기술 배분",
+        required=True,
+        axis_names=("은신 기술", "설득 기술", "장치 기술", "운동 기술"),
+        point_budget=75, per_target_max=30,
+    ),
+    CreationStepDecl(
+        step_id="name", kind="free_text", label="이름", required=True,
+        provides_display_name=True,
+    ),
+)
+
+OPENQUEST_PARTY_SIZE_RANGE = PartySizeRange(min_player_characters=2, max_player_characters=6)
+"""BRP 계열 출간작이 흔히 적는 권장 범위(D-01) — 던전월드류(3~5)와 다른
+숫자를 실제로 써서, 세 룰북이 같은 범위를 복사해 붙이지 않았음을 데이터로
+보인다."""
+
 OPENQUEST = Rulebook(
     rulebook_id=OPENQUEST_ID,
     display_name="OpenQuest",
@@ -131,6 +184,8 @@ OPENQUEST = Rulebook(
     check_trigger_mode="declared_list",
     difficulty_levels=OPENQUEST_DIFFICULTY_LEVELS,
     outcome_list=OPENQUEST_OUTCOME_LIST,
+    creation_steps=OPENQUEST_CREATION_STEPS,
+    party_size_range=OPENQUEST_PARTY_SIZE_RANGE,
 )
 
 

@@ -18,8 +18,10 @@
 from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.rulebook import (
     D20_ROLL_UNDER,
+    CreationStepDecl,
     GradeBand,
     OutcomeList,
+    PartySizeRange,
     ResourceAxisDecl,
     RetroDeclarationDecl,
     Rulebook,
@@ -80,6 +82,52 @@ CAIRN_RETRO_DECLARATION = RetroDeclarationDecl(
     operation="fill",
 )
 
+CAIRN_CREATION_STEPS: tuple[CreationStepDecl, ...] = (
+    # 주사위 위주 만들기 — 세 능력치를 한 단계로 굴린다(`roll_to_fill`은
+    # `axis_names` 각각에 대해 독립적으로 굴린다). 3d6은 `CAIRN_EXAMPLE_ADVENTURER`가
+    # 이미 쓰는 값(current=10, 3d6 평균)과 일치한다(웹 검색으로 확인한 SRD
+    # 내용 — 원문 PDF 직접 확인은 아니다).
+    CreationStepDecl(
+        step_id="abilities", kind="roll_to_fill", label="능력치 굴리기",
+        required=True, axis_names=("STR", "DEX", "WIL"), dice_expr="3d6",
+    ),
+    # Hit Protection — 체력이 아니라 "피해를 피하는 능력", 시작값 1d6
+    # (`CAIRN_RESOURCE_AXES` 주석). 별도 단계인 이유: 세 능력치와 굴림
+    # 시점이 SRD상 자연스럽게 갈리는 값이라 같은 dice_expr로 묶이지
+    # 않는다(1d6 vs 3d6).
+    CreationStepDecl(
+        step_id="hit_protection", kind="roll_to_fill", label="Hit Protection 굴리기",
+        required=True, axis_names=("Hit Protection",), dice_expr="1d6",
+    ),
+    # 배경/트린켓 — SRD 표 항목을 고른다(`pick_one`). "굴려서 표를 뽑는다"는
+    # 이 형식으로 표현되지 않는다(알려진 한계, RQ-1 유형 8의 사촌) — 지금
+    # 형식으로는 사람이 고르는 것까지만 표현 가능하다.
+    CreationStepDecl(
+        step_id="background", kind="pick_one", label="배경", required=True,
+        options=(
+            "폐허를 뒤지던 도굴꾼",
+            "장돌뱅이 행상인",
+            "파문당한 사제",
+            "몰락한 용병",
+        ),
+    ),
+    CreationStepDecl(
+        step_id="name", kind="free_text", label="이름", required=True,
+        provides_display_name=True,
+    ),
+    # 소지품(named_slots 10칸)은 이번 만들기 단계에서 채우지 않는다(알려진
+    # 한계) — 만들기 단계 형식이 `named_slots` 축을 채우는 조작을 갖고
+    # 있지 않다. `place_fixed_values`/`allocate_points`/`roll_to_fill`은
+    # 전부 정수 축을 채운다.
+)
+
+CAIRN_PARTY_SIZE_RANGE = PartySizeRange(min_player_characters=1, max_player_characters=4)
+"""가볍고 소규모로 도는 계열의 권장 범위(D-01) — 던전월드류(3~5)·
+OpenQuest(2~6)와 또 다른 숫자를 실제로 써서 세 룰북이 같은 범위를 복사해
+붙이지 않았음을 보인다. 1인 전용(최소=최대=1)이 정상값이라는 것은
+`tests/test_rulebook.py`의 단위 시험이 별도로 확인한다 — 이 범위(1~4)
+자체는 1인 전용이 아니다."""
+
 CAIRN = Rulebook(
     rulebook_id=CAIRN_ID,
     display_name="Cairn",
@@ -90,6 +138,8 @@ CAIRN = Rulebook(
     check_trigger_mode="gm_discretion",
     outcome_list=CAIRN_OUTCOME_LIST,
     retro_declaration=CAIRN_RETRO_DECLARATION,
+    creation_steps=CAIRN_CREATION_STEPS,
+    party_size_range=CAIRN_PARTY_SIZE_RANGE,
 )
 
 # 자체 작성 예시 — 어떤 룰북 원문에서도 오지 않았다(D-18이 배제한 자체 창작

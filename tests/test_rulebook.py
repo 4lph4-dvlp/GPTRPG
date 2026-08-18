@@ -1307,11 +1307,107 @@ def test_narrow_party_size_range_with_unbounded_rulebook_range_accepts_a_bounded
 
 
 # ---------------------------------------------------------------------------
-# Rulebook.party_size_range — 실제 등록된 룰북(Task 2 시점)
+# 세 룰북 실제 검증 (12.1-02 Task 3, D-01/D-02/D-04) — 「셋 다 같은 방식이면
+# 형식이 검증되지 않는다」
 # ---------------------------------------------------------------------------
+
+_REGISTERED_RULEBOOKS = (DUNGEONWORLD_LIKE, OPENQUEST, CAIRN)
 
 
 def test_dungeonworld_like_declares_a_party_size_range():
     assert DUNGEONWORLD_LIKE.party_size_range == PartySizeRange(
         min_player_characters=3, max_player_characters=5
     )
+
+
+@pytest.mark.parametrize("rulebook", _REGISTERED_RULEBOOKS)
+def test_every_registered_rulebook_declares_creation_steps_and_party_size_range(rulebook):
+    assert rulebook.creation_steps
+    assert rulebook.party_size_range is not None
+
+
+def test_three_registered_rulebooks_do_not_all_use_the_same_creation_step_kind_set():
+    kind_sets = [
+        frozenset(step.kind for step in rulebook.creation_steps)
+        for rulebook in _REGISTERED_RULEBOOKS
+    ]
+    assert len(set(kind_sets)) > 1, (
+        "세 룰북의 kind 집합이 전부 같다 — 형식이 여러 룰북을 담을 수 있다는"
+        " 것이 검증되지 않는다(D-04)"
+    )
+
+
+@pytest.mark.parametrize("rulebook", _REGISTERED_RULEBOOKS)
+def test_every_creation_step_axis_name_is_declared_by_the_same_rulebook(rulebook):
+    """선언 시점에 잡히지 않으면 완성 시점에야 `EntityAxisMismatch`가 난다
+    — 이 시험이 그 어긋남을 등록 시점으로 앞당긴다."""
+    declared_axis_names = {axis.name for axis in rulebook.resource_axes}
+    for step in rulebook.creation_steps:
+        for axis_name in step.axis_names:
+            assert axis_name in declared_axis_names, (
+                f"{rulebook.rulebook_id}의 만들기 단계 {step.step_id!r}가 선언되지"
+                f" 않은 축을 가리킨다: {axis_name!r}"
+            )
+        if step.kind == "derive":
+            assert step.derive_base_axis in declared_axis_names
+
+
+@pytest.mark.parametrize("rulebook", _REGISTERED_RULEBOOKS)
+def test_every_registered_rulebook_has_exactly_one_provides_display_name_step(rulebook):
+    display_name_steps = [
+        step for step in rulebook.creation_steps if step.provides_display_name
+    ]
+    assert len(display_name_steps) == 1
+
+
+def test_openquest_creation_steps_include_multiple_allocate_points_pools_and_roll_to_fill():
+    kinds = [step.kind for step in OPENQUEST.creation_steps]
+    assert kinds.count("allocate_points") >= 2  # 다중 예산 풀(단계 여러 개)
+    assert "roll_to_fill" in kinds
+
+
+def test_cairn_creation_steps_include_multiple_roll_to_fill_steps():
+    kinds = [step.kind for step in CAIRN.creation_steps]
+    assert kinds.count("roll_to_fill") >= 2
+
+
+def test_validate_registered_rulebooks_rejects_when_every_rulebook_shares_the_same_kind_set():
+    """등록된 룰북이 전부 같은 kind 집합을 쓰면 등록 자체가 거부된다는
+    것을, 실제 세 룰북이 아니라 시험 전용 픽스처로 재현한다 — 등록소를
+    건드리지 않고 `validate_registered_rulebooks`가 참조하는 전역
+    `RULEBOOKS`만 monkeypatch한다."""
+    import gptrpg.rulebooks as rulebooks_module
+
+    # 한 밴드로 모든 (margin, is_doubles) 조합을 덮는다 — 이 시험이 재현하려는
+    # 실패는 kind 집합 중복이지 등급 밴드 구멍이 아니다.
+    _covers_everything = (
+        GradeBand(name="any", counts_as_failure=False, succeeded=True, costs=False),
+    )
+    same_kind_a = Rulebook(
+        rulebook_id="same-a", display_name="A", resolution_method=TWO_D6,
+        grade_bands=_covers_everything,
+        resource_axes=(ResourceAxisDecl(name="X", form="numeric"),),
+        check_trigger_mode="no_dice",
+        creation_steps=(
+            CreationStepDecl(step_id="x", kind="free_text", label="x"),
+        ),
+        party_size_range=PartySizeRange(1, 4),
+    )
+    same_kind_b = Rulebook(
+        rulebook_id="same-b", display_name="B", resolution_method=TWO_D6,
+        grade_bands=_covers_everything,
+        resource_axes=(ResourceAxisDecl(name="Y", form="numeric"),),
+        check_trigger_mode="no_dice",
+        creation_steps=(
+            CreationStepDecl(step_id="y", kind="free_text", label="y"),
+        ),
+        party_size_range=PartySizeRange(1, 4),
+    )
+
+    original = rulebooks_module.RULEBOOKS
+    rulebooks_module.RULEBOOKS = {"same-a": same_kind_a, "same-b": same_kind_b}
+    try:
+        with pytest.raises(InvalidCreationStep):
+            rulebooks_module.validate_registered_rulebooks()
+    finally:
+        rulebooks_module.RULEBOOKS = original

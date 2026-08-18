@@ -67,9 +67,21 @@ def test_creation_end_to_end_through_lock_and_rejection_after_lock(web_client) -
     party_size_response = _fix_party_size(client, count=3)
     assert party_size_response.status_code == 200
 
-    # ② 단계 둘 확정 — 자유 서술(이름) + 정해진 숫자 배치(능력치)
-    name_response = _complete_step(client, step_id="name", text_value="브람")
-    assert name_response.status_code == 200
+    # ② 대본 1~4단계 전체 확정(12.1-02 Task 3) — 사람됨(pick_one) · 왜
+    # 여기 있는가(free_text) · 능력치 배치(place_fixed_values) · 체력
+    # 자동 계산(derive) · 이름·모습(free_text, provides_display_name).
+    # 방어구(pick_one, required=False)는 건너뛴다.
+    archetype_response = _complete_step(
+        client, step_id="archetype", text_value=None,
+        picked=["몸으로 먼저 막아선다"],
+    )
+    assert archetype_response.status_code == 200
+
+    backstory_response = _complete_step(
+        client, step_id="backstory",
+        text_value="우물 마을 순찰대에 뒤늦게 합류한 떠돌이 검객",
+    )
+    assert backstory_response.status_code == 200
 
     ability_response = _complete_step(
         client,
@@ -86,6 +98,12 @@ def test_creation_end_to_end_through_lock_and_rejection_after_lock(web_client) -
     )
     assert ability_response.status_code == 200
 
+    hp_response = _complete_step(client, step_id="hp", text_value=None)
+    assert hp_response.status_code == 200
+
+    name_response = _complete_step(client, step_id="name", text_value="브람")
+    assert name_response.status_code == 200
+
     # ③ 완성 — 자동 점유가 같은 요청 안에서 함께 일어난다(CHAR-05)
     complete_response = _complete_creation(client)
     assert complete_response.status_code == 200
@@ -101,7 +119,7 @@ def test_creation_end_to_end_through_lock_and_rejection_after_lock(web_client) -
     created_events = _events_of_type(client, "character_created")
     assert len(created_events) == 1
     assert created_events[0]["display_name"] == "브람"
-    assert len(created_events[0]["stats"]) == 6  # 능력치 여섯 칸
+    assert len(created_events[0]["stats"]) == 7  # 능력치 여섯 칸 + 체력(derive)
 
     # 자동 점유가 만든 쿠키가 실제로 이 캐릭터를 가리킨다
     raw_cookie = client.cookies.get("gptrpg_character")
@@ -191,7 +209,17 @@ def test_occupy_succeeds_for_a_fresh_session_with_only_creation_events(web_clien
 
     assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
     assert (
-        _complete_step(client, session_id=session_id, step_id="name", text_value="선").status_code
+        _complete_step(
+            client, session_id=session_id, step_id="archetype", text_value=None,
+            picked=["몸으로 먼저 막아선다"],
+        ).status_code
+        == 200
+    )
+    assert (
+        _complete_step(
+            client, session_id=session_id, step_id="backstory",
+            text_value="밤그림자처럼 마을에 흘러든 나그네",
+        ).status_code
         == 200
     )
     assert (
@@ -209,6 +237,16 @@ def test_occupy_succeeds_for_a_fresh_session_with_only_creation_events(web_clien
                 {"axis_name": "CHA", "value": -1},
             ],
         ).status_code
+        == 200
+    )
+    assert (
+        _complete_step(
+            client, session_id=session_id, step_id="hp", text_value=None,
+        ).status_code
+        == 200
+    )
+    assert (
+        _complete_step(client, session_id=session_id, step_id="name", text_value="선").status_code
         == 200
     )
     complete_response = _complete_creation(client, session_id=session_id)

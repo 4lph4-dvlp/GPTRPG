@@ -121,23 +121,70 @@ DUNGEONWORLD_OUTCOME_LIST = OutcomeList(
 )
 
 DUNGEONWORLD_CREATION_STEPS: tuple[CreationStepDecl, ...] = (
-    # 트레이서용 최소 선언 두 항목만(12.1-01) — 나머지(왜 여기 있는가·체력
-    # 자동 계산·방어구 등)는 12.1-02가 채운다.
+    # `docs/experiment/character-creation-script.md`의 만들기 대본 1~4단계
+    # 전체를 데이터로 옮긴다(12.1-02 Task 3) — 이 파일에 들어가는 값은
+    # 전부 룰북 콘텐츠다(항목 이름·선택지 문구·숫자·체력 공식의 16과 2가
+    # 전부 여기 있고 플랫폼 코드에는 하나도 없다). `web/characters_data.py`의
+    # `NEW_CHARACTER_*` 상수가 지금 같은 값을 중복해서 갖고 있고, 12.1-05가
+    # 그 파일을 시험 재료로 옮길 때 중복이 해소된다.
+    #
+    # 순서가 곧 의존 방향이다(`Rulebook.__post_init__`) — "archetype"이
+    # "ability_array"의 `default_from`과 "backstory" 앞에 오고,
+    # "ability_array"가 "hp"의 `depends_on` 앞에 온다.
     CreationStepDecl(
-        step_id="name", kind="free_text", label="이름", required=True,
-        provides_display_name=True,
+        # 대본 1단계 앞부분 — ① 목록에서 하나 고르기.
+        step_id="archetype", kind="pick_one", label="사람됨", required=True,
+        options=(
+            "몸으로 먼저 막아선다",
+            "그림자 속에서 조용히, 들키지 않게 움직인다",
+            "무슨 일이 벌어지고 있는지 먼저 알아내려 한다",
+            "말로 상대의 마음을 움직이려 한다",
+        ),
     ),
     CreationStepDecl(
-        step_id="ability_array",
-        kind="place_fixed_values",
-        label="능력치 배치",
-        required=True,
-        axis_names=("STR", "DEX", "CON", "INT", "WIS", "CHA"),
+        # 대본 1단계 뒷부분 — ⑥ 자유롭게 쓰기("왜 여기 있는가").
+        step_id="backstory", kind="free_text", label="왜 여기 있는가", required=True,
+    ),
+    CreationStepDecl(
+        # 대본 2단계 — ④ 정해진 숫자를 자리에 배치. `default_from`이
+        # "archetype"을 가리킨다 — 대본 61~66행의 「1단계 선택 → 추천
+        # 배치」 표가 이 칸이 표현해야 하는 것이다(추천 배치 자체의 숫자는
+        # 룰북 콘텐츠라 여기 선언에는 없다 — 이 형식은 "누구를 따라 추천을
+        # 뽑을지"만 표현하고, 추천값 계산은 GM 대화 쪽(12.1-03)이 대본을
+        # 그대로 읽는다).
+        step_id="ability_array", kind="place_fixed_values", label="능력치 배치",
+        required=True, axis_names=("STR", "DEX", "CON", "INT", "WIS", "CHA"),
         # 이 여섯 숫자는 룰북 콘텐츠이고 지금 web/characters_data.py:32의
         # NEW_CHARACTER_STAT_ARRAY와 같은 값이다 — 같은 값이 두 곳에 있는
         # 것은 12.1-05가 그 정적 상수를 지울 때 해소된다.
-        fixed_values=(2, 1, 1, 0, 0, -1),
+        fixed_values=(2, 1, 1, 0, 0, -1), default_from="archetype",
     ),
+    CreationStepDecl(
+        # 대본 3단계 체력 — ⑦ 자동 계산. `16 + CON 값 × 2`.
+        step_id="hp", kind="derive", label="체력", required=True,
+        axis_names=("체력",), derive_base_axis="CON", derive_multiplier=2,
+        derive_offset=16, depends_on=("ability_array",),
+    ),
+    CreationStepDecl(
+        # 대본 3단계 방어구 — 조건부 제안(랜드마인, 12.1-RESEARCH.md).
+        # `required=False`로 「이 단계를 안 채워도 캐릭터가 완성된다」만
+        # 표현한다 — 「1단계에서 무엇을 골랐느냐에 따라 제안 여부가
+        # 갈린다」는 알려진 한계로 표현하지 않는다(조건 언어를 만들면
+        # 결국 유형 8을 만들게 된다). 대본에서 이 대목은 GM이 대화로
+        # 「방어구를 가지시겠어요?」를 물으면 되는 자리다(D-03).
+        step_id="armor", kind="pick_one", label="방어구", required=False,
+        options=("가벼운 방어구를 갖춘다", "방어구 없이 시작한다"),
+    ),
+    CreationStepDecl(
+        # 대본 4단계 — ⑥ 자유롭게 쓰기(이름·모습). 표시 이름의 유일한
+        # 출처다(provides_display_name).
+        step_id="name", kind="free_text", label="이름·모습", required=True,
+        provides_display_name=True,
+    ),
+    # 대본 5단계(완성 순간 되읽기)·6단계(애착 질문)는 만들기 단계가
+    # 아니다 — 5단계는 D-10의 GM 정리 절차이고 6단계는 M0 계측용
+    # 질문이다. 둘 다 여기 `CreationStepDecl`로 나타나지 않는다는 것을
+    # `tests/test_creation_script_fixture.py`가 명시적으로 단언한다.
 )
 
 DUNGEONWORLD_PARTY_SIZE_RANGE = PartySizeRange(
