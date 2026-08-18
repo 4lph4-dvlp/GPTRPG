@@ -5,8 +5,8 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.1
 current_phase_name: 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22)
 status: planning
-stopped_at: Completed 12-07-PLAN.md (12-07) — Phase 12 전체 완료
-last_updated: "2026-08-18T08:25:14.356Z"
+stopped_at: Phase 12.1 context gathered
+last_updated: "2026-08-18T10:49:52.033Z"
 last_activity: 2026-08-18
 progress:
   total_phases: 13
@@ -321,10 +321,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-18T03:45:29.842Z
-Stopped at: Completed 12-07-PLAN.md (12-07) — Phase 12 전체 완료
+Last session: 2026-08-18T10:49:51.994Z
+Stopped at: Phase 12.1 context gathered
 이어받아 Task 2·Task 3 커밋까지 완료
-Resume file: None
+Resume file: .planning/phases/12.1-character-creation/12.1-CONTEXT.md
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
 `resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
