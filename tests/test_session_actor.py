@@ -29,8 +29,11 @@ from gptrpg.session_actor.actor import (
     AlreadyResolved,
     AppendNarration,
     CommandRejected,
+    CompleteCreationStep,
     ConfirmAction,
+    CreateCharacter,
     DeclareAction,
+    FixPartySize,
     OccupyCharacter,
     ProceedEligible,
     RecordActionClassification,
@@ -679,6 +682,94 @@ async def test_occupy_rejected_in_old_session_with_events_but_no_occupation(tmp_
     events = _read_events(tmp_db_path)
     assert len(events) == 1  # 점유 사건은 추가되지 않았다
     assert events[0].event_type == "action_declared"
+
+
+async def _submit_minimal_creation(actor, character_id: str, browser_id: str) -> None:
+    """만들기 사건 셋(party_size_fixed/creation_step_completed/
+    character_created)만 쌓고 점유는 아직 제출하지 않는다 — 아래 두 시험이
+    「만들기 사건은 있는데 점유가 없는」 정확한 판 9 새 세션 모양을 만드는
+    공용 도우미다."""
+    await actor.submit(FixPartySize(player_character_count=1, rulebook_id=DUNGEONWORLD_LIKE_ID))
+    await actor.submit(
+        CompleteCreationStep(
+            character_id=character_id,
+            browser_id=browser_id,
+            step_id="name",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            text_value="브람",
+        )
+    )
+    await actor.submit(
+        CompleteCreationStep(
+            character_id=character_id,
+            browser_id=browser_id,
+            step_id="ability_array",
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            axis_values=(
+                ("STR", 2), ("DEX", 1), ("CON", 1), ("INT", 0), ("WIS", 0), ("CHA", -1),
+            ),
+        )
+    )
+    await actor.submit(
+        CreateCharacter(
+            character_id=character_id,
+            browser_id=browser_id,
+            rulebook_id=DUNGEONWORLD_LIKE_ID,
+            one_line_intro="조용한 마을을 떠나온 모험가",
+        )
+    )
+
+
+async def test_occupy_succeeds_in_a_new_session_with_only_creation_events_and_no_occupation(
+    tmp_db_path,
+):
+    """12.1-01 Task 2 ⑦ — 판 9부터 「사건은 있는데 점유가 없다」가 반드시
+    옛 세션(판 5 미만)을 뜻하지 않는다. 만들기 사건 셋을 먼저 쌓은 새
+    세션에서 CHAR-05가 요구하는 자동 점유가 「옛 세션이다」로 거절되면 안
+    된다 — `created_characters`가 채워져 있으면 그것이 새 세션이라는
+    증거다. 이 시험과 아래 옛 세션 시험을 나란히 두는 이유는, 둘 다
+    「사건은 있는데 점유가 없다」는 같은 표면 조건을 만족하면서도 서로
+    반대로 판정돼야 하기 때문이다 — 구분 근거(created_characters 유무)가
+    실제로 갈림길을 만드는지 여기서 확인한다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await _submit_minimal_creation(actor, "bram", "B1")
+        assert actor.state.last_seq >= 0
+        assert actor.state.occupied_by == {}
+        assert actor.state.created_characters  # 만들기 사건이 있다
+        seq = await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+    finally:
+        await actor.stop()
+        store.close()
+
+    assert seq >= 0
+    events = _read_events(tmp_db_path)
+    assert events[-1].event_type == "character_occupied"
+
+
+async def test_occupy_still_rejected_in_old_session_with_unrelated_events_and_no_creation(
+    tmp_db_path,
+):
+    """위 시험의 대칭 — 만들기 사건도 점유도 없이 **다른** 사건만 있는
+    세션(판 5 미만 옛 세션)은 여전히 거부된다. `created_characters`를
+    새로 더한 세 번째 조건이 옛 세션 판별 자체를 느슨하게 만들지 않았다는
+    것을 이 시험이 못박는다(`test_occupy_rejected_in_old_session_with_events_but_no_occupation`와
+    같은 모양이지만, 12.1-01의 세 번째 조건이 들어온 뒤에도 여전히 성립함을
+    별도로 확인한다)."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(DeclareAction(player_id="bram", raw_text="문을 두드린다"))
+        assert actor.state.last_seq >= 0
+        assert actor.state.occupied_by == {}
+        assert not actor.state.created_characters  # 만들기 사건이 없다
+        with pytest.raises(CommandRejected):
+            await actor.submit(OccupyCharacter(character_id="bram", browser_id="B1"))
+    finally:
+        await actor.stop()
+        store.close()
+
+    events = _read_events(tmp_db_path)
+    assert len(events) == 1  # 점유 사건은 추가되지 않았다
 
 
 async def test_occupation_survives_a_fresh_session_registry_over_the_same_store(tmp_db_path):

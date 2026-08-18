@@ -31,12 +31,20 @@ import pytest
 from conftest import PROJECT_ROOT
 from gptrpg.event_log.schema import (
     EVENT_SCHEMA_VERSION,
+    CharacterCreated,
+    CreationInterjection,
+    CreationStatEntryRecord,
+    CreationStepCompleted,
+    PartyRosterLocked,
+    PartySizeFixed,
     ResourceChanged,
     SafetyFlagged,
     parse_event,
     utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
+from gptrpg.rules_core.entities import STAT_ENTRY_FIELD_NAMES
+from gptrpg.rules_core.reducer import UnknownEventType, apply_event, initial_state
 from gptrpg.session_actor.projection import rebuild_state_from_events
 
 _REAL_EVENTS_DB = PROJECT_ROOT / ".gptrpg" / "events.db"
@@ -495,3 +503,168 @@ def test_freshly_written_schema_8_resource_changed_event_folds_without_exception
     state = rebuild_state_from_events("fresh-resource-session", events)
     assert state.last_seq == 0
     assert state.character_resource_ops[("bram", "체력")][0].amount == -6
+
+
+# ---------------------------------------------------------------------------
+# ⑥ 판 8 -> 판 9 하위 호환 + 사건 왕복 (12.1-01 Task 3, D-03~D-09)
+#
+# 캐릭터 만들기 다섯 사건이 늘어났다 — 옛 기록(신설 다섯 종류가 하나도 없는
+# 기록)이 여전히 예외 없이 접히는지, 그리고 다섯 신설 사건 각각이 왕복·
+# 접기 양쪽에서 칸을 잃지 않는지를 못박는다. 이 저장소가 이 사고를 이미
+# 네 번 냈으므로(schema.py 판 올리기 도크스트링) 다섯 번째를 시험으로 막는다.
+# ---------------------------------------------------------------------------
+
+
+def test_pre_phase_12_1_records_with_no_creation_events_fold_under_schema_9(tmp_path):
+    """신설 다섯 종류가 하나도 없는 판 8 이하 기록(위 ①②의 실기록·⑤의
+    커밋된 픽스처가 이미 이 사실을 증명한다)과 같은 모양의 최소 기록을
+    새로 만들어, 판 9 코드로도 예외 없이 접힌다는 것을 독립적으로 못박는다.
+    """
+    store_path = tmp_path / "pre-12-1.db"
+    store = EventStore(store_path)
+    store.initialize()
+    try:
+        event = ResourceChanged(
+            session_id="pre-12-1-session",
+            seq=0,
+            schema_version=8,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="resource_changed",
+            character_id="bram",
+            changes=[
+                {
+                    "axis": "체력",
+                    "operation": "delta",
+                    "amount": -6,
+                    "rolls": [],
+                    "before": 20,
+                    "after": 14,
+                }
+            ],
+            category_id=None,
+            source="outcome_list",
+        )
+        store.append(event)
+        events = store.read_events("pre-12-1-session")
+    finally:
+        store.close()
+
+    state = rebuild_state_from_events("pre-12-1-session", events)
+    assert state.last_seq == 0
+    assert state.party_size_fixed is None
+    assert state.creation_step_values == {}
+    assert state.created_characters == {}
+    assert state.party_roster is None
+
+
+_CREATION_STAT_ENTRY_SAMPLE = CreationStatEntryRecord(
+    name="STR", form="numeric", current=2, max=None, depleted_effect_ref=None,
+    slot_values=None, tags=None, none_kind=None,
+)
+
+_NEW_EVENT_FACTORIES = {
+    "party_size_fixed": lambda seq: PartySizeFixed(
+        session_id="s-creation", seq=seq, schema_version=9, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="party_size_fixed",
+        player_character_count=3, rulebook_id="dungeonworld_like", rulebook_min=1,
+        rulebook_max=None,
+    ),
+    "creation_step_completed": lambda seq: CreationStepCompleted(
+        session_id="s-creation", seq=seq, schema_version=9, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="creation_step_completed",
+        character_id="bram", browser_id="b1", step_id="name", kind="free_text",
+        text_value="브람", picked=None, axis_values=None, rolls=None,
+        superseded_seq=None,
+    ),
+    "creation_interjection": lambda seq: CreationInterjection(
+        session_id="s-creation", seq=seq, schema_version=9, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="creation_interjection",
+        speaker_character_id="nari", browser_id="b2", during_character_id="bram",
+        mentioned_character_ids=("bram",), text="우리 같은 마을 출신이네요",
+    ),
+    "character_created": lambda seq: CharacterCreated(
+        session_id="s-creation", seq=seq, schema_version=9, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="character_created",
+        character_id="bram", browser_id="b1", display_name="브람",
+        rulebook_id="dungeonworld_like", one_line_intro="조용한 마을을 떠나온 모험가",
+        stats=(_CREATION_STAT_ENTRY_SAMPLE,),
+    ),
+    "party_roster_locked": lambda seq: PartyRosterLocked(
+        session_id="s-creation", seq=seq, schema_version=9, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="party_roster_locked",
+        character_ids=("bram",), player_character_count=1,
+    ),
+}
+
+
+@pytest.mark.parametrize("event_type", sorted(_NEW_EVENT_FACTORIES))
+def test_new_creation_event_round_trips_through_parse_event_without_losing_fields(
+    event_type,
+):
+    """다섯 신설 사건 각각을 직렬화 -> 역직렬화(`parse_event`)해도 칸이
+    하나도 안 바뀐다."""
+    original = _NEW_EVENT_FACTORIES[event_type](0)
+    round_tripped = parse_event(original.model_dump_json())
+    assert round_tripped == original
+
+
+@pytest.mark.parametrize("event_type", sorted(_NEW_EVENT_FACTORIES))
+def test_new_creation_event_folds_without_unknown_event_type(event_type):
+    """다섯 신설 사건 각각이 `apply_event`에 분기를 갖는다 —
+    `UnknownEventType`이 안 난다. 이 저장소가 이 사고를 이미 네 번 냈다
+    (schema.py 판 올리기 도크스트링) — 다섯 번째를 여기서 막는다."""
+    event = _NEW_EVENT_FACTORIES[event_type](0)
+    state = apply_event(initial_state("s-creation"), event.event_type, event.model_dump())
+    assert state.last_seq == 0
+
+
+def test_unknown_event_type_still_raises_unknown_event_type():
+    """분기 누락 회귀 방어의 반대 방향 — 이 다섯 종류 밖의 진짜 모르는
+    `event_type`은 여전히 `UnknownEventType`으로 멈춘다(조용히 넘어가지
+    않는다)."""
+    state = initial_state("s-creation")
+    with pytest.raises(UnknownEventType):
+        apply_event(state, "no_such_creation_event", {"seq": 0})
+
+
+def test_creation_stat_entry_record_field_count_matches_stat_entry():
+    """`CreationStatEntryRecord`의 필드 개수가 `STAT_ENTRY_FIELD_NAMES`의
+    개수와 같다 — `event_log`가 `rules_core`를 import할 수 없어 두 곳에
+    같은 여덟 칸이 따로 선언된다. 두 선언이 갈리는 순간을 여기서 잡는다."""
+    creation_record_field_names = set(CreationStatEntryRecord.model_fields)
+    assert creation_record_field_names == STAT_ENTRY_FIELD_NAMES
+    assert len(creation_record_field_names) == 8
+
+
+def test_creation_step_completed_second_submission_wins_and_records_superseded_seq():
+    """같은 `(character_id, step_id)`로 `creation_step_completed`를 두 번
+    접으면 나중 값이 `GameState.creation_step_values`에 남고, 앞선 사건은
+    기록(사건 목록 길이)에서 사라지지 않는다(D-07의 기록 형식)."""
+    first = CreationStepCompleted(
+        session_id="s-creation", seq=0, schema_version=9, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="creation_step_completed",
+        character_id="bram", browser_id="b1", step_id="name", kind="free_text",
+        text_value="브람", picked=None, axis_values=None, rolls=None,
+        superseded_seq=None,
+    )
+    second = CreationStepCompleted(
+        session_id="s-creation", seq=1, schema_version=9, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="creation_step_completed",
+        character_id="bram", browser_id="b1", step_id="name", kind="free_text",
+        text_value="브람 2세", picked=None, axis_values=None, rolls=None,
+        superseded_seq=0,
+    )
+
+    state = initial_state("s-creation")
+    state = apply_event(state, first.event_type, first.model_dump())
+    state = apply_event(state, second.event_type, second.model_dump())
+
+    fold_record = state.creation_step_values[("bram", "name")]
+    assert fold_record.text_value == "브람 2세"
+    assert fold_record.seq == 1
+
+    # 앞선 사건은 기록에서 지워지지 않는다 — 두 사건 다 이벤트 목록에 남고,
+    # 나중 사건의 페이로드 자체가 앞선 사건의 순번을 superseded_seq로
+    # 담고 있다(사건 기록은 append-only, 접은 결과에서만 나중 것이 이긴다).
+    assert second.superseded_seq == first.seq == 0
