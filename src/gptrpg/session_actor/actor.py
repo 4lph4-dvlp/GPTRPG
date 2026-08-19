@@ -189,6 +189,39 @@ class RecordInterjection:
     text: str
 
 
+@dataclass(frozen=True)
+class RecordConsent:
+    """동의 표시 하나(D-10, Phase 12.1-04) — **사건을 만들지 않는다.**
+
+    개별 동의는 잠금 직전 몇 초의 상태이고 잠금이 일어나면 의미가
+    사라진다. 서버가 그 사이에 재시작하면 GM이 다시 정리하고 다시
+    묻는다(D-11) — 잃는 것은 몇 초의 클릭이지 사람이 말한 서사가
+    아니다. 반면 단계 값과 완성된 캐릭터는 사람이 실제로 말한 것이므로
+    사건이다. 판을 한 번 더 올리는 비용(저장소가 네 번 사고를 낸 구간을
+    한 번 더 지나는 것)이 이 이득보다 크다. **이것이 이 저장소에서
+    사건이 아닌 유일한 만들기 상태다.** 같은 `character_id`가 두 번
+    동의해도(액터 메모리 딕셔너리가 덮어쓰므로) 두 번 세어지지 않는다
+    (멱등)."""
+
+    character_id: str
+    browser_id: str
+    agree: bool
+
+
+@dataclass(frozen=True)
+class ReopenCreationStep:
+    """만들기 항목 하나를 다시 여는 명령(D-11, Phase 12.1-04) — **사건을
+    만들지 않는다.**
+
+    그 사람의 그 항목 하나만 다시 열린다 — `character_created`가
+    무효가 되는 것이 아니라, 그 항목에 대한 `CompleteCreationStep`이
+    다시 허용되고(재확정 뒤 `CreateCharacter`를 다시 제출해
+    `character_created`를 갱신한다). **다시 열리면 앞서 받은 동의는
+    전부 무효가 된다** — 바뀐 내용에 대한 동의를 다시 받아야 한다."""
+
+    character_id: str
+    browser_id: str
+    step_id: str
 
 
 @dataclass(frozen=True)
@@ -375,6 +408,8 @@ Command = (
     | CreateCharacter
     | LockPartyRoster
     | RecordInterjection
+    | RecordConsent
+    | ReopenCreationStep
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
@@ -534,6 +569,20 @@ class SessionActor:
         # 세 자리에 따로 적지 않는다.
         self._clock_segment_count = clock_segment_count
         self._report_dir = report_dir if report_dir is not None else DEFAULT_REPORTS_DIR
+        self._creation_consents: dict[str, bool] = {}
+        """character_id -> 동의 표시(True/False, Phase 12.1-04, D-10) —
+        **사건이 아니라 액터 메모리 상태다** (`RecordConsent` 도크스트링이
+        그 근거를 적는다 — 이 저장소에서 사건이 아닌 유일한 만들기 상태).
+        서버가 재시작하면 이 표는 비워지고 GM이 다시 정리해서 다시
+        묻는다(D-11) — 잃는 것은 몇 초의 클릭뿐이다. `ReopenCreationStep`이
+        이 표를 통째로 비운다(부분 재진행 뒤 동의를 다시 받아야 한다)."""
+        self._reopened_creation_steps: set[tuple[str, str]] = set()
+        """(character_id, step_id) -> 「다시 열렸다」 표시(Phase 12.1-04,
+        D-11) — **사건이 아니라 액터 메모리 상태다.**
+        `_prepare_complete_creation_step`의 차례 종료 검사가 이 표를 보고
+        완성된 캐릭터의 항목 재확정을 허용한다. 재확정이 성공하면 그
+        항목 하나만 소비되어 이 표에서 지워진다 — 한 번 다시 채우면 다시
+        닫힌다."""
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -573,6 +622,16 @@ class SessionActor:
             self._queue.task_done()
 
     async def _process(self, command: Command) -> int:
+        # RecordConsent/ReopenCreationStep은 사건을 만들지 않는다(Phase
+        # 12.1-04, D-10/D-11) — 아래 공용 `_prepare` → append 절차를 타지
+        # 않고 액터 메모리만 바꾼다. `_prepare`의 반환 계약
+        # (event_type/caused_by_seq/fields)이 이 두 명령에는 애초에
+        # 맞지 않으므로 여기서 갈라낸다.
+        if isinstance(command, RecordConsent):
+            return await self._process_consent(command)
+        if isinstance(command, ReopenCreationStep):
+            return self._process_reopen(command)
+
         event_type, caused_by_seq, fields = self._prepare(command)
 
         seq = self._store.next_seq(self._session_id)
@@ -628,6 +687,53 @@ class SessionActor:
                 caused_by_seq=check_seq,
             )
         )
+
+    def _all_created_characters_consented(self) -> bool:
+        """완성된 캐릭터 전원이 동의했는가(D-10) — 빈 세션(아직 아무도
+        안 만들었다)은 「전원 동의」로 세지 않는다."""
+        return bool(self.state.created_characters) and all(
+            self._creation_consents.get(character_id, False)
+            for character_id in self.state.created_characters
+        )
+
+    async def _process_consent(self, command: RecordConsent) -> int:
+        """동의 표시를 액터 메모리에 담는다 — 사건을 만들지 않는다(D-10,
+        `RecordConsent` 도크스트링). 전원 동의가 모이면 그 자리에서
+        `LockPartyRoster`를 재귀 호출로 제출한다(`_maybe_auto_advance`와
+        같은 이유·같은 형식 — 큐로 돌리면 그 사이에 다른 동의가 끼어들
+        수 있다).
+
+        이 명령 자체는 사건을 안 남기므로 잠금이 일어나지 않았을 때는
+        새로 기록된 사건이 없다 — 이 경우 `self.state.last_seq`(마지막
+        기록 순번, 바뀌지 않았다)를 그대로 돌려준다. 잠금이 일어났을
+        때는 그 잠금 사건의 순번을 돌려준다.
+        """
+        if self.state.party_roster is not None:
+            raise RosterAlreadyLocked("파티 명단이 이미 잠겼다")
+        if command.character_id not in self.state.created_characters:
+            raise CommandRejected("완성되지 않은 캐릭터는 동의를 표시할 수 없다")
+
+        self._creation_consents[command.character_id] = command.agree
+        if command.agree and self._all_created_characters_consented():
+            return await self._process(
+                LockPartyRoster(character_ids=tuple(self.state.created_characters))
+            )
+        return self.state.last_seq
+
+    def _process_reopen(self, command: ReopenCreationStep) -> int:
+        """그 (character_id, step_id) 하나만 다시 연다(D-11) — 사건을
+        만들지 않는다. **앞서 받은 동의를 전부 무효화한다** — 바뀐
+        내용에 대한 동의를 다시 받아야 한다(위 「결정한 열린 지점 ③」,
+        12.1-04-PLAN.md).
+        """
+        if self.state.party_roster is not None:
+            raise RosterAlreadyLocked("파티 명단이 이미 잠겨 다시 열 수 없다")
+        if command.character_id not in self.state.created_characters:
+            raise CommandRejected("완성되지 않은 캐릭터의 항목은 다시 열 필요가 없다")
+
+        self._reopened_creation_steps.add((command.character_id, command.step_id))
+        self._creation_consents.clear()
+        return self.state.last_seq
 
     def _write_report_snapshot(self) -> None:
         """`write_report`를 불러 집계 파일을 최신으로 갱신한다 (D-44).
@@ -1231,13 +1337,19 @@ class SessionActor:
         축 값을 찾아 `기준값 × derive_multiplier + derive_offset`으로 계산한다.
 
         **D-07 경계(Phase 12.1-04)** — 그 캐릭터에 `character_created`가
-        이미 있으면(차례가 끝났다) 이 명령은 `CommandRejected`다. 다시
-        고치려면 정리 뒤 동의 관문에서 말해야 한다(D-11, 12.1-04 Task 2가
-        `ReopenCreationStep`으로 이 문을 다시 여는 길을 붙인다).
+        이미 있으면(차례가 끝났다) 이 명령은 `CommandRejected`다. 유일한
+        예외는 `ReopenCreationStep`이 그 (character_id, step_id)를 다시
+        열어 둔 경우다(D-11) — 그 경우 이 확정이 통과하고 성공하는 순간
+        그 표에서 지워진다(한 번 다시 채우면 다시 닫힌다, 아래 함수
+        끝의 discard 참조).
         """
         if self.state.party_roster is not None:
             raise RosterAlreadyLocked("파티 명단이 이미 잠겨 만들기를 더 진행할 수 없다")
-        if command.character_id in self.state.created_characters:
+        reopen_key = (command.character_id, command.step_id)
+        if (
+            command.character_id in self.state.created_characters
+            and reopen_key not in self._reopened_creation_steps
+        ):
             raise CommandRejected(
                 "차례가 끝난 캐릭터의 항목은 고칠 수 없다 — 정리 뒤 동의 관문에서"
                 " 말해야 한다"
@@ -1377,6 +1489,12 @@ class SessionActor:
         prior = self.state.creation_step_values.get(key)
         superseded_seq = prior.seq if prior is not None else None
 
+        # D-11 — 다시 열린 항목을 성공적으로 재확정했으면 그 표시를
+        # 소비한다(한 번 다시 채우면 다시 닫힌다). 여기까지 온 것은 위의
+        # 모든 검증을 통과했다는 뜻이므로, 이 시점 이후로는 실패할 수
+        # 없다 — 이 표를 앞당겨 지워도 반쪽 상태가 남지 않는다.
+        self._reopened_creation_steps.discard(key)
+
         return (
             "creation_step_completed",
             None,
@@ -1476,7 +1594,16 @@ class SessionActor:
 
     def _prepare_lock_roster(self, command: LockPartyRoster) -> tuple[str, int | None, dict]:
         """파티 명단을 잠근다(D-08) — 빈 명단은 잠글 수 없고, 이미 잠긴
-        세션에서 다시 부르면 `RosterAlreadyLocked`다."""
+        세션에서 다시 부르면 `RosterAlreadyLocked`다.
+
+        **D-10 — 동의 표시 없이 잠글 수 없다(Phase 12.1-04).** 완성된
+        캐릭터 전원이 액터 메모리의 동의 집계(`_creation_consents`)에
+        동의로 올라 있어야 한다. 이 검사는 `RecordConsent`가 전원 동의
+        순간 내부에서 이 명령을 재귀 호출할 때도 자연히 통과한다(그
+        호출은 정의상 전원 동의가 갓 채워진 뒤에 일어난다) — 이 명령을
+        **직접** 부르는 경로(라우터 우회 포함)를 막는 것이 이 검사의
+        목적이다.
+        """
         if self.state.party_roster is not None:
             raise RosterAlreadyLocked("파티 명단이 이미 잠겼다")
         if not command.character_ids:
@@ -1489,6 +1616,14 @@ class SessionActor:
                 raise CommandRejected(
                     f"만들어지지 않은 캐릭터는 명단에 넣을 수 없다: {character_id!r}"
                 )
+        if not all(
+            self._creation_consents.get(character_id, False)
+            for character_id in self.state.created_characters
+        ):
+            raise CommandRejected(
+                "동의 표시 없이 파티 명단을 잠글 수 없다 — 완성된 전원이 동의해야"
+                " 한다(D-10)"
+            )
         return (
             "party_roster_locked",
             None,

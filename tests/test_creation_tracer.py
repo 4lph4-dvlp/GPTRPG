@@ -125,12 +125,16 @@ def test_creation_end_to_end_through_lock_and_rejection_after_lock(web_client) -
     raw_cookie = client.cookies.get("gptrpg_character")
     assert raw_cookie is not None
 
-    # ⑤ 명단 잠금(D-08)
-    lock_response = client.post(
-        f"/api/sessions/{SESSION_ID}/creation/lock-roster",
-        json={"character_ids": [CHARACTER_ID]},
+    # ⑤ 명단 잠금(D-08) — 12.1-04부터 동의 표시가 잠금의 전제다(D-10).
+    # `/creation/lock-roster` 직접 호출은 동의 없이는 이제 409다(아래
+    # `test_lock_roster_directly_without_consent_is_rejected` 참조) —
+    # 이 트레이서는 실제 동의 경로(`/creation/consent`)를 지나 잠근다.
+    consent_response = client.post(
+        f"/api/sessions/{SESSION_ID}/creation/consent",
+        json={"character_id": CHARACTER_ID, "browser_id": BROWSER_ID, "agree": True},
     )
-    assert lock_response.status_code == 200
+    assert consent_response.status_code == 200
+    assert consent_response.json()["locked"] is True
 
     locked_events = _events_of_type(client, "party_roster_locked")
     assert len(locked_events) == 1
@@ -266,3 +270,61 @@ def test_fix_party_size_rejects_a_count_over_the_absolute_safety_valve(web_clien
         client, count=PARTY_MEMBER_LIMIT + 1, session_id=f"{SESSION_ID}-over-limit"
     )
     assert response.status_code == 400
+
+
+def test_lock_roster_directly_without_consent_is_rejected(web_client) -> None:
+    """12.1-04 D-10 — 동의 표시 없이 `/creation/lock-roster`를 직접 불러도
+    잠기지 않는다. 동의 집계는 액터 메모리(`_creation_consents`)에만
+    있으므로 라우터를 우회해도 액터 안의 검사(`_prepare_lock_roster`)가
+    막는다."""
+    client = web_client
+    session_id = f"{SESSION_ID}-direct-lock-no-consent"
+    assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+    assert (
+        _complete_step(
+            client, session_id=session_id, step_id="archetype", text_value=None,
+            picked=["몸으로 먼저 막아선다"],
+        ).status_code
+        == 200
+    )
+    assert (
+        _complete_step(
+            client, session_id=session_id, step_id="backstory",
+            text_value="우물 마을 순찰대에 뒤늦게 합류한 떠돌이 검객",
+        ).status_code
+        == 200
+    )
+    assert (
+        _complete_step(
+            client,
+            session_id=session_id,
+            step_id="ability_array",
+            text_value=None,
+            axis_values=[
+                {"axis_name": "STR", "value": 2},
+                {"axis_name": "DEX", "value": 1},
+                {"axis_name": "CON", "value": 1},
+                {"axis_name": "INT", "value": 0},
+                {"axis_name": "WIS", "value": 0},
+                {"axis_name": "CHA", "value": -1},
+            ],
+        ).status_code
+        == 200
+    )
+    assert (
+        _complete_step(client, session_id=session_id, step_id="hp", text_value=None).status_code
+        == 200
+    )
+    assert (
+        _complete_step(
+            client, session_id=session_id, step_id="name", text_value="브람"
+        ).status_code
+        == 200
+    )
+    assert _complete_creation(client, session_id=session_id).status_code == 200
+
+    response = client.post(
+        f"/api/sessions/{session_id}/creation/lock-roster",
+        json={"character_ids": [CHARACTER_ID]},
+    )
+    assert response.status_code == 409

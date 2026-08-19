@@ -42,9 +42,11 @@ from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
 from gptrpg.agents.context import PARTY_MEMBER_LIMIT
 from gptrpg.agents.creation_gm import (
     CreationGmContractViolation,
+    CreationGmWrapUp,
     announce_requirements,
     judge_hooks,
     nominate_speaker,
+    wrap_up,
 )
 from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, UnknownProvider
@@ -67,7 +69,9 @@ from gptrpg.session_actor.actor import (
     FixPartySize,
     LockPartyRoster,
     OccupyCharacter,
+    RecordConsent,
     RecordInterjection,
+    ReopenCreationStep,
     RosterAlreadyLocked,
 )
 from gptrpg.web.cookie_auth import COOKIE_NAME, read_identity, sign_cookie
@@ -416,6 +420,30 @@ def _required_steps_filled(state: GameState, rulebook: Rulebook, character_id: s
     return True
 
 
+def _fallback_intro_for(state: GameState, rulebook: Rulebook, character_id: str) -> str:
+    """AI 정리가 두 번 실패했을 때 쓸 기본 한 줄 소개(CHAR-03/D-10).
+
+    `provides_display_name`인 항목의 값(표시 이름)과, 그 항목이 아닌
+    첫 `free_text` 항목의 첫 문장을 이어 붙인다. 한 줄 소개가 아예 없는
+    상태를 만들지 않는다 — CHAR-03이 "자동으로 만들어진다"를 요구한다.
+    """
+    entity = state.created_characters.get(character_id)
+    display_name = entity.display_name if entity is not None else character_id
+
+    first_sentence = ""
+    for step in rulebook.creation_steps:
+        if step.kind != "free_text" or step.provides_display_name:
+            continue
+        fold = state.creation_step_values.get((character_id, step.step_id))
+        if fold is not None and fold.text_value:
+            first_sentence = fold.text_value.strip().splitlines()[0][:200]
+            break
+
+    if first_sentence:
+        return f"{display_name} — {first_sentence}"
+    return display_name
+
+
 def _resolve_creation_gm_provider(request: Request) -> tuple[Provider, str]:
     """`creation_gm` 역할의 제공자·모델을 고른다 — 기존 호출부(`declare()`
     등)와 같은 방식이다. 설정에 없으면 `ROLE_FALLBACKS`가 `master_gm`을
@@ -582,3 +610,188 @@ async def creation_follow_up(
         required_steps_filled=required_steps_filled,
     )
 
+
+# ---------------------------------------------------------------------------
+# GM 정리·한 줄 소개(CHAR-03/D-10) · 동의 관문과 부분 재진행(D-11)
+# (Phase 12.1-04)
+# ---------------------------------------------------------------------------
+
+
+class WrapUpCreationRequest(BaseModel):
+    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
+
+
+class CharacterIntroBody(BaseModel):
+    character_id: str
+    intro: str
+
+
+class WrapUpCreationResponse(BaseModel):
+    say: str
+    intros: list[CharacterIntroBody]
+
+
+@router.post("/sessions/{session_id}/creation/wrap-up", response_model=WrapUpCreationResponse)
+async def wrap_up_creation(
+    session_id: str, body: WrapUpCreationRequest, request: Request
+) -> WrapUpCreationResponse:
+    """전원 완성 뒤 GM이 정리하고 캐릭터마다 한 줄 소개를 낸다(CHAR-03/D-10).
+
+    아직 전원이 완성되지 않았으면 409. 완성된 캐릭터 전원에 대해
+    `CreateCharacter`를 `one_line_intro`와 함께 **다시 제출**해
+    `character_created`를 갱신한다(같은 `character_id`로 다시 기록되고
+    접을 때 나중 것이 이긴다) — 새 사건 종류를 만들지 않는 방법이 이것이다.
+    **별도 입력 장치를 만들지 않는다** — 이 경로가 CHAR-03을 만족하는
+    유일한 자리다.
+
+    **「전원 완성」의 판정 기준은 `party_size_fixed`(룰북 권장 인원)가
+    아니라 `_unfinished_candidates`다** — 12.1-CONTEXT.md D-08이 「명단과
+    출석은 다르다」를 명시한다(정원이 안 차도 진행한다, D22). 룰북 권장
+    범위 안에서 방을 열었어도 실제 참가자가 그보다 적을 수 있다 — 그
+    경우에도 「시작한 사람 전원이 끝났는가」만 보면 된다. 아직 아무도
+    안 만들었으면(참가자가 하나도 없으면) 정리할 것이 없으므로 이것도
+    409다.
+    """
+    actor = request.app.state.registry.get_or_create(session_id)
+    state = actor.state
+    if state.party_roster is not None:
+        raise HTTPException(status_code=409, detail="파티 명단이 이미 잠겼다")
+    if not state.created_characters:
+        raise HTTPException(status_code=409, detail="아직 완성된 캐릭터가 없다")
+    if _unfinished_candidates(state):
+        raise HTTPException(status_code=409, detail="아직 자기소개를 안 끝낸 사람이 있다")
+
+    try:
+        rulebook = get_rulebook(body.rulebook_id)
+    except UnknownRulebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    character_ids = tuple(state.created_characters)
+    fallback_intros = tuple(
+        (character_id, _fallback_intro_for(state, rulebook, character_id))
+        for character_id in character_ids
+    )
+    transcript = _transcript_for(state, character_ids)
+
+    try:
+        provider, model = _resolve_creation_gm_provider(request)
+    except _AGENT_RESOLUTION_ERRORS as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        result = await asyncio.to_thread(wrap_up, fallback_intros, transcript, provider, model)
+    except CreationGmContractViolation as exc:
+        print(f"경고: creation_gm 정리가 계약을 어겼다 — {exc}", file=sys.stderr)
+        result = CreationGmWrapUp(
+            intros=fallback_intros, say="다들 준비되셨나요? 이렇게 게임을 진행할까요?"
+        )
+
+    intro_by_id = dict(result.intros)
+    for character_id in character_ids:
+        entity = state.created_characters[character_id]
+        try:
+            await actor.submit(
+                CreateCharacter(
+                    character_id=character_id,
+                    browser_id=state.occupied_by.get(character_id, ""),
+                    rulebook_id=entity.rulebook_id,
+                    one_line_intro=intro_by_id.get(character_id, entity.display_name),
+                )
+            )
+        except RosterAlreadyLocked as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CommandRejected as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SequenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return WrapUpCreationResponse(
+        say=result.say,
+        intros=[
+            CharacterIntroBody(character_id=character_id, intro=intro)
+            for character_id, intro in result.intros
+        ],
+    )
+
+
+class ConsentRequest(BaseModel):
+    character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    browser_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    agree: bool
+    step_id: str | None = Field(default=None, max_length=MAX_ID_LEN)
+
+
+class ConsentResponse(BaseModel):
+    locked: bool
+    party_roster: list[str] | None = None
+    reopened_step_id: str | None = None
+    message: str | None = None
+
+
+@router.post("/sessions/{session_id}/creation/consent", response_model=ConsentResponse)
+async def record_creation_consent(
+    session_id: str, body: ConsentRequest, request: Request
+) -> ConsentResponse:
+    """동의 표시(D-10)와 「아니요」를 통한 부분 재진행(D-11)을 처리한다.
+
+    **신원 대조가 맨 앞이다** — 남의 캐릭터로 동의를 보낼 수 없다
+    (T-12.1-24). `agree=true`면 동의가 집계되고, 전원 동의가 모이면
+    같은 요청 안에서 명단이 잠긴다(액터가 내부에서
+    `LockPartyRoster`를 재귀 제출한다). `agree=false`면 `step_id`가
+    필수이고 그 사람의 그 항목 하나만 다시 열린다 — **앞서 받은 동의는
+    전부 무효**가 된다(D-11). 이 경로에 「명단에서 사람을 뺀다」는
+    없다 — `ReopenCreationStep`은 항목 하나를 다시 여는 것이지 명단을
+    바꾸지 않는다(D-11 경계, D-08).
+    """
+    identity = read_identity(request, session_id)
+    if identity is not None and identity.character_id != body.character_id:
+        print("경고: 신원 검증 실패 — creation/consent 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+
+    actor = request.app.state.registry.get_or_create(session_id)
+
+    if not body.agree:
+        if not body.step_id:
+            raise HTTPException(
+                status_code=400, detail="동의하지 않으면 다시 열 항목(step_id)이 필요하다"
+            )
+        try:
+            await actor.submit(
+                ReopenCreationStep(
+                    character_id=body.character_id,
+                    browser_id=body.browser_id,
+                    step_id=body.step_id,
+                )
+            )
+        except RosterAlreadyLocked as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CommandRejected as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SequenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return ConsentResponse(
+            locked=False,
+            reopened_step_id=body.step_id,
+            message=(
+                f"{body.step_id!r} 항목이 다시 열렸다 — 다시 채우고 나면 GM이"
+                " 다시 정리해서 다시 묻는다."
+            ),
+        )
+
+    try:
+        await actor.submit(
+            RecordConsent(character_id=body.character_id, browser_id=body.browser_id, agree=True)
+        )
+    except RosterAlreadyLocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CommandRejected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    state = actor.state
+    locked = state.party_roster is not None
+    return ConsentResponse(
+        locked=locked,
+        party_roster=list(state.party_roster) if locked else None,
+    )

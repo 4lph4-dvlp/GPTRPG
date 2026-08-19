@@ -466,11 +466,16 @@ def test_all_three_routes_return_409_after_roster_is_locked(web_client_with_fake
             },
         )
         assert complete_response.status_code == 200
-        lock_response = client.post(
-            f"/api/sessions/{session_id}/creation/lock-roster",
-            json={"character_ids": [CHARACTER_ID]},
+        # 12.1-04부터 동의 표시가 잠금의 전제다(D-10) — `/creation/consent`를
+        # 지나 잠근다(`/creation/lock-roster` 직접 호출은 동의 없이 이제
+        # 409다, `tests/test_creation_tracer.py`의
+        # `test_lock_roster_directly_without_consent_is_rejected` 참조).
+        consent_response = client.post(
+            f"/api/sessions/{session_id}/creation/consent",
+            json={"character_id": CHARACTER_ID, "browser_id": BROWSER_ID, "agree": True},
         )
-        assert lock_response.status_code == 200
+        assert consent_response.status_code == 200
+        assert consent_response.json()["locked"] is True
 
         assert _announce(client, session_id=session_id).status_code == 409
         assert _nominate(client, session_id=session_id).status_code == 409

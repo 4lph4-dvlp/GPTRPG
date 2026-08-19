@@ -140,6 +140,28 @@ def _interject(
     )
 
 
+def _consent(
+    client,
+    *,
+    session_id: str = SESSION_ID,
+    character_id: str = CHARACTER_ID,
+    browser_id: str = BROWSER_ID,
+    agree: bool,
+    step_id: str | None = None,
+):
+    body = {"character_id": character_id, "browser_id": browser_id, "agree": agree}
+    if step_id is not None:
+        body["step_id"] = step_id
+    return client.post(f"/api/sessions/{session_id}/creation/consent", json=body)
+
+
+def _wrap_up(client, *, session_id: str = SESSION_ID):
+    return client.post(
+        f"/api/sessions/{session_id}/creation/wrap-up",
+        json={"rulebook_id": "dungeonworld_like"},
+    )
+
+
 def _events_of_type(client, event_type: str, session_id: str = SESSION_ID) -> list[dict]:
     response = client.get(f"/api/sessions/{session_id}/events")
     assert response.status_code == 200
@@ -331,17 +353,21 @@ def test_creation_step_with_someone_elses_character_id_is_rejected(web_client):
 
 
 def test_interject_and_complete_after_roster_locked_are_both_rejected(web_client):
-    """명단이 잠긴 뒤 되돌리기·끼어들기 둘 다 `RosterAlreadyLocked`다."""
+    """명단이 잠긴 뒤 되돌리기·끼어들기 둘 다 `RosterAlreadyLocked`다.
+
+    잠금 자체는 Task 2가 붙이는 동의 관문(D-10)을 지나야 한다 — 동의
+    없이 `lock-roster`를 직접 부르면 이제 409다(아래 Task 2 절
+    `test_locking_the_roster_without_any_consent_is_rejected` 참조).
+    """
     client = web_client
     session_id = SESSION_ID + "-interject-locked"
     assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
     _complete_all_required_steps(client, session_id=session_id)
     assert _complete_creation(client, session_id=session_id).status_code == 200
-    lock_response = client.post(
-        f"/api/sessions/{session_id}/creation/lock-roster",
-        json={"character_ids": [CHARACTER_ID]},
+    assert (
+        _consent(client, session_id=session_id, character_id=CHARACTER_ID, agree=True).status_code
+        == 200
     )
-    assert lock_response.status_code == 200
     assert _events_of_type(client, "party_roster_locked", session_id=session_id)
 
     client.cookies.clear()
@@ -363,3 +389,343 @@ def test_interject_and_complete_after_roster_locked_are_both_rejected(web_client
         text_value="나리",
     )
     assert step_response.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — GM 정리·한 줄 소개(CHAR-03/D-10) · 동의 관문과 부분 재진행(D-11)
+# ---------------------------------------------------------------------------
+
+
+class _WrapUpStub:
+    """`wrap_up` 시험 전용 이중체 — `tests/test_creation_gm.py`의
+    `_CreationGmStub`과 같은 모양(호출 횟수·`fail_times`)이다."""
+
+    name = "wrap-up-stub"
+
+    def __init__(self, *, fail_times: int = 0, complete_value: str = "") -> None:
+        self.fail_times = fail_times
+        self.complete_value = complete_value
+        self.call_count = 0
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s):
+        from gptrpg.agents.envelope import AgentResult
+
+        self.call_count += 1
+        if self.call_count <= self.fail_times:
+            raise RuntimeError("wrap-up provider unavailable")
+        return AgentResult(
+            ok=True, value=self.complete_value, elapsed_ms=2, prompt_tokens=1, completion_tokens=1
+        )
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        raise NotImplementedError("wrap_up은 스트리밍하지 않는다")
+
+    def last_result(self):
+        raise NotImplementedError("이 이중체는 complete()만 시험한다")
+
+
+def test_wrap_up_before_anyone_has_finished_is_rejected(web_client):
+    client = web_client
+    session_id = SESSION_ID + "-wrapup-nobody"
+    assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+    response = _wrap_up(client, session_id=session_id)
+    assert response.status_code == 409
+
+
+def test_wrap_up_before_a_started_participant_has_finished_is_rejected(web_client):
+    """전원이 완성되기 전에는 409 — 시작했지만 아직 안 끝난 사람이 남아
+    있으면 정리할 수 없다."""
+    client = web_client
+    session_id = SESSION_ID + "-wrapup-partial"
+    assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+    assert _complete_step(client, session_id=session_id, step_id="name").status_code == 200
+
+    response = _wrap_up(client, session_id=session_id)
+    assert response.status_code == 409
+
+
+def test_wrap_up_proceeds_with_fewer_participants_than_the_rulebook_recommends(
+    web_client_with_fake_provider,
+):
+    """D-08 — 명단과 출석은 다르다. 룰북 권장 인원(3~5)보다 실제 참가자가
+    적어도(둘), 시작한 전원이 끝났으면 정리할 수 있다."""
+    from conftest import FakeProvider
+
+    provider = FakeProvider(
+        complete_value=json.dumps(
+            [
+                {
+                    "intros": [
+                        {"character_id": CHARACTER_ID, "intro": "브람은 조용한 마을을 떠나온 검객이다."},
+                        {"character_id": SECOND_CHARACTER_ID, "intro": "나리는 밤그림자를 쫓는 추적자다."},
+                    ],
+                    "say": "이렇게 게임을 진행할까요?",
+                }
+            ]
+        )
+    )
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-wrapup-attendance"
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+        _complete_all_required_steps(
+            client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
+        )
+        assert (
+            _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
+            == 200
+        )
+        # 브라우저(client)가 이미 hero-1 쿠키를 들고 있다 — 두 번째 사람을
+        # 흉내내려면 그 쿠키를 지운다(신원 대조가 hero-2로 오는 요청을
+        # 막지 않도록).
+        client.cookies.clear()
+        _complete_all_required_steps(
+            client,
+            character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID,
+            session_id=session_id,
+            name="나리",
+        )
+        assert (
+            _complete_creation(
+                client, character_id=SECOND_CHARACTER_ID, browser_id=SECOND_BROWSER_ID,
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+
+        response = _wrap_up(client, session_id=session_id)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["say"]
+        assert {intro["character_id"] for intro in body["intros"]} == {
+            CHARACTER_ID,
+            SECOND_CHARACTER_ID,
+        }
+        assert all(intro["intro"] for intro in body["intros"])
+
+        created_events = _events_of_type(client, "character_created", session_id=session_id)
+        # 각 캐릭터가 완성 시점에 한 번 + 정리에서 갱신으로 한 번, 총 넷.
+        assert len(created_events) == 4
+        latest_by_id = {}
+        for event in created_events:
+            latest_by_id[event["character_id"]] = event
+        assert latest_by_id[CHARACTER_ID]["one_line_intro"] == "브람은 조용한 마을을 떠나온 검객이다."
+        assert latest_by_id[SECOND_CHARACTER_ID]["one_line_intro"] == "나리는 밤그림자를 쫓는 추적자다."
+
+
+def test_wrap_up_falls_back_to_a_nonempty_intro_when_provider_fails_twice(web_client_with_fake_provider):
+    """제공자가 두 번 실패해도 200이고 한 줄 소개가 비어 있지 않다
+    (ARCH-05, CHAR-03이 「자동으로」를 요구한다)."""
+    provider = _WrapUpStub(fail_times=99)
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-wrapup-fallback"
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+        _complete_all_required_steps(client, session_id=session_id)
+        assert _complete_creation(client, session_id=session_id).status_code == 200
+
+        response = _wrap_up(client, session_id=session_id)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["say"]
+        assert len(body["intros"]) == 1
+        assert body["intros"][0]["intro"]
+
+
+def test_consent_locks_only_once_everyone_created_has_agreed(web_client_with_fake_provider):
+    """전원 동의에서만 명단이 잠긴다(D-10) — 한 사람이라도 미동의면
+    `party_roster_locked`가 없다."""
+    provider = _WrapUpStub(fail_times=99)
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-consent-partial"
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+        _complete_all_required_steps(
+            client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
+        )
+        assert (
+            _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
+            == 200
+        )
+        # 브라우저(client)가 이미 hero-1 쿠키를 들고 있다 — 두 번째 사람을
+        # 흉내내려면 그 쿠키를 지운다(신원 대조가 hero-2로 오는 요청을
+        # 막지 않도록).
+        client.cookies.clear()
+        _complete_all_required_steps(
+            client,
+            character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID,
+            session_id=session_id,
+            name="나리",
+        )
+        assert (
+            _complete_creation(
+                client, character_id=SECOND_CHARACTER_ID, browser_id=SECOND_BROWSER_ID,
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+
+        # 지금 client 쿠키는 hero-2다(방금 완성) — hero-1의 동의를 보내려면
+        # 지운다(진짜로는 서로 다른 브라우저다).
+        client.cookies.clear()
+        first_consent = _consent(
+            client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+            agree=True,
+        )
+        assert first_consent.status_code == 200
+        assert first_consent.json()["locked"] is False
+        assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
+        # 같은 사람이 두 번 동의해도 한 번만 세어진다(멱등) — 여전히 안
+        # 잠긴다.
+        repeat_consent = _consent(
+            client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+            agree=True,
+        )
+        assert repeat_consent.status_code == 200
+        assert repeat_consent.json()["locked"] is False
+        assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
+        second_consent = _consent(
+            client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID, agree=True,
+        )
+        assert second_consent.status_code == 200
+        assert second_consent.json()["locked"] is True
+        locked_events = _events_of_type(client, "party_roster_locked", session_id=session_id)
+        assert len(locked_events) == 1
+        assert set(locked_events[0]["character_ids"]) == {CHARACTER_ID, SECOND_CHARACTER_ID}
+
+
+def test_consent_with_someone_elses_character_id_is_rejected(web_client_with_fake_provider):
+    provider = _WrapUpStub(fail_times=99)
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-consent-403"
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+        _complete_all_required_steps(client, session_id=session_id)
+        assert _complete_creation(client, session_id=session_id).status_code == 200
+        assert client.cookies.get("gptrpg_character") is not None
+
+        response = _consent(
+            client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID, agree=True,
+        )
+        assert response.status_code == 403
+
+
+def test_disagreeing_reopens_only_that_step_and_invalidates_prior_consent(
+    web_client_with_fake_provider,
+):
+    """D-11 — 「아니요」가 나오면 걸리는 대목(그 사람의 그 항목)만 다시
+    받는다. 다른 사람의 값과 그 사람의 다른 항목은 그대로다. 다시 받은
+    뒤 앞서 받은 동의는 전부 무효가 된다."""
+    provider = _WrapUpStub(fail_times=99)
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-consent-reopen"
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+        _complete_all_required_steps(
+            client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
+        )
+        assert (
+            _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
+            == 200
+        )
+        # 브라우저(client)가 이미 hero-1 쿠키를 들고 있다 — 두 번째 사람을
+        # 흉내내려면 그 쿠키를 지운다(신원 대조가 hero-2로 오는 요청을
+        # 막지 않도록).
+        client.cookies.clear()
+        _complete_all_required_steps(
+            client,
+            character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID,
+            session_id=session_id,
+            name="나리",
+        )
+        assert (
+            _complete_creation(
+                client, character_id=SECOND_CHARACTER_ID, browser_id=SECOND_BROWSER_ID,
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+
+        # hero-1이 먼저 동의한다 — 지금 쿠키는 hero-2다, 지운다.
+        client.cookies.clear()
+        assert (
+            _consent(
+                client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+                agree=True,
+            ).status_code
+            == 200
+        )
+
+        first_hero_backstory_before = _transcript_line_for(client, session_id, CHARACTER_ID)
+
+        # hero-2가 「아니요」를 하고 backstory를 다시 받는다.
+        disagree_response = _consent(
+            client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID, agree=False, step_id="backstory",
+        )
+        assert disagree_response.status_code == 200
+        disagree_body = disagree_response.json()
+        assert disagree_body["locked"] is False
+        assert disagree_body["reopened_step_id"] == "backstory"
+        assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
+        # hero-1의 값은 그대로다.
+        assert (
+            _transcript_line_for(client, session_id, CHARACTER_ID) == first_hero_backstory_before
+        )
+
+        # 다시 열린 항목에 재확정이 통과한다.
+        resubmit_response = _complete_step(
+            client,
+            session_id=session_id,
+            character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID,
+            step_id="backstory",
+            text_value="사실 밤그림자를 쫓는 추적자였다",
+        )
+        assert resubmit_response.status_code == 200
+
+        # 다시 채운 값으로 캐릭터를 갱신한다(같은 character_id로 재제출).
+        recreate_response = _complete_creation(
+            client, character_id=SECOND_CHARACTER_ID, browser_id=SECOND_BROWSER_ID,
+            session_id=session_id, one_line_intro="나리는 사실 추적자였다.",
+        )
+        assert recreate_response.status_code == 200
+
+        # 앞서 받은 hero-1의 동의가 무효가 됐으므로, 재동의 없이는 안
+        # 잠긴다 — hero-2만 다시 동의해도 여전히 안 잠긴다.
+        hero2_reconsent = _consent(
+            client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID, agree=True,
+        )
+        assert hero2_reconsent.status_code == 200
+        assert hero2_reconsent.json()["locked"] is False
+        assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
+        # hero-1이 다시 동의하면 그제서야 전원 동의로 잠긴다 — 지금 쿠키는
+        # hero-2다(방금 재완성), 지운다.
+        client.cookies.clear()
+        hero1_reconsent = _consent(
+            client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+            agree=True,
+        )
+        assert hero1_reconsent.status_code == 200
+        assert hero1_reconsent.json()["locked"] is True
+        assert len(_events_of_type(client, "party_roster_locked", session_id=session_id)) == 1
+
+
+def _transcript_line_for(client, session_id: str, character_id: str) -> tuple[str, ...]:
+    """`creation_step_completed` 사건 중 그 캐릭터의 `text_value`가 있는
+    항목만 (step_id, text_value) 쌍으로 접어 돌려준다 — 다른 캐릭터의
+    값이 안 바뀌었는지 비교하는 데 쓴다."""
+    events = _events_of_type(client, "creation_step_completed", session_id=session_id)
+    return tuple(
+        (event["step_id"], event["text_value"])
+        for event in events
+        if event["character_id"] == character_id and event["text_value"]
+    )

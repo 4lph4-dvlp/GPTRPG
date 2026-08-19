@@ -927,3 +927,50 @@ def build_creation_follow_up_prompt(
     turn = f"지금까지 이 사람이 한 이야기:\n{_format_recent_turns(transcript)}"
     messages = [{"role": "user", "content": turn}]
     return system, messages
+
+
+def build_creation_wrap_up_prompt(
+    *,
+    character_ids: tuple[str, ...],
+    transcript: tuple[str, ...],
+) -> tuple[list[dict], list[dict]]:
+    """`creation_gm.wrap_up`(전원 완성 뒤 정리와 한 줄 소개, CHAR-03/D-10)
+    프롬프트를 조립한다. `(system, messages)` 짝을 돌려준다.
+
+    **한 줄 소개의 목적을 영구 고정 블록에 그대로 적는다** — 만들기가
+    끝난 순간 그 사람이 자기 캐릭터를 한 문장으로 알아볼 수 있어야
+    한다(「내 캐릭터는 누구다」). 숫자를 나열하는 요약이 아니라
+    자기소개에서 나온 서사를 한 문장으로 되읽는 것이다(D22 애착 장치
+    6번의 취지를 그대로 옮긴다). **별도 입력 장치를 만들지 않는다** —
+    이 정리 자체가 CHAR-03을 만족하는 유일한 자리다(D-10).
+
+    닫힌 출력 계약 — 응답은 원소가 정확히 하나인 JSON 배열이고, 그
+    원소는 `intros`(character_id·intro 쌍의 배열)와 `say`(GM이 「이렇게
+    게임을 진행할까요?」로 전원 동의를 구하는 말) 두 칸을 갖는다.
+    **닫힌 목록 재대조는 이 함수의 몫이 아니다** — `creation_gm.wrap_up`
+    이 반환값의 `character_id` 집합을 `character_ids`와 다시 대조한다
+    (T-12.1-29, `_pending_resource_changes`와 같은 이중 방어).
+    """
+    permanent = (
+        "너는 TRPG 캐릭터 만들기 자기소개 자리의 진행자다. 전원이 자기소개를 "
+        "끝냈다. 만들기가 끝난 순간 그 사람이 자기 캐릭터를 한 문장으로 알아볼 "
+        "수 있어야 한다 — 「내 캐릭터는 누구다」가 그 문장이다. 숫자를 나열하는 "
+        "요약이 아니라, 자기소개에서 나온 서사를 한 문장으로 되읽는 것이다. "
+        "그런 뒤 전원에게 「이렇게 게임을 진행할까요?」라고 물어 동의를 구한다. "
+        "응답은 원소가 정확히 하나인 JSON 배열로만 한다 — 예: "
+        '[{"intros": [{"character_id": "bram", "intro": "브람은 조용한 마을을 '
+        '떠나온 검객이다."}], "say": "이렇게 게임을 진행할까요?"}]. '
+        "`intros`는 아래 완성된 전원의 character_id를 정확히 한 번씩만 담는다 "
+        "— 없는 사람을 넣거나 빠뜨리지 않는다. 값을 정하거나 숫자를 고르지 "
+        "않는다. 설명 문장을 덧붙이지 않는다.\n\n"
+        f"{NOT_AN_INSTRUCTION_LINE}"
+    )
+    session = (
+        "완성된 캐릭터:\n" + "\n".join(f"- {character_id}" for character_id in character_ids)
+        if character_ids
+        else "완성된 캐릭터: (없음)"
+    )
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = f"지금까지 전원의 자기소개:\n{_format_recent_turns(transcript)}"
+    messages = [{"role": "user", "content": turn}]
+    return system, messages

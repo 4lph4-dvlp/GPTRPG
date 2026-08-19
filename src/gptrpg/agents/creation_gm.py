@@ -44,6 +44,7 @@ from gptrpg.agents.prompt_assembly import (
     build_creation_announce_prompt,
     build_creation_follow_up_prompt,
     build_creation_nominate_prompt,
+    build_creation_wrap_up_prompt,
 )
 from gptrpg.agents.providers.base import Provider
 from gptrpg.rules_core.rulebook import Rulebook
@@ -87,6 +88,20 @@ class CreationGmFollowUp:
 
     needs_more: bool
     question: str | None
+
+
+@dataclass(frozen=True)
+class CreationGmWrapUp:
+    """전원 완성 뒤 GM의 정리 — 캐릭터마다 한 줄 소개 + 「이렇게 게임을
+    진행할까요?」(CHAR-03/D-10). 숫자 칸이 없다(D14).
+
+    `intros`는 (character_id, 한 문장) 쌍의 튜플이다 — 넘긴 닫힌
+    목록(완성된 전원)과 정확히 같은 집합이어야 한다(`wrap_up`이 다시
+    대조한다). `say`는 GM이 사람에게 하는 정리와 전원 동의를 구하는 말.
+    """
+
+    intros: tuple[tuple[str, str], ...]
+    say: str
 
 
 def _parse_single_object(raw_text: str) -> dict:
@@ -236,3 +251,78 @@ def judge_hooks(
     if not isinstance(question, str) or not question.strip():
         raise CreationGmContractViolation("needs_more=True인데 question이 비어 있다")
     return CreationGmFollowUp(needs_more=True, question=question)
+
+
+def wrap_up(
+    fallback_intros: tuple[tuple[str, str], ...],
+    transcript: tuple[str, ...],
+    provider: Provider,
+    model: str,
+    *,
+    timeout_s: float = SCENE_ENTITY_TIMEOUT_S,
+) -> CreationGmWrapUp:
+    """전원 완성 뒤 GM이 정리하고 캐릭터마다 한 줄 소개를 낸다(CHAR-03/D-10).
+
+    `fallback_intros`는 (character_id, 기본 한 줄 소개) 쌍의 닫힌 목록이다
+    — 호출부(`web/routes_creation.py`)가 `provides_display_name` 값과
+    `free_text` 항목 첫 문장을 이어 붙여 미리 계산해 넘긴다. **AI가 두
+    번 실패하면 이 값을 그대로 쓴다** — 한 줄 소개가 아예 없는 상태를
+    만들지 않는다(CHAR-03이 "자동으로 만들어진다"를 요구한다). 빈
+    목록으로 부르면 정리할 사람이 없다는 뜻이므로 호출 전에
+    `CreationGmContractViolation`이다.
+
+    반환 `intros`의 `character_id` 집합이 `fallback_intros`의 집합과
+    정확히 같아야 한다 — 다르면 `CreationGmContractViolation`(닫힌 목록
+    재대조, T-12.1-29). 빈 `intro`도 같은 예외다.
+    """
+    if not fallback_intros:
+        raise CreationGmContractViolation("정리할 캐릭터가 없는데 정리를 요청했다")
+
+    character_ids = tuple(character_id for character_id, _fallback in fallback_intros)
+    system, messages = build_creation_wrap_up_prompt(
+        character_ids=character_ids, transcript=transcript
+    )
+
+    def _call_once() -> AgentResult:
+        return provider.complete(
+            model=model, system=system, messages=messages, max_tokens=1536, timeout_s=timeout_s
+        )
+
+    result, _last_error_text = call_with_one_retry(_call_once, timeout_s=timeout_s)
+    if not result.ok:
+        # 실패해도 진행을 막지 않는다 — 기본 한 줄 소개로 떨어진다
+        # (09-CONTEXT D-05, ARCH-05, CHAR-03이 요구하는 "자동으로").
+        return CreationGmWrapUp(
+            intros=fallback_intros, say="다들 준비되셨나요? 이렇게 게임을 진행할까요?"
+        )
+
+    parsed = _parse_single_object(str(result.value))
+    raw_intros = parsed.get("intros")
+    say = parsed.get("say")
+    if not isinstance(raw_intros, list):
+        raise CreationGmContractViolation(f"intros가 배열이 아니다: {raw_intros!r}")
+    if not isinstance(say, str) or not say.strip():
+        raise CreationGmContractViolation("정리하며 할 말이 비어 있다")
+
+    intros: list[tuple[str, str]] = []
+    seen_ids: set[str] = set()
+    for item in raw_intros:
+        if not isinstance(item, dict):
+            raise CreationGmContractViolation(f"intro 항목이 객체가 아니다: {item!r}")
+        character_id = item.get("character_id")
+        intro = item.get("intro")
+        if not isinstance(character_id, str) or character_id not in character_ids:
+            raise CreationGmContractViolation(
+                f"intro 항목의 character_id가 완성된 목록 밖이다: {character_id!r}"
+            )
+        if not isinstance(intro, str) or not intro.strip():
+            raise CreationGmContractViolation(f"{character_id!r}의 한 줄 소개가 비어 있다")
+        intros.append((character_id, intro))
+        seen_ids.add(character_id)
+
+    if seen_ids != set(character_ids):
+        raise CreationGmContractViolation(
+            "정리 응답의 캐릭터 집합이 완성된 전원과 다르다"
+            f" — 빠진 사람: {set(character_ids) - seen_ids!r}"
+        )
+    return CreationGmWrapUp(intros=tuple(intros), say=say)
