@@ -5,8 +5,8 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.2
 current_phase_name: 판정 합계를 서버가 보낸다 — 룰북과 무관하게 검산이 맞는다
 status: planning
-stopped_at: Completed 12.1-06-PLAN.md — Phase 12.1 전체 완료 (6/6)
-last_updated: "2026-08-19T09:53:25.372Z"
+stopped_at: Phase 12.2 context gathered
+last_updated: "2026-08-19T12:32:46.563Z"
 last_activity: 2026-08-19
 progress:
   total_phases: 14
@@ -348,10 +348,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-19T07:44:32.615Z
-Stopped at: Completed 12.1-06-PLAN.md — Phase 12.1 전체 완료 (6/6)
+Last session: 2026-08-19T12:32:46.519Z
+Stopped at: Phase 12.2 context gathered
 이어받아 Task 2·Task 3 커밋까지 완료
-Resume file: None
+Resume file: .planning/phases/12.2-check-total/12.2-CONTEXT.md
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
 `resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
