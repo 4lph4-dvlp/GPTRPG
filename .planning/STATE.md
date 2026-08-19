@@ -6,15 +6,15 @@ current_phase: 12.2
 current_phase_name: 판정 합계를 서버가 보낸다 — 룰북과 무관하게 검산이 맞는다
 status: planning
 stopped_at: Completed 12.1-06-PLAN.md — Phase 12.1 전체 완료 (6/6)
-last_updated: "2026-08-19T09:25:48.327Z"
+last_updated: "2026-08-19T09:53:25.372Z"
 last_activity: 2026-08-19
-last_activity_desc: Phase 12.1 execution started
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 35
   completed_plans: 35
   percent: 43
+last_activity_desc: Phase 12.1 execution started
 ---
 
 # Project State
@@ -34,7 +34,7 @@ Phase: 12.2 — 판정 합계를 서버가 보낸다 — 룰북과 무관하게 
 Plan: Not started
 Status: Ready to plan
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-19 — Phase 12.1 complete, transitioned to Phase 12.2
+Last activity: 2026-08-19
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
