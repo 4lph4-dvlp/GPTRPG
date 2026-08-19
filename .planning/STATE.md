@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.2
-current_phase_name: 판정 합계를 서버가 보낸다 — 룰북과 무관하게 검산이 맞는다
+current_phase_name: check-total
 status: executing
-stopped_at: Phase 12.2 context gathered
-last_updated: "2026-08-19T13:47:52.849Z"
+stopped_at: Completed 12.2-01-PLAN.md
+last_updated: "2026-08-19T14:40:17.995Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 12.1 execution started
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 38
-  completed_plans: 35
+  completed_plans: 36
   percent: 43
 ---
 
@@ -24,17 +24,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 12.1 — character-creation
+**Current focus:** Phase 12.2 — check-total
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 12.2 — 판정 합계를 서버가 보낸다 — 룰북과 무관하게 검산이 맞는다
-Plan: Not started
+Phase: 12.2 (check-total) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-19 — Phase 12.2 planning complete
+Last activity: 2026-08-19 — Phase 12.2 execution started
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -42,7 +42,7 @@ Last activity: 2026-08-19 — Phase 12.2 planning complete
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [██████████] 100%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -127,6 +127,7 @@ Progress: [██████████] 100%
 | Phase 12.1-character-creation P04 | not tracked precisely (single continuous session) | 3 tasks | 8 files |
 | Phase 12.1 P05 | 약 2시간 | 3 tasks | 22 files |
 | Phase 12.1 P06 | ~5h (사람 확인 대기 포함) | 2 tasks | 5 files |
+| Phase 12.2 P01 | not tracked (checkpoint-resumed) | 3 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -291,6 +292,10 @@ Progress: [██████████] 100%
 - [Phase ?]: 12.1-06: 접힌 할 일 세 선택지 중 2번(변경하기 숨김)만 채택 — 1번(점유 놓기)은 D-08과 어긋나 기각, 3번(카드 비활성 표시)은 Phase 16 몫으로 이관
 - [Phase ?]: 12.1-06: 쿠키 분실 한계 문구를 사람 확인 피드백으로 구체화 — '표시를 지우면'을 '인터넷 사용 기록을 지울 때'로 교체(f16de59)
 - [Phase ?]: 12.1-06 사람 확인 중 발견(범위 밖): Phase 12.1 전체가 서버 라우트만 완성하고 프런트엔드 화면이 없다 — Phase 12.3(캐릭터 만들기 화면)이 로드맵에 신설됨(f6109be)
+- [Phase ?]: 12.2-01 Task 1 체크포인트(option-a, 사용자 승인): 판 9→10을 한 번에 올려 total·rulebook_id 두 칸을 같은 판에 넣는다(D-01/D-02/D-03)
+- [Phase ?]: 12.2-01: 계산 줄은 PollResponse의 병렬 목록(check_calculations)으로 싣는다 — groupTurns.ts는 안 고친다
+- [Phase ?]: 12.2-01: 계산 조각의 역할 이름은 자유 문자열(promote, Grade = str 전례) — 닫힌 목록을 만들지 않는다(D-10)
+- [Phase ?]: 12.2-01 [deviation, Rule 3]: 판 올리기로 깨진 기존 CheckResolved() 생성부 6개 파일(conftest.py 등)에 total/rulebook_id 추가
 
 ### Pending Todos
 
@@ -348,10 +353,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-19T12:32:46.519Z
-Stopped at: Phase 12.2 context gathered
+Last session: 2026-08-19T14:40:17.949Z
+Stopped at: Completed 12.2-01-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
-Resume file: .planning/phases/12.2-check-total/12.2-CONTEXT.md
+Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
 `resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
