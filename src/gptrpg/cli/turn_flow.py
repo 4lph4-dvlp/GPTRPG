@@ -257,6 +257,16 @@ async def _proceed_without_check(
     # 파티 인자(party_state/actor_character_id)를 안 넘긴다(12-05) — 명령줄에는
     # 캐릭터 선택·신원 개념이 없다(person_id=args.player, character_id=args.player
     # 전제와 같은 이유). 기본값이 예시 개체 하나짜리 파티를 채운다.
+    #
+    # **캐릭터 만들기(Phase 12.1)를 명령줄에 넣지 않는다 — 이 저장소의 「웹과
+    # CLI를 같은 커밋에서 닫는다」 관례의 명시적 예외다.** 만들기는 서명 쿠키
+    # 신원(누가 말하고 있나)과 차례 지목(누가 지금 차례인가) 둘을 전제하는데,
+    # 명령줄에는 그 두 개념이 아예 없다(바로 위 주석). 넣으려면 명령줄에
+    # 신원 개념을 먼저 만들어야 하고 그것은 계정이 생기는 다음 마일스톤의
+    # 일이다. **빠뜨린 것이 아니라 근거가 있는 예외다** — 조용히 한쪽만
+    # 고치는 것이 이 저장소의 알려진 실패 모양이라 여기 적는다
+    # (12.1-CONTEXT.md Claude's Discretion). 명령줄은 지금처럼 예시 개체
+    # 하나짜리 파티로 돈다.
     ctx = _build_turn_context(store, args.session, args.rulebook)
 
     # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에

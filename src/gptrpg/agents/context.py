@@ -64,12 +64,21 @@ class ContextCapExceeded(Exception):
 PARTY_MEMBER_LIMIT = 8
 """`TurnContext.party_state`/`NarrationFacts.party_state`에 들어갈 수 있는
 파티 구성원의 최대 개수(D-18, ARCH-06, 12-05) — `RECENT_TURNS_LIMIT`·
-`NEW_ENTITY_LIMIT`과 같은 성격의 안전 밸브다.
+`NEW_ENTITY_LIMIT`과 같은 성격의 절대 안전 밸브다.
+
+**인원의 출처가 아니다.** 12.1(캐릭터 만들기)부터 인원은 상수가 아니라
+층으로 쌓인 데이터다(D-01) — `Rulebook.party_size_range`
+(`rules_core/rulebook.py`)가 룰북·시나리오가 권장하는 범위를 선언하고,
+방을 여는 사람이 그 범위 안에서 실제 인원을 확정한다
+(`rules_core/rulebook.py`의 `validate_party_size`가 그 확정을 룰북 범위와
+대조해 12.1-02가 이미 검사를 붙였다). 이 상수는 그 위에 얹힌 절대 상한일
+뿐이다 — **어떤 룰북도 이 상한을 넘을 수 없고**, 넘으면 인원 확정 시점에
+거절된다.
 
 **요약하려는 장치가 아니다** — D-18이 "파티 전원의 축이 요약 없이 같은
-모양으로 들어간다"를 못박았고, 실제 파티는 넷이다. 이 상한은 파티 인원이
-비정상적으로 커져 프롬프트가 폭주하는 것(T-12-23)만 막는다 — 정상 파티
-크기에서는 절대 걸리지 않도록 넉넉하게 잡았다."""
+모양으로 들어간다"를 못박았다. 이 상한은 파티 인원이 비정상적으로 커져
+프롬프트가 폭주하는 것(T-12-23)만 막는다 — 정상 파티 크기에서는 절대
+걸리지 않도록 넉넉하게 잡았다."""
 
 
 class ActorNotInParty(Exception):

@@ -137,7 +137,8 @@ def test_narration_facts_raises_context_cap_exceeded_over_new_entities_limit():
 
 # ---------------------------------------------------------------------------
 # 파티 상한(PARTY_MEMBER_LIMIT, D-18/ARCH-06/T-12-23, 12-05) — 요약이 아니라
-# 상한이다. 실제 파티는 넷이라 정상 경로에서는 절대 안 걸린다.
+# 절대 안전 밸브다. 인원의 출처는 `Rulebook.party_size_range`와 방장 확정
+# (D-01, 12.1)이고, 정상 파티 크기에서는 이 상한에 절대 안 걸린다.
 # ---------------------------------------------------------------------------
 
 
@@ -168,6 +169,17 @@ def test_narration_facts_raises_context_cap_exceeded_over_party_member_limit():
 
 def test_narration_facts_at_party_member_limit_does_not_raise():
     _narration_facts(party_state=_party_of(PARTY_MEMBER_LIMIT))
+
+
+def test_context_module_source_does_not_claim_the_real_party_is_four():
+    """12.1-05 — 룰북 하나(넷짜리 파티)가 플랫폼 코드에 새어 든 문구가
+    다시 들어오면 즉시 붉게 된다(D-01, 12.1-CONTEXT.md가 명시적으로 지목한
+    자리). 인원의 출처는 이제 `Rulebook.party_size_range`와 방장 확정이고,
+    `PARTY_MEMBER_LIMIT`은 절대 안전 밸브일 뿐이다."""
+    import gptrpg.agents.context as context_module
+
+    source = Path(context_module.__file__).read_text(encoding="utf-8")
+    assert "실제 파티는 넷이다" not in source
 
 
 # ---------------------------------------------------------------------------
