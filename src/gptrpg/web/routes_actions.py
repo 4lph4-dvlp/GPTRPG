@@ -46,7 +46,6 @@ from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, Unkno
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
-from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.entities import Entity
 from gptrpg.rules_core.resource_change import (
@@ -314,10 +313,20 @@ class MoveCandidateView(BaseModel):
 
 
 class DeclareRequest(BaseModel):
+    """룰북 칸이 없다 — 어느 룰북으로 노는지는 **캐릭터가 정한다**(그 값은
+    `character_created` 사건에 이미 있다). 이 칸을 바깥에서 받던 동안에는
+    브라우저가 그것을 안 보내 서버 기본값(던전월드)이 조용히 이겼고,
+    OpenQuest 캐릭터가 던전월드 무브를 배정받아 확인 단계에서 400으로
+    막혔다. `extra="forbid"`가 옛 클라이언트를 조용히 무시하는 대신
+    422로 되돌려 보낸다 — `ConfirmRequest`가 `target`/`modifiers`에 쓴
+    것과 같은 규율(D-02).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
     character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
     raw_text: str = Field(min_length=1, max_length=MAX_RAW_TEXT_LEN)
-    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
 
 
 class ItemUseView(BaseModel):
@@ -411,14 +420,14 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
         ctx = build_turn_context(
             store,
             session_id,
-            body.rulebook_id,
+            character.rulebook_id,
             party_state=party,
             actor_character_id=identity.character_id,
             character_names=_character_names(party),
         )
 
-        rulebook = get_rulebook(body.rulebook_id)
-        moves = get_moves(body.rulebook_id)
+        rulebook = get_rulebook(character.rulebook_id)
+        moves = get_moves(character.rulebook_id)
 
         choices = load_config(request.app.state.agent_config_path)
         classifier_choice = choices["action_classifier"]
@@ -552,7 +561,6 @@ class ConfirmRequest(BaseModel):
     suggestion_stat: str = Field(min_length=1, max_length=MAX_ID_LEN)
     confirmed: bool
     declare_seq: int = Field(ge=0)
-    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
     character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
     difficulty: str | None = Field(default=None, max_length=MAX_DIFFICULTY_LEN)
     """룰북이 선언한 닫힌 이름 목록에서 고른 난이도(D-02, 12-01). `None`이면
@@ -761,7 +769,7 @@ async def confirm(
             raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
 
         try:
-            rulebook = get_rulebook(body.rulebook_id)
+            rulebook = get_rulebook(character.rulebook_id)
         except UnknownRulebook as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -833,7 +841,7 @@ async def confirm(
                     # `_prepare_resolve_check`가 룰북 선언에서 조립해
                     # 이 빈 튜플 앞뒤에 붙인다.
                     modifiers=(),
-                    rulebook_id=body.rulebook_id,
+                    rulebook_id=character.rulebook_id,
                     caused_by_seq=confirm_seq,
                     person_id=identity.browser_id,
                     character_id=identity.character_id,
@@ -880,7 +888,7 @@ async def confirm(
     ctx = build_turn_context(
         store,
         session_id,
-        body.rulebook_id,
+        character.rulebook_id,
         party_state=party,
         actor_character_id=identity.character_id,
         character_names=_character_names(party),
@@ -1225,7 +1233,6 @@ class ConfirmResourceChangeRequest(BaseModel):
     재사용한다, T-12-03)."""
     category_ids: list[str] = Field(default_factory=list, max_length=MAX_PICKED_CATEGORIES)
     confirmed: bool
-    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
     discretionary: DiscretionaryProposal | None = None
     """룰북에 결과 목록이 없을 때만(`ConfirmResponse.discretionary.available`)
     뜻이 있다 — `category_ids`와 이 칸은 서로 배타적이지 않지만(같은 요청
@@ -1285,8 +1292,14 @@ async def confirm_resource_change(
     if len(body.category_ids) != len(set(body.category_ids)):
         raise HTTPException(status_code=400, detail="같은 결과 카테고리를 두 번 보냈다")
 
+    # 룰북은 캐릭터가 정한다 — 요청에 그 칸이 없다. 아래 「마지막 관문」이
+    # 쓰는 것과 같은 개체를 여기서 한 번만 불러 두고 둘이 나눠 쓴다.
+    actor_entity = _created_character(request.app.state.store, session_id, identity.character_id)
+    if actor_entity is None:
+        raise HTTPException(status_code=404, detail="캐릭터를 찾을 수 없다")
+
     try:
-        rulebook = get_rulebook(body.rulebook_id)
+        rulebook = get_rulebook(actor_entity.rulebook_id)
     except UnknownRulebook as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1354,9 +1367,6 @@ async def confirm_resource_change(
     # 그 사건이 기록된 뒤 `resolve_character_stats`가 조용히 버려서, 화면엔
     # 「변했다」가 뜨는데 실제로는 아무 일도 안 일어난다 — 잘못된 기록이
     # 영구히 남는다(2026-08-18 플레이테스트 관측).
-    actor_entity = _created_character(request.app.state.store, session_id, identity.character_id)
-    if actor_entity is None:
-        raise HTTPException(status_code=404, detail="캐릭터를 찾을 수 없다")
     try:
         require_axes_on_character(decls, actor_entity.stats)
     except AxisNotOnCharacter as exc:
@@ -1438,9 +1448,12 @@ async def confirm_resource_change(
 
 
 class ProceedRequest(BaseModel):
+    """`DeclareRequest`와 같은 이유로 룰북 칸이 없다 — 캐릭터가 정한다."""
+
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
     declare_seq: int = Field(ge=0)
-    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
     character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
 
 
@@ -1511,7 +1524,7 @@ async def proceed(
         raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
 
     try:
-        rulebook = get_rulebook(body.rulebook_id)
+        rulebook = get_rulebook(character.rulebook_id)
     except UnknownRulebook as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1538,7 +1551,7 @@ async def proceed(
     ctx = build_turn_context(
         store,
         session_id,
-        body.rulebook_id,
+        character.rulebook_id,
         party_state=party,
         actor_character_id=identity.character_id,
         character_names=_character_names(party),

@@ -415,8 +415,7 @@ def test_identity_mismatch_response_has_no_secret_leak(web_client: TestClient) -
             "player_id": "p1",
             "character_id": "nari",
             "raw_text": "아무 문장",
-            "rulebook_id": "dungeonworld_like",
-        },
+            },
     )
     assert response.status_code == 403
 

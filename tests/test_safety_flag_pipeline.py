@@ -58,7 +58,6 @@ def _declare_body(**overrides) -> dict:
         "player_id": "bram",
         "character_id": "bram",
         "raw_text": "경비병을 설득해 통로를 열어 보려 한다",
-        "rulebook_id": "dungeonworld_like",
     }
     body.update(overrides)
     return body
@@ -75,7 +74,6 @@ def _confirm_body(declare_seq: int, **overrides) -> dict:
         "suggestion_stat": "CHA",
         "confirmed": True,
         "declare_seq": declare_seq,
-        "rulebook_id": "dungeonworld_like",
         "character_id": "bram",
     }
     body.update(overrides)

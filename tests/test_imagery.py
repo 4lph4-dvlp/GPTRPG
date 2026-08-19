@@ -328,8 +328,7 @@ def _run_one_turn(client: TestClient) -> dict:
             "player_id": "p1",
             "character_id": "bram",
             "raw_text": "경비병을 설득해 통로를 열어 보려 한다",
-            "rulebook_id": "dungeonworld_like",
-        },
+            },
     )
     assert declare.status_code == 200
     # `target`/`modifiers`는 `ConfirmRequest`에서 사라졌다(D-02, 12-01
@@ -344,8 +343,7 @@ def _run_one_turn(client: TestClient) -> dict:
             "suggestion_stat": "CHA",
             "confirmed": True,
             "declare_seq": declare.json()["declare_seq"],
-            "rulebook_id": "dungeonworld_like",
-            "character_id": "bram",
+                "character_id": "bram",
         },
     )
     assert confirm.status_code == 200
@@ -470,8 +468,7 @@ def test_rejected_confirm_makes_no_illustration(tmp_db_path: Path, tmp_path: Pat
                 "player_id": "p1",
                 "character_id": "bram",
                 "raw_text": "경비병을 설득해 통로를 열어 보려 한다",
-                "rulebook_id": "dungeonworld_like",
-            },
+                    },
         )
         # `target`/`modifiers`는 `ConfirmRequest`에서 사라졌다(D-02, 12-01
         # Task 3) — `extra="forbid"`가 이 두 칸을 거절한다.
@@ -485,8 +482,7 @@ def test_rejected_confirm_makes_no_illustration(tmp_db_path: Path, tmp_path: Pat
                 "suggestion_stat": "CHA",
                 "confirmed": False,
                 "declare_seq": declare.json()["declare_seq"],
-                "rulebook_id": "dungeonworld_like",
-                "character_id": "bram",
+                        "character_id": "bram",
             },
         )
         illustrations = _events_of_type(client, "scene_illustrated")

@@ -39,7 +39,7 @@ from gptrpg.web.app import create_app
 from gptrpg.web.cookie_auth import sign_cookie, verify_cookie
 from gptrpg.web.routes_actions import _current_party_state
 from gptrpg.web.routes_characters import COOKIE_NAME
-from tests.fixtures.characters import PLAYER_CHARACTERS
+from tests.fixtures.characters import OPENQUEST_CHARACTER, PLAYER_CHARACTERS
 
 SESSION_ID = "s1"
 
@@ -62,7 +62,6 @@ def _declare_body(**overrides) -> dict:
         "player_id": "bram",
         "character_id": "bram",
         "raw_text": "경비병을 설득해 통로를 열어 보려 한다",
-        "rulebook_id": "dungeonworld_like",
     }
     body.update(overrides)
     return body
@@ -228,15 +227,16 @@ def test_raw_text_over_max_length_returns_422(web_client_with_fake_provider) -> 
     assert response.status_code == 422
 
 
-def test_declare_rulebook_id_over_max_length_returns_422(web_client_with_fake_provider) -> None:
-    """QUAL-04 — 상한 전수 훑기가 찾은 빈자리 중 하나:
-    `DeclareRequest.rulebook_id`는 예전에 길이 상한이 없었다. `MAX_ID_LEN`을
-    재사용한다(다른 식별자 칸과 같은 상수, 새 숫자를 만들지 않는다)."""
+def test_declare_rulebook_id_field_no_longer_exists_and_returns_422(web_client_with_fake_provider) -> None:
+    """`DeclareRequest`에 `rulebook_id` 칸 자체가 없다 — 룰북은 캐릭터가
+    정한다. 옛 클라이언트가 그 칸을 보내면 조용히 무시되는 대신 422로
+    되돌아온다. 값이 아무리 짧아도 마찬가지다(길이 상한 문제가 아니라
+    칸이 없는 것이다)."""
     fake = FakeProvider()
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/declare",
-            json=_declare_body(rulebook_id="a" * 65),
+            json=_declare_body(rulebook_id="openquest"),
         )
     assert response.status_code == 422
 
@@ -472,6 +472,18 @@ def _declare_first(client: TestClient, **overrides) -> int:
     return response.json()["declare_seq"]
 
 
+def _seed_openquest_character(tmp_db_path, character_id: str = "hana") -> None:
+    """OpenQuest 캐릭터를 이 세션에 실제로 만든다.
+
+    룰북은 요청이 아니라 **캐릭터가 정한다** — OpenQuest 규칙(d100·밑돌아야
+    성공·난이도 이름)을 보려면 OpenQuest 캐릭터가 있어야 한다. 예전에는 이
+    자리에서 던전월드 캐릭터에 `rulebook_id="openquest"`를 얹어 시험했고,
+    캐릭터와 요청이 어긋난 그 조합이 실제 결함(브라우저가 룰북을 안 보내면
+    OpenQuest 캐릭터가 던전월드로 굴러 확인 단계에서 400)을 가렸다.
+    """
+    _seed_character_created(tmp_db_path, SESSION_ID, character_id, entity=OPENQUEST_CHARACTER)
+
+
 def _confirm_body(declare_seq: int, **overrides) -> dict:
     """`ConfirmRequest`가 받아들이는 칸만 담는다(D-02, 12-01 Task 3) —
     `target`/`modifiers`(바깥의 자유 숫자 통로)는 더 이상 이 모델에 없고,
@@ -486,7 +498,6 @@ def _confirm_body(declare_seq: int, **overrides) -> dict:
         "suggestion_stat": "CHA",
         "confirmed": True,
         "declare_seq": declare_seq,
-        "rulebook_id": "dungeonworld_like",
         "character_id": "bram",
     }
     body.update(overrides)
@@ -652,7 +663,7 @@ def test_confirm_response_carries_total_and_calculation(web_client_with_fake_pro
 
 
 def test_confirm_response_d100_rulebook_direction_is_roll_under(
-    web_client_with_fake_provider,
+    web_client_with_fake_provider, tmp_db_path
 ) -> None:
     """d100 룰북(OpenQuest)으로 확인한 판정의 `calculation.direction`이
     밑돌아야 성공을 뜻하는 값이다(D-07) — 2d6은 넘어야 성공(위 시험)과
@@ -660,16 +671,18 @@ def test_confirm_response_d100_rulebook_direction_is_roll_under(
     classifier = FakeProvider(complete_value=json.dumps([{"move": "판정", "stat": "CHA"}]))
     gm = FakeProvider(stream_text=_NARRATION_TEXT)
     with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
-        declare_seq = _declare_first(client, rulebook_id="openquest")
+        _seed_openquest_character(tmp_db_path)
+        declare_seq = _declare_first(client, player_id="hana", character_id="hana")
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
             json=_confirm_body(
                 declare_seq,
+                player_id="hana",
+                character_id="hana",
                 move="판정",
                 stat="CHA",
                 suggestion_move="판정",
                 suggestion_stat="CHA",
-                rulebook_id="openquest",
             ),
         )
         assert response.status_code == 200
@@ -1091,13 +1104,14 @@ def test_confirm_difficulty_over_max_length_returns_422(web_client_with_fake_pro
     assert response.status_code == 422
 
 
-def test_confirm_rulebook_id_over_max_length_returns_422(web_client_with_fake_provider) -> None:
-    """QUAL-04 — `ConfirmRequest.rulebook_id`도 예전에 길이 상한이 없었다."""
+def test_confirm_rulebook_id_field_no_longer_exists_and_returns_422(web_client_with_fake_provider) -> None:
+    """`ConfirmRequest`에도 `rulebook_id` 칸이 없다 — `extra="forbid"`가
+    `target`/`modifiers`와 똑같이 거절한다."""
     fake = FakeProvider()
     with web_client_with_fake_provider(action_classifier=fake) as client:
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
-            json=_confirm_body(0, rulebook_id="a" * 65),
+            json=_confirm_body(0, rulebook_id="openquest"),
         )
     assert response.status_code == 422
 
@@ -1136,7 +1150,7 @@ def test_confirm_unknown_extra_field_returns_422(web_client_with_fake_provider) 
 
 
 def test_confirm_with_openquest_rulebook_and_valid_difficulty_returns_200(
-    web_client_with_fake_provider,
+    web_client_with_fake_provider, tmp_db_path
 ) -> None:
     """`{"difficulty": "hard"}`(OpenQuest 룰북)를 보내면 200이고 판정의
     목표값이 그만큼 이동한다 — `CheckResolved.modifiers`에 `source`가
@@ -1144,16 +1158,18 @@ def test_confirm_with_openquest_rulebook_and_valid_difficulty_returns_200(
     classifier = FakeProvider(complete_value=json.dumps([{"move": "판정", "stat": "CHA"}]))
     gm = FakeProvider(stream_text=_NARRATION_TEXT)
     with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
-        declare_seq = _declare_first(client, rulebook_id="openquest")
+        _seed_openquest_character(tmp_db_path)
+        declare_seq = _declare_first(client, player_id="hana", character_id="hana")
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
             json=_confirm_body(
                 declare_seq,
+                player_id="hana",
+                character_id="hana",
                 move="판정",
                 stat="CHA",
                 suggestion_move="판정",
                 suggestion_stat="CHA",
-                rulebook_id="openquest",
                 difficulty="hard",
             ),
         )
@@ -1166,23 +1182,25 @@ def test_confirm_with_openquest_rulebook_and_valid_difficulty_returns_200(
 
 
 def test_confirm_with_unknown_difficulty_name_returns_400_and_no_new_events(
-    web_client_with_fake_provider,
+    web_client_with_fake_provider, tmp_db_path
 ) -> None:
     """`{"difficulty": "아무말"}`을 보내면 400이고 사건이 하나도 안 쌓인다 —
     선언에 없는 이름을 조용히 무시하지 않는다."""
     classifier = FakeProvider(complete_value=json.dumps([{"move": "판정", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=classifier) as client:
-        declare_seq = _declare_first(client, rulebook_id="openquest")
+        _seed_openquest_character(tmp_db_path)
+        declare_seq = _declare_first(client, player_id="hana", character_id="hana")
         events_before = len(_events(client))
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/confirm",
             json=_confirm_body(
                 declare_seq,
+                player_id="hana",
+                character_id="hana",
                 move="판정",
                 stat="CHA",
                 suggestion_move="판정",
                 suggestion_stat="CHA",
-                rulebook_id="openquest",
                 difficulty="아무말",
             ),
         )
@@ -1421,7 +1439,6 @@ def _proceed_body(declare_seq: int, **overrides) -> dict:
     body = {
         "player_id": "bram",
         "declare_seq": declare_seq,
-        "rulebook_id": "dungeonworld_like",
         "character_id": "bram",
     }
     body.update(overrides)
@@ -1987,6 +2004,24 @@ def test_confirm_discretionary_available_when_outcome_list_empty_and_grade_costs
     자원 축 이름과 같다(RULE-10). Cairn은 판정 방식(d20 롤언더)에 등록된
     계산기가 없지만(11-04 Task 0), 확인 재사용 경로(D-09)는 판정을 다시
     굴리지 않으므로 이 시험에 영향이 없다."""
+    # 룰북이 선언한 축 전체가 아니라 **교집합**이 나오는지를 보는 시험이므로,
+    # 이 캐릭터는 Cairn이 선언한 축 중 일부(STR·DEX)만 갖는다 — WIL·Hit
+    # Protection·Inventory는 룰북에는 있고 이 캐릭터에는 없다. 예전에는 같은
+    # 교집합을 「던전월드 캐릭터 + cairn 요청」이라는 어긋난 조합으로 만들었다.
+    _seed_character_created(
+        tmp_db_path,
+        SESSION_ID,
+        "bram",
+        entity=Entity(
+            entity_id="bram",
+            display_name="시험용 캐릭터",
+            rulebook_id="cairn",
+            stats=(
+                StatEntry(name="STR", form="numeric", current=10),
+                StatEntry(name="DEX", form="numeric", current=10),
+            ),
+        ),
+    )
     classifier = FakeProvider(complete_value=json.dumps([{"move": "아무 시도", "stat": "STR"}]))
     gm = FakeProvider(stream_text=_NARRATION_TEXT)
     web_app = create_app(
@@ -2027,7 +2062,6 @@ def test_confirm_discretionary_available_when_outcome_list_empty_and_grade_costs
                 stat="STR",
                 suggestion_move="아무 시도",
                 suggestion_stat="STR",
-                rulebook_id="cairn",
             ),
         )
 
@@ -2059,7 +2093,6 @@ def _confirm_resource_change_body(caused_by_seq: int, **overrides) -> dict:
         "caused_by_seq": caused_by_seq,
         "category_ids": [],
         "confirmed": True,
-        "rulebook_id": "dungeonworld_like",
     }
     body.update(overrides)
     return body
@@ -2237,11 +2270,16 @@ def test_confirm_resource_change_same_caused_by_seq_twice_records_exactly_one_ev
 
 
 def test_confirm_resource_change_discretionary_applies_within_declared_axis(
-    web_client_with_fake_provider,
+    web_client_with_fake_provider, tmp_db_path
 ) -> None:
     """재량 제안(RULE-10)이 이 룰북(Cairn)의 자원 축 이름을 가리키고 형태·
     동작이 맞으면 적용된다 — `source="discretionary_ruling"`으로 사건에
     남는다(재량 판정과 결과 목록을 사건만 보고도 구분할 수 있다)."""
+    _seed_character_created(
+        tmp_db_path, SESSION_ID, "bram", entity=_cairn_style_entity(
+            entity_id="bram", slot_values=(None,) * 10
+        )
+    )
     classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=classifier) as client:
         _select_character(client, "bram")
@@ -2250,7 +2288,6 @@ def test_confirm_resource_change_discretionary_applies_within_declared_axis(
             f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
             json=_confirm_resource_change_body(
                 declare_seq,
-                rulebook_id="cairn",
                 discretionary={"axis": "STR", "operation": "delta", "amount": -3},
             ),
         )
@@ -2267,8 +2304,13 @@ def test_confirm_resource_change_discretionary_applies_within_declared_axis(
 
 
 def test_confirm_resource_change_discretionary_rejects_axis_outside_rulebook(
-    web_client_with_fake_provider,
+    web_client_with_fake_provider, tmp_db_path
 ) -> None:
+    _seed_character_created(
+        tmp_db_path, SESSION_ID, "bram", entity=_cairn_style_entity(
+            entity_id="bram", slot_values=(None,) * 10
+        )
+    )
     classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=classifier) as client:
         _select_character(client, "bram")
@@ -2278,7 +2320,6 @@ def test_confirm_resource_change_discretionary_rejects_axis_outside_rulebook(
             f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
             json=_confirm_resource_change_body(
                 declare_seq,
-                rulebook_id="cairn",
                 discretionary={"axis": "없는축", "operation": "delta", "amount": 1},
             ),
         )
@@ -2289,8 +2330,13 @@ def test_confirm_resource_change_discretionary_rejects_axis_outside_rulebook(
 
 
 def test_confirm_resource_change_discretionary_amount_over_max_returns_422(
-    web_client_with_fake_provider,
+    web_client_with_fake_provider, tmp_db_path
 ) -> None:
+    _seed_character_created(
+        tmp_db_path, SESSION_ID, "bram", entity=_cairn_style_entity(
+            entity_id="bram", slot_values=(None,) * 10
+        )
+    )
     classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     with web_client_with_fake_provider(action_classifier=classifier) as client:
         _select_character(client, "bram")
@@ -2299,7 +2345,6 @@ def test_confirm_resource_change_discretionary_amount_over_max_returns_422(
             f"/api/sessions/{SESSION_ID}/actions/confirm-resource-change",
             json=_confirm_resource_change_body(
                 declare_seq,
-                rulebook_id="cairn",
                 discretionary={"axis": "STR", "operation": "delta", "amount": 999},
             ),
         )
@@ -2351,7 +2396,7 @@ def test_declare_item_not_held_opens_retro_declaration_when_rulebook_allows(
         _select_character(client, "bram")
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/declare",
-            json=_declare_body(rulebook_id="cairn"),
+            json=_declare_body(),
         )
 
     assert response.status_code == 200
@@ -2406,10 +2451,47 @@ def test_declare_item_held_and_actually_present_is_not_downgraded(
         _select_character(client, "bram")
         response = client.post(
             f"/api/sessions/{SESSION_ID}/actions/declare",
-            json=_declare_body(rulebook_id="cairn"),
+            json=_declare_body(),
         )
 
     assert response.status_code == 200
     body = response.json()
     assert body["item_use"] == {"kind": "held", "item": "장검"}
     assert body["retro_declaration"]["available"] is False
+
+
+# ---------------------------------------------------------------------------
+# 행동 요청의 룰북은 캐릭터가 정한다
+# ---------------------------------------------------------------------------
+
+
+def test_declare_uses_the_characters_own_rulebook(
+    web_client_with_fake_provider, tmp_db_path
+) -> None:
+    """OpenQuest 캐릭터로 선언하면 분류기가 **OpenQuest** 무브 목록을 받는다.
+
+    브라우저는 「어느 룰북으로 노는가」를 보내지 않는다. 그 값을 요청 기본값
+    으로 두면 세션이 캐릭터와 무관하게 던전월드로 굴러, 분류기가 던전월드
+    무브를 고르고 그 무브를 OpenQuest 캐릭터에게 적용하려다 확인 단계에서
+    400으로 막힌다(그때는 `action_confirmed`가 이미 기록된 뒤다). 룰북은
+    캐릭터 기록에 이미 있으므로 서버가 거기서 읽는다.
+
+    `perception`은 OpenQuest 무브이고 던전월드 목록에는 없다 — 이 후보가
+    받아들여진다는 것이 곧 「캐릭터의 룰북 목록을 넘겼다」는 뜻이다.
+    """
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "perception", "stat": "INT"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        _seed_character_created(tmp_db_path, SESSION_ID, "hana", entity=OPENQUEST_CHARACTER)
+        _select_character(client, "hana")
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/declare",
+            json={
+                "player_id": "hana",
+                "character_id": "hana",
+                "raw_text": "복도 끝 그림자 속에서 움직이는 소리를 살펴본다",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidates"] == [{"move": "perception", "stat": "INT"}]

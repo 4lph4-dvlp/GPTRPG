@@ -32,6 +32,7 @@ D-12가 폐기한 경로가 부활한다. 이 파일은 `tests/` 아래에서 �
 from dataclasses import dataclass
 
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
+from gptrpg.rulebooks.openquest import OPENQUEST_ID
 from gptrpg.rules_core.entities import Entity, StatEntry
 
 NEW_CHARACTER_STAT_NAMES: tuple[str, ...] = ("STR", "DEX", "CON", "INT", "WIS", "CHA")
@@ -182,3 +183,40 @@ def list_characters() -> tuple[CharacterSummary, ...]:
 def get_character(character_id: str) -> Entity | None:
     """알려진 캐릭터 식별자면 `Entity`를, 아니면 `None`을 돌려준다(시험 재료)."""
     return PLAYER_CHARACTERS.get(character_id)
+
+
+OPENQUEST_CHARACTER: Entity = Entity(
+    entity_id="player.hana",
+    display_name="하나",
+    rulebook_id=OPENQUEST_ID,
+    stats=(
+        StatEntry(name="STR", form="numeric", current=55),
+        StatEntry(name="CON", form="numeric", current=60),
+        StatEntry(name="DEX", form="numeric", current=65),
+        StatEntry(name="SIZ", form="numeric", current=50),
+        StatEntry(name="INT", form="numeric", current=55),
+        StatEntry(name="POW", form="numeric", current=55),
+        StatEntry(name="CHA", form="numeric", current=45),
+        StatEntry(
+            name="Hit Points",
+            form="numeric",
+            current=12,
+            max=12,
+            depleted_effect_ref="openquest.hp_depleted",
+        ),
+        StatEntry(name="Magic Points", form="numeric", current=11, max=11),
+        StatEntry(name="Armour Points", form="numeric", current=0),
+    ),
+)
+"""OpenQuest 룰북 캐릭터 하나(시험 재료).
+
+**`PLAYER_CHARACTERS` 밖에 따로 둔다.** 그 사전은 「넷」이라는 개수 자체를
+전제하는 시험들이 쓰고 있어, 다섯 번째를 넣으면 이 캐릭터와 무관한 시험이
+깨진다. 룰북이 다른 캐릭터가 필요한 시험은 `seed_character_created(...,
+entity=OPENQUEST_CHARACTER)`로 이것을 직접 넘긴다.
+
+**왜 필요한가.** 여기 있던 캐릭터가 전부 던전월드였던 탓에, 행동 요청이
+캐릭터의 룰북을 무시하고 던전월드로 굴러도 시험이 아무것도 눈치채지
+못했다 — 브라우저에서 OpenQuest 캐릭터로 굴리면 능력치 이름부터 어긋나
+판정이 400으로 막히는데도 그랬다. 룰북이 다른 캐릭터가 재료에 있어야
+그 종류의 결함이 시험에 걸린다."""
