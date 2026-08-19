@@ -765,10 +765,13 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             # 이 경로는 **이 캐릭터가 어느 축을 실제로 가졌는지 모른다.**
             # 명령줄에는 캐릭터 선택 개념이 없어 `args.player`를 식별자로만
             # 쓰고(D-42), `build_turn_context`에 파티를 안 넘기므로
-            # `ctx.party_state`가 비어 있다. 실제 수치가 담긴
-            # `web.characters_data`는 계층 규칙상 여기서 볼 수 없다
-            # (`cli`와 `web`은 같은 층의 형제라 서로 import 못 한다,
-            # `.importlinter` contract:2).
+            # `ctx.party_state`가 비어 있다. 실제 수치(세션에서 만들어진
+            # 캐릭터의 `Entity`)는 계층 규칙상 여기서 볼 수 없다 — `cli`와
+            # `web`은 같은 층의 형제라 서로 import 못 한다
+            # (`.importlinter` contract:2). 캐릭터 만들기 자체를 CLI에
+            # 넣지 않는 근거는 아래 `_build_turn_context` 호출부 주석과
+            # 이 함수 초입의 「명령줄에는 캐릭터 선택·신원 개념이 없다」
+            # 주석을 참조(12.1-05, Phase 12.1의 웹·CLI 예외 판단).
             #
             # 웹 경로는 이 자리에서 `eligible_categories`로 걸러 내고
             # `require_axes_on_character`로 다시 막는다. 여기서는 그 검사를

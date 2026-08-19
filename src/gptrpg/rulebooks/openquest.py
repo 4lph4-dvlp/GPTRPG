@@ -61,8 +61,9 @@ OPENQUEST_RESOURCE_AXES: tuple[ResourceAxisDecl, ...] = (
     # 크리처가 실제로 갖고 있는 열 축 — 이 단계는 numeric 형태 하나만
     # 관통시킨다(11-01). 능력치 일곱(STR~CHA)에는 12-01 Task 3이
     # `stat_usage="use_as_target"`을 더한다(D-01 Assumption A5 — 이
-    # 저장소의 웹 캐릭터 로스터(`characters_data.PLAYER_CHARACTERS`)가
-    # 아직 던전월드류뿐이라 실제 OpenQuest 판정 캐릭터가 없다. 이 값은
+    # 저장소에서 실제로 만들어지는 플레이어 캐릭터가 아직 던전월드류뿐이라
+    # (12.1이 여는 만들기 흐름도 이 계획 시점엔 dungeonworld_like만 실제
+    # 값을 넣었다) 실제 OpenQuest 판정 캐릭터가 없다. 이 값은
     # OpenQuest가 d100 롤언더 판정 방식(`use_as_target`)에 능력치 축을
     # 실제로 연결한다는 실증이고, 진짜 기술값(근접 무기 기술 등)이 판정에
     # 쓰이는 것은 OpenQuest 플레이어 캐릭터가 생기는 다음 마일스톤이다).

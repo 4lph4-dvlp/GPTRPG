@@ -22,14 +22,20 @@ from gptrpg.event_log.schema import (
     ActionConfirmed,
     ActionDeclared,
     AiInvoked,
+    CharacterCreated,
     CheckResolved,
     ClockAdvanced,
+    CreationStatEntryRecord,
     GameEvent,
     NarrationAppended,
+    utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
 from gptrpg.imagery import imagery_config_from_env
+from gptrpg.rules_core.entities import Entity
+from gptrpg.session_actor.projection import rebuild_state_from_events
 from gptrpg.web.app import create_app
+from tests.fixtures.characters import PLAYER_CHARACTERS
 
 # 테스트가 어느 작업 디렉터리에서 실행되든 저장소 최상위를 가리키도록 고정한다.
 # import-linter처럼 현재 작업 디렉터리에 의존하는 도구를 테스트 안에서 호출할 때 필요하다.
@@ -460,7 +466,98 @@ def fake_provider() -> FakeProvider:
 # ---------------------------------------------------------------------------
 
 
+def seed_character_created(
+    db_path: str | Path,
+    session_id: str,
+    character_id: str,
+    *,
+    entity: Entity | None = None,
+    one_line_intro: str = "시험용 캐릭터",
+    browser_id: str = "test-fixture-browser",
+) -> None:
+    """이 세션에 `character_id`가 아직 없으면 `character_created` 사건을
+    직접 심는다(시험 전용, CHAR-02) — 12.1-05부터 캐릭터는 미리 정의된
+    상수가 아니라 이 세션에서 「만들어진」 캐릭터여야 하므로, 정적 상수를
+    쓰던 다수의 기존 시험이 "bram"/"nari" 등을 계속 신원 확인·목록 재료로
+    쓸 수 있게 하는 지름길이다. 제품 코드에는 이런 지름길이 없다 — 이
+    함수는 `tests/` 아래에만 있다.
+
+    `entity`를 생략하면 시험 재료(`tests/fixtures/characters.py`의
+    `PLAYER_CHARACTERS`)에서 `character_id`와 같은 이름을 찾는다. 다른
+    룰북·다른 축 조합을 시험하려고 직접 만든 `Entity`를 쓰고 싶으면
+    `entity=`로 넘긴다 — 그 경우 `display_name`/`rulebook_id`/`stats`만
+    사건 페이로드로 옮겨지고 `entity.entity_id` 자체는 쓰이지 않는다
+    (사건의 `character_id`가 곧 짧은 식별자다 — 만들기 완료가 하는 것과
+    같다).
+
+    캐릭터를 점유(쿠키)까지 하지 않고 세션에 **존재하게만** 하고 싶은
+    시험(목록 조회 등)이 `select_character()`를 거치지 않고 이 함수를
+    직접 쓴다.
+
+    **새 `EventStore` 연결을 연다.** `client.app.state.store`를 재사용하지
+    않는다 — 그 연결은 앱의 lifespan 스레드에서 만들어졌고, sqlite3
+    연결은 만든 스레드에서만 쓸 수 있다(이 함수는 대개 시험 스레드에서
+    불린다). `db_path`는 보통 `client.app.state.db_path`(`web/app.py`의
+    그 칸 도크스트링 참조)이거나, 앱을 열기 전이면 `tmp_db_path` 픽스처
+    값이다.
+    """
+    store = EventStore(db_path)
+    store.initialize()
+    state = rebuild_state_from_events(session_id, store.read_events(session_id))
+    if character_id in state.created_characters:
+        store.close()
+        return
+    if entity is None:
+        entity = PLAYER_CHARACTERS.get(character_id)
+        if entity is None:
+            store.close()
+            raise AssertionError(
+                f"seed_character_created 시험 헬퍼가 모르는 캐릭터: {character_id!r} — "
+                "tests/fixtures/characters.py의 PLAYER_CHARACTERS에 없다. "
+                "직접 만든 Entity를 쓰려면 entity=를 넘겨라."
+            )
+    store.append(
+        CharacterCreated(
+            session_id=session_id,
+            seq=store.next_seq(session_id),
+            schema_version=EVENT_SCHEMA_VERSION,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="character_created",
+            character_id=character_id,
+            browser_id=browser_id,
+            display_name=entity.display_name,
+            rulebook_id=entity.rulebook_id,
+            one_line_intro=one_line_intro,
+            stats=tuple(
+                CreationStatEntryRecord(
+                    name=stat.name,
+                    form=stat.form,
+                    current=stat.current,
+                    max=stat.max,
+                    depleted_effect_ref=stat.depleted_effect_ref,
+                    slot_values=(
+                        list(stat.slot_values) if stat.slot_values is not None else None
+                    ),
+                    tags=list(stat.tags) if stat.tags is not None else None,
+                    none_kind=stat.none_kind,
+                )
+                for stat in entity.stats
+            ),
+        )
+    )
+    store.close()
+
+
 def select_character(client: TestClient, session_id: str, character_id: str) -> None:
+    """캐릭터를 세션에서 선택한다 — 실제 `select-character` 경로를 통해서만
+    쿠키를 얻는다(시험 전용 서명기를 손으로 만들지 않는다).
+
+    **12.1-05부터 select-character가 통과하려면 그 캐릭터가 이 세션에서
+    실제로 「만들어진」 캐릭터여야 한다(CHAR-02)** — `seed_character_created`
+    로 먼저 그 상태를 만든다.
+    """
+    seed_character_created(client.app.state.db_path, session_id, character_id)
     response = client.post(
         f"/api/sessions/{session_id}/select-character",
         json={"character_id": character_id},

@@ -10,8 +10,9 @@ AI가 하는 것은 안내 산문 · 닫힌 후보 목록에서 다음 차례 �
 판단뿐이고, 반환값에 값을 정하는 통로가 없다(D14).
 
 이 라우터는 미리 만들어진 캐릭터 목록을 돌려주는 경로를 만들지 않는다
-(CHAR-02) — `web.characters_data`를 import하지 않는다. 정적 넷(브람·나리·
-선·호두)과 **나란히 존재하는** 새 경로다(12.1-05가 그 정적 넷을 지운다).
+(CHAR-02) — 제품에 남아 있던 유일한 정적 캐릭터 상수 모듈은 12.1-05가
+지웠다(브람·나리·선·호두 넷은 이제 `tests/fixtures/characters.py`에서
+시험 재료로만 산다). 이 라우터는 애초에 그 모듈을 import한 적이 없다.
 
 **`complete` 경로가 지키는 순서** (`routes_characters.select_character`의
 「점유 제출이 쿠키 굽기보다 먼저」 규율을 그대로 옮긴다): ① 신원을 먼저
@@ -23,11 +24,11 @@ AI가 하는 것은 안내 산문 · 닫힌 후보 목록에서 다음 차례 �
 쿠키를 굽는다. 순서가 뒤집히면 완성은 됐는데 점유가 없는 반쪽 상태가
 남는다.
 
-**알려진 범위 경계:** `GET /my-character`·`GET /characters/{id}`
-(`routes_characters.py`)는 여전히 `web.characters_data`의 정적 목록만
-읽는다 — 이 계획이 만드는 세션 스코프 캐릭터(`GameState.created_characters`)
-는 그 두 경로에서 아직 보이지 않는다. 12.1-05가 그 세 호출부를 한꺼번에
-세션 기준으로 옮긴다(D-12). 이 계획은 사건 기록(`GET /events`에 남는
+**12.1-05 이후:** `GET /my-character`·`GET /characters/{id}`
+(`routes_characters.py`)도 이제 이 계획이 만드는 세션 스코프 캐릭터
+(`GameState.created_characters`)를 본다 — 정적 목록으로 갈라져 있던 네
+소비처(목록·시트·선택·판정 컨텍스트·초상화)가 전부 같은 출처를 보게
+됐다(D-12). 이 라우터는 여전히 사건 기록(`GET /events`에 남는
 `character_occupied`)과 쿠키로 「자동 점유가 실제로 일어났다」를 증명한다.
 """
 

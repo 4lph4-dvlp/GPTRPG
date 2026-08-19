@@ -124,9 +124,11 @@ DUNGEONWORLD_CREATION_STEPS: tuple[CreationStepDecl, ...] = (
     # `docs/experiment/character-creation-script.md`의 만들기 대본 1~4단계
     # 전체를 데이터로 옮긴다(12.1-02 Task 3) — 이 파일에 들어가는 값은
     # 전부 룰북 콘텐츠다(항목 이름·선택지 문구·숫자·체력 공식의 16과 2가
-    # 전부 여기 있고 플랫폼 코드에는 하나도 없다). `web/characters_data.py`의
-    # `NEW_CHARACTER_*` 상수가 지금 같은 값을 중복해서 갖고 있고, 12.1-05가
-    # 그 파일을 시험 재료로 옮길 때 중복이 해소된다.
+    # 전부 여기 있고 플랫폼 코드에는 하나도 없다). 예전 웹 캐릭터 상수
+    # 모듈(12.1-05가 지운 파일)의 `NEW_CHARACTER_*`가 한때 같은 값을
+    # 중복해서 갖고 있었는데, 그 모듈이 시험 재료
+    # (`tests/fixtures/characters.py`)로만 남으면서 제품 코드 쪽 중복은
+    # 해소됐다.
     #
     # 순서가 곧 의존 방향이다(`Rulebook.__post_init__`) — "archetype"이
     # "ability_array"의 `default_from`과 "backstory" 앞에 오고,
@@ -154,9 +156,9 @@ DUNGEONWORLD_CREATION_STEPS: tuple[CreationStepDecl, ...] = (
         # 그대로 읽는다).
         step_id="ability_array", kind="place_fixed_values", label="능력치 배치",
         required=True, axis_names=("STR", "DEX", "CON", "INT", "WIS", "CHA"),
-        # 이 여섯 숫자는 룰북 콘텐츠이고 지금 web/characters_data.py:32의
-        # NEW_CHARACTER_STAT_ARRAY와 같은 값이다 — 같은 값이 두 곳에 있는
-        # 것은 12.1-05가 그 정적 상수를 지울 때 해소된다.
+        # 이 여섯 숫자는 룰북 콘텐츠이고 tests/fixtures/characters.py의
+        # NEW_CHARACTER_STAT_ARRAY(시험 재료)와 같은 값이다 — 그 상수가
+        # 제품 코드에서 지워지면서(12.1-05) 제품 쪽 중복은 해소됐다.
         fixed_values=(2, 1, 1, 0, 0, -1), default_from="archetype",
     ),
     CreationStepDecl(

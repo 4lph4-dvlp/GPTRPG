@@ -9,11 +9,11 @@
 `tests/conftest.py`의 `web_client` 픽스처(제공자 대역이 필요 없는 순수
 FastAPI 클라이언트)를 그대로 쓴다.
 
-**알려진 범위 경계(routes_creation.py 모듈 도크스트링 참조):**
-`GET /my-character`·`GET /characters/{id}`는 여전히 `web.characters_data`의
-정적 목록만 읽으므로, 이 계획이 세션 스코프로 만든 캐릭터는 그 두 경로에서
-아직 보이지 않는다(12.1-05가 옮긴다). 이 시험은 그 대신 사건 기록
-(`GET /events`)과 쿠키로 「자동 점유가 실제로 일어났다」를 확인한다.
+**12.1-05 이후:** `GET /my-character`·`GET /characters/{id}`도 이제 이
+계획이 세션 스코프로 만든 캐릭터(`GameState.created_characters`)를 본다 —
+정적 캐릭터 상수 모듈은 제품 코드에서 지워졌다(D-12). 이 시험은 여전히
+사건 기록(`GET /events`)과 쿠키로 「자동 점유가 실제로 일어났다」를
+확인한다.
 """
 
 from gptrpg.agents.context import PARTY_MEMBER_LIMIT

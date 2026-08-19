@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
 from conftest import FakeProvider
+from conftest import seed_character_created as _seed_character_created
 from conftest import select_character as _select_character_at
 from gptrpg.agents import prompt_assembly
 from gptrpg.agents.context import ITEM_NOT_IN_INVENTORY, NO_CHECK_SUMMARY
@@ -34,12 +35,11 @@ from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.rulebook import NO_CHANGE_CATEGORY_ID
 from gptrpg.turn.context import build_turn_context
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments
-from gptrpg.web import routes_actions as routes_actions_module
 from gptrpg.web.app import create_app
-from gptrpg.web.characters_data import PLAYER_CHARACTERS
 from gptrpg.web.cookie_auth import sign_cookie, verify_cookie
 from gptrpg.web.routes_actions import _current_party_state
 from gptrpg.web.routes_characters import COOKIE_NAME
+from tests.fixtures.characters import PLAYER_CHARACTERS
 
 SESSION_ID = "s1"
 
@@ -1172,10 +1172,7 @@ def test_action_routes_no_secret_leak_across_403_409_400(
     gm = FakeProvider(stream_text=_NARRATION_TEXT)
 
     with web_client_with_fake_provider(action_classifier=fake, master_gm=gm) as client_a:
-        select_response = client_a.post(
-            f"/api/sessions/{SESSION_ID}/select-character", json={"character_id": "bram"}
-        )
-        assert select_response.status_code == 200
+        _select_character(client_a, "bram")
         cookie_value = client_a.cookies.get(COOKIE_NAME)
         assert cookie_value is not None
         secret = client_a.app.state.cookie_secret
@@ -1280,6 +1277,7 @@ async def test_concurrent_confirm_same_declare_seq_http_layer_one_check_resolved
     classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
     gm = FakeProvider(stream_text=_NARRATION_TEXT)
     app = _make_app_with_fake_provider(tmp_db_path, tmp_path, action_classifier=classifier, master_gm=gm)
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram")
 
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
@@ -1540,6 +1538,7 @@ def test_next_turn_gm_prompt_reflects_folded_resource_change_not_starting_value(
     )
     folded_hp = starting_hp - 6
 
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram")
     store = EventStore(tmp_db_path)
     store.initialize()
     store.append(
@@ -1598,12 +1597,13 @@ def test_party_state_axis_value_matches_character_sheet_response(
     )
     folded_hp = starting_hp - 6
 
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram")
     store = EventStore(tmp_db_path)
     store.initialize()
     store.append(
         ResourceChanged(
             session_id=SESSION_ID,
-            seq=0,
+            seq=store.next_seq(SESSION_ID),
             schema_version=EVENT_SCHEMA_VERSION,
             caused_by_seq=None,
             recorded_at=utc_now_iso(),
@@ -1778,6 +1778,7 @@ def test_confirm_surfaces_pending_resource_change_from_closed_list_pick_without_
 
     web_app.state.provider_resolver = _resolver
 
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram", browser_id="browser-1")
     seed_store = EventStore(tmp_db_path)
     seed_store.initialize()
     declare_seq, _confirm_seq, _resolve_seq = _seed_occupied_and_confirmed_check(
@@ -1846,6 +1847,7 @@ def test_confirm_no_change_pick_yields_empty_pending_resource_changes(
 
     web_app.state.provider_resolver = _resolver
 
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram", browser_id="browser-1")
     seed_store = EventStore(tmp_db_path)
     seed_store.initialize()
     declare_seq, _confirm_seq, _resolve_seq = _seed_occupied_and_confirmed_check(
@@ -1900,6 +1902,7 @@ def test_confirm_discretionary_available_when_outcome_list_empty_and_grade_costs
 
     web_app.state.provider_resolver = _resolver
 
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram", browser_id="browser-1")
     seed_store = EventStore(tmp_db_path)
     seed_store.initialize()
     declare_seq, _confirm_seq, _resolve_seq = _seed_occupied_and_confirmed_check(
@@ -2225,15 +2228,22 @@ def _cairn_style_entity(*, entity_id: str, slot_values: tuple) -> Entity:
 
 
 def test_declare_item_not_held_opens_retro_declaration_when_rulebook_allows(
-    web_client_with_fake_provider, monkeypatch
+    web_client_with_fake_provider, tmp_db_path
 ) -> None:
     """소지품에 없는 것을 쓰겠다고 하면(`kind="not_held"`) 재량 판정 경로로
     간다 — Cairn처럼 소급 선언을 허용하는 룰북은 그 비용 축·동작을 응답에
-    함께 싣는다(RULE-16, D-16). `get_character`를 갈아 끼워 named_slots
-    소지품을 가진 캐릭터를 임시로 만든다 — 저장소의 기존 플레이어 캐릭터는
-    전부 던전월드류(소지품 `form="none"`)라 이 경로를 자연스럽게 못 탄다."""
+    함께 싣는다(RULE-16, D-16).
+
+    **12.1-05부터 `get_character`가 없다** — 내부 함수를 갈아 끼우는 대신,
+    이 세션에 named_slots 소지품을 가진 캐릭터를 실제로 「만든다」
+    (`seed_character_created(entity=...)`, 시험 전용). `_current_party_state`
+    /`_created_character` 둘 다 이제 사건 기록(`GameState.created_characters`)
+    을 유일한 출처로 삼으므로, 두 경로가 같은 값을 보려면 monkeypatch가
+    아니라 실제로 사건을 심는 것이 맞는 방법이다 — 저장소의 기존 플레이어
+    캐릭터(시험 재료)는 전부 던전월드류(소지품 `form="none"`)라 이 경로를
+    자연스럽게 못 탄다."""
     entity = _cairn_style_entity(entity_id="bram", slot_values=(None,) * 10)
-    monkeypatch.setattr(routes_actions_module, "get_character", lambda character_id: entity)
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram", entity=entity)
 
     classifier = FakeProvider(
         complete_value=json.dumps(
@@ -2281,12 +2291,16 @@ def test_declare_item_use_skipped_entirely_for_rulebook_without_named_slots(
 
 
 def test_declare_item_held_and_actually_present_is_not_downgraded(
-    web_client_with_fake_provider, monkeypatch
+    web_client_with_fake_provider, tmp_db_path
 ) -> None:
     """분류기가 「갖고 있다」고 골랐고 실제로 슬롯에 있으면(이중 대조 통과)
-    `retro_declaration`이 안 열린다 — 재량 판정은 「없다」일 때만 연다."""
+    `retro_declaration`이 안 열린다 — 재량 판정은 「없다」일 때만 연다.
+
+    12.1-05부터 실제로 이 세션에 named_slots 캐릭터를 「만든다」(위
+    `test_declare_item_not_held_opens_retro_declaration_when_rulebook_allows`
+    와 같은 이유)."""
     entity = _cairn_style_entity(entity_id="bram", slot_values=("장검", None, None))
-    monkeypatch.setattr(routes_actions_module, "get_character", lambda character_id: entity)
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram", entity=entity)
 
     classifier = FakeProvider(
         complete_value=json.dumps([{"move": "아무 시도", "stat": "STR"}, {"item": "장검"}])

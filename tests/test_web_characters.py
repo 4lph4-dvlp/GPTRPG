@@ -23,7 +23,11 @@ from gptrpg.event_log.store import EventStore
 from gptrpg.rulebooks import RULEBOOKS
 from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.rulebook import GradeBand, ResourceAxisDecl, Rulebook, TWO_D6
-from gptrpg.web.characters_data import (
+from gptrpg.web.cookie_auth import verify_cookie
+from gptrpg.web.routes_characters import COOKIE_NAME
+
+from conftest import seed_character_created as _seed_character_created
+from tests.fixtures.characters import (
     CHARACTER_ARCHETYPES,
     NEW_CHARACTER_HP_BASE,
     NEW_CHARACTER_HP_PER_CON,
@@ -31,21 +35,24 @@ from gptrpg.web.characters_data import (
     NEW_CHARACTER_STAT_NAMES,
     PLAYER_CHARACTERS,
 )
-from gptrpg.web.cookie_auth import verify_cookie
-from gptrpg.web.routes_characters import COOKIE_NAME
 
 _HP_DEPLETED_REF = "dungeonworld_like.hp_depleted"
 
 
 def test_known_character_sheet_matches_characters_data(web_client: TestClient) -> None:
-    """알려진 캐릭터의 시트가 `characters_data`의 값과 칸마다 같다."""
+    """알려진 캐릭터의 시트가 시험 재료(`tests/fixtures/characters.py`)의 값과
+    칸마다 같다(이 캐릭터를 이 세션에서 먼저 「만든」 뒤에)."""
     entity = PLAYER_CHARACTERS["bram"]
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
 
     response = web_client.get("/api/sessions/s1/characters/bram")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["entity_id"] == entity.entity_id
+    # 12.1-05부터 세션에서 만들어진 캐릭터의 entity_id는 짧은 식별자
+    # ("bram")다 — 시험 재료의 긴 형태("player.bram")가 아니다. 만들기
+    # 완료가 처음부터 짧은 형태로 Entity를 만들기 때문이다(D-01).
+    assert body["entity_id"] == "bram"
     assert body["display_name"] == entity.display_name
     assert body["rulebook_id"] == entity.rulebook_id
     assert len(body["stats"]) == len(entity.stats)
@@ -88,12 +95,13 @@ def test_none_axis_excluded_from_sheet_response(web_client: TestClient) -> None:
         ),
     )
     RULEBOOKS[test_rulebook_id] = test_rulebook
-    PLAYER_CHARACTERS[test_character_id] = test_entity
     try:
+        _seed_character_created(
+            web_client.app.state.db_path, "s1", test_character_id, entity=test_entity
+        )
         response = web_client.get(f"/api/sessions/s1/characters/{test_character_id}")
     finally:
         del RULEBOOKS[test_rulebook_id]
-        del PLAYER_CHARACTERS[test_character_id]
 
     assert response.status_code == 200
     body = response.json()
@@ -110,6 +118,7 @@ def test_dungeonworld_discretionary_axis_is_absent_from_sheet_response(
     브람의 시트 응답 본문 문자열 어디에도 등장하지 않는다(RULE-12, D-67,
     11-07) — 시험 픽스처가 아니라 저장소에 출하되는 실제 룰북 데이터로
     RULE-12를 실증한다."""
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
     response = web_client.get("/api/sessions/s1/characters/bram")
 
     assert response.status_code == 200
@@ -120,6 +129,7 @@ def test_dungeonworld_sheet_stat_count_unchanged_by_none_axis(web_client: TestCl
     """룰북이 「소지품」 축을 새로 선언해도, 그 축을 갖지 않은 브람의 시트
     `stats` 길이는 `Entity.stats` 선언 길이와 완전히 같다 — 룰북이 선언한
     `none` 축이 개체에 없는 값을 새로 실어 보내지 않는다(D-04)."""
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
     response = web_client.get("/api/sessions/s1/characters/bram")
 
     assert response.status_code == 200
@@ -146,12 +156,13 @@ def test_rulebook_with_zero_axes_returns_empty_stats(web_client: TestClient) -> 
         stats=(),
     )
     RULEBOOKS[test_rulebook_id] = test_rulebook
-    PLAYER_CHARACTERS[test_character_id] = test_entity
     try:
+        _seed_character_created(
+            web_client.app.state.db_path, "s1", test_character_id, entity=test_entity
+        )
         response = web_client.get(f"/api/sessions/s1/characters/{test_character_id}")
     finally:
         del RULEBOOKS[test_rulebook_id]
-        del PLAYER_CHARACTERS[test_character_id]
 
     assert response.status_code == 200
     assert response.json()["stats"] == []
@@ -161,6 +172,7 @@ def test_sheet_stats_preserve_declaration_order(web_client: TestClient) -> None:
     """브람 시트 응답의 `stats` 이름 순서가 `Entity.stats` 선언 순서와
     완전히 같다(RULE-11 ordering) — 응답 조립 단계가 어디서도 다시
     정렬하지 않는다는 증거다."""
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
     response = web_client.get("/api/sessions/s1/characters/bram")
 
     assert response.status_code == 200
@@ -181,6 +193,8 @@ def test_different_stat_counts_produce_same_shaped_response(web_client: TestClie
     assert len(PLAYER_CHARACTERS["bram"].stats) != len(PLAYER_CHARACTERS["nari"].stats), (
         "이 시험은 두 캐릭터의 상태값 개수가 실제로 달라야 의미가 있다"
     )
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
+    _seed_character_created(web_client.app.state.db_path, "s1", "nari")
 
     bram_response = web_client.get("/api/sessions/s1/characters/bram")
     nari_response = web_client.get("/api/sessions/s1/characters/nari")
@@ -212,6 +226,7 @@ def test_character_sheet_route_rejects_all_write_methods(web_client: TestClient)
 
 def test_select_character_sets_httponly_lax_cookie(web_client: TestClient) -> None:
     """`select-character`가 쿠키를 걸고, 그 쿠키에 HttpOnly와 SameSite=lax가 붙어 있다."""
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
     response = web_client.post(
         "/api/sessions/s1/select-character",
         json={"character_id": "bram"},
@@ -227,6 +242,7 @@ def test_select_character_sets_httponly_lax_cookie(web_client: TestClient) -> No
 
 def test_my_character_returns_selected_true_after_selecting(web_client: TestClient) -> None:
     """쿠키를 건 뒤 `my-character`가 `selected: true`를 돌려준다."""
+    _seed_character_created(web_client.app.state.db_path, "s1", "nari")
     web_client.post("/api/sessions/s1/select-character", json={"character_id": "nari"})
 
     response = web_client.get("/api/sessions/s1/my-character")
@@ -263,13 +279,34 @@ def test_path_traversal_session_id_rejected_with_400(web_client: TestClient) -> 
     assert response.status_code == 400
 
 
-def test_character_list_contains_all_hand_authored_characters(web_client: TestClient) -> None:
-    """목록 경로가 손으로 쓴 캐릭터 전부와 그 한 줄 소개를 돌려준다."""
+def test_character_list_is_empty_when_nobody_has_created_a_character(
+    web_client: TestClient,
+) -> None:
+    """12.1-05: 만들기가 하나도 안 일어난 세션의 캐릭터 목록은 빈 목록이다
+    (CHAR-02 empty) — 완성된 캐릭터를 미리 보여주는 정적 목록은 이제
+    제품 코드 어디에도 없다."""
+    response = web_client.get("/api/sessions/s1/characters")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_character_list_contains_only_characters_created_in_this_session(
+    web_client: TestClient,
+) -> None:
+    """12.1-05: 목록 경로는 「이 세션에서 만들어진 캐릭터」만 돌려주고,
+    그 순서는 완성된 순서다(D-01/D-12) — 정적 상수 넷을 전부 돌려주지
+    않는다. `archetype`은 `character_created` 사건의 `one_line_intro`에서
+    온다(CHAR-03)."""
+    db_path = web_client.app.state.db_path
+    _seed_character_created(db_path, "s1", "bram", one_line_intro=CHARACTER_ARCHETYPES["bram"])
+    _seed_character_created(db_path, "s1", "nari", one_line_intro=CHARACTER_ARCHETYPES["nari"])
+
     response = web_client.get("/api/sessions/s1/characters")
 
     assert response.status_code == 200
     body = response.json()
-    assert {item["character_id"] for item in body} == set(PLAYER_CHARACTERS.keys())
+    assert [item["character_id"] for item in body] == ["bram", "nari"]
     for item in body:
         assert item["archetype"] == CHARACTER_ARCHETYPES[item["character_id"]]
 
@@ -354,6 +391,7 @@ def test_identity_mismatch_response_has_no_secret_leak(web_client: TestClient) -
     """QUAL-05: 신원 불일치(403) 응답 본문에 ① 발급된 쿠키 값 전체 ② 비밀
     열쇠 바이트의 16진 표현 ③ 서명 조각 ④ `browser_id` 값 넷 중 어느 것도
     부분 문자열로 실려 나가지 않는다."""
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
     select_response = web_client.post(
         "/api/sessions/s1/select-character", json={"character_id": "bram"}
     )
@@ -409,6 +447,7 @@ def _character_occupied_event_count(tmp_db_path: Path, session_id: str = "s1") -
 def test_occupancy_first_select_appends_one_character_occupied_event(
     web_client: TestClient, tmp_db_path: Path
 ) -> None:
+    _seed_character_created(tmp_db_path, "s1", "bram")
     response = web_client.post(
         "/api/sessions/s1/select-character", json={"character_id": "bram"}
     )
@@ -430,6 +469,7 @@ def test_occupancy_second_browser_without_cookie_gets_409_no_cookie_no_new_event
     재시작해도 「다른 브라우저」 재현이 그대로 성립한다 — 같은
     `tmp_db_path`와 `cookie_secret` 파일을 공유하기 때문이다.
     """
+    _seed_character_created(tmp_db_path, "s1", "bram")
     with TestClient(web_app) as client_a:
         first = client_a.post(
             "/api/sessions/s1/select-character", json={"character_id": "bram"}
@@ -447,9 +487,11 @@ def test_occupancy_second_browser_without_cookie_gets_409_no_cookie_no_new_event
 
 
 def test_occupancy_second_browser_can_select_a_different_character(
-    web_app: FastAPI,
+    web_app: FastAPI, tmp_db_path: Path
 ) -> None:
     """진 쪽은 다른 캐릭터를 고를 수 있다(D-05)."""
+    _seed_character_created(tmp_db_path, "s1", "bram")
+    _seed_character_created(tmp_db_path, "s1", "nari")
     with TestClient(web_app) as client_a:
         first = client_a.post(
             "/api/sessions/s1/select-character", json={"character_id": "bram"}
@@ -467,6 +509,7 @@ def test_occupancy_own_reselect_returns_200_and_does_not_duplicate_event(
     web_client: TestClient, tmp_db_path: Path
 ) -> None:
     """본인 재접속은 그대로 통과하고 사건은 늘지 않는다(D-05)."""
+    _seed_character_created(tmp_db_path, "s1", "bram")
     first = web_client.post(
         "/api/sessions/s1/select-character", json={"character_id": "bram"}
     )
@@ -483,6 +526,8 @@ def test_occupancy_reselecting_a_different_character_returns_409(
     web_client: TestClient,
 ) -> None:
     """한 브라우저는 한 캐릭터만(D-07) — 이미 bram을 쥔 쿠키로 nari를 고르면 409."""
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
+    _seed_character_created(web_client.app.state.db_path, "s1", "nari")
     first = web_client.post(
         "/api/sessions/s1/select-character", json={"character_id": "bram"}
     )
@@ -494,8 +539,11 @@ def test_occupancy_reselecting_a_different_character_returns_409(
     assert second.status_code == 409
 
 
-def test_occupancy_409_response_has_no_holder_identity_leak(web_app: FastAPI) -> None:
+def test_occupancy_409_response_has_no_holder_identity_leak(
+    web_app: FastAPI, tmp_db_path: Path
+) -> None:
     """QUAL-05: 409 응답 본문 어디에도 점유자의 browser_id가 실려 나가지 않는다."""
+    _seed_character_created(tmp_db_path, "s1", "bram")
     with TestClient(web_app) as client_a:
         first = client_a.post(
             "/api/sessions/s1/select-character", json={"character_id": "bram"}
@@ -520,9 +568,20 @@ def test_occupancy_409_response_has_no_holder_identity_leak(web_app: FastAPI) ->
 def test_occupancy_old_session_rejects_select_but_polling_still_succeeds(
     tmp_db_path: Path, web_app: FastAPI
 ) -> None:
-    """D-14 옛 세션: 사건은 있는데(action_declared) 점유 사건이 없으면
-    select-character는 409지만 폴링(GET /events)은 여전히 200이다 — 다시보기는
-    된다."""
+    """D-14 옛 세션: 사건은 있는데(action_declared) 캐릭터 만들기 사건이
+    하나도 없으면 select-character는 거절되지만 폴링(GET /events)은 여전히
+    200이다 — 다시보기는 된다.
+
+    **12.1-05부터 응답 코드는 400이다(409가 아니다).** 이전에는 "bram"이
+    정적 상수라 항상 「알려진 캐릭터」였고, 옛 세션 판별(`_prepare_occupy`,
+    D-14)이 점유 시도 단계에서 409로 막았다. 이제는 select-character의
+    첫 관문이 「이 세션에서 실제로 만들어진 캐릭터인가」이고(CHAR-02),
+    이 세션은 애초에 그런 캐릭터가 하나도 없으므로(옛 세션이 정확히 그런
+    상태다) 그 관문에서 400으로 먼저 걸린다 — 점유 시도까지 가지도 않는다.
+    「다시보기는 되지만 새로 캐릭터를 잡을 수 없다」는 결론 자체는 그대로다.
+    `_prepare_occupy`의 옛 세션 판별 자체는 `tests/test_session_actor.py`가
+    여전히 직접 검사한다.
+    """
     store = EventStore(tmp_db_path)
     store.initialize()
     store.append(
@@ -543,7 +602,7 @@ def test_occupancy_old_session_rejects_select_but_polling_still_succeeds(
         select_response = client.post(
             "/api/sessions/s1/select-character", json={"character_id": "bram"}
         )
-        assert select_response.status_code == 409
+        assert select_response.status_code == 400
 
         poll_response = client.get("/api/sessions/s1/events")
         assert poll_response.status_code == 200
@@ -551,6 +610,7 @@ def test_occupancy_old_session_rejects_select_but_polling_still_succeeds(
 
 def test_occupancy_new_session_with_zero_events_select_succeeds(web_client: TestClient) -> None:
     """D-14 새 세션: 사건이 하나도 없는 세션에서는 언제나 정상적으로 잡힌다."""
+    _seed_character_created(web_client.app.state.db_path, "s1", "bram")
     response = web_client.post(
         "/api/sessions/s1/select-character", json={"character_id": "bram"}
     )
@@ -562,6 +622,9 @@ def test_occupancy_same_character_selectable_independently_in_a_different_sessio
 ) -> None:
     """점유는 세션 범위다 — s1에서 bram을 잡아도 s2에서 같은 브라우저가 bram을
     고르는 것은 충돌이 아니다(`GameState`는 세션마다 따로 접힌다)."""
+    db_path = web_client.app.state.db_path
+    _seed_character_created(db_path, "s1", "bram")
+    _seed_character_created(db_path, "s2", "bram")
     first = web_client.post(
         "/api/sessions/s1/select-character", json={"character_id": "bram"}
     )
@@ -584,8 +647,9 @@ def test_occupancy_same_character_selectable_independently_in_a_different_sessio
 
 
 async def test_concurrent_select_character_same_character_status_codes_are_200_and_409(
-    web_app: FastAPI,
+    web_app: FastAPI, tmp_db_path: Path
 ) -> None:
+    _seed_character_created(tmp_db_path, "s1", "bram")
     async with web_app.router.lifespan_context(web_app):
         transport = ASGITransport(app=web_app)
         async with (
@@ -613,18 +677,20 @@ def test_resource_changed_event_is_reflected_in_character_sheet(
     web_app: FastAPI, tmp_db_path: Path
 ) -> None:
     """`resource_changed` 사건을 하나 넣은 세션에서 시트의 그 축 `current`가
-    `characters_data.py` 시작값과 다르다 — 사건이 있는 세션에서만 접은
-    값이 달라지고, 없는 세션(위 `test_known_character_sheet_matches_characters_data`)
-    에서는 여전히 시작값과 같다는 것과 대칭이다."""
+    시작값(만들기 완료 사건이 기록한 값)과 다르다 — 사건이 있는 세션에서만
+    접은 값이 달라지고, 없는 세션(위
+    `test_known_character_sheet_matches_characters_data`)에서는 여전히
+    시작값과 같다는 것과 대칭이다."""
     entity = PLAYER_CHARACTERS["bram"]
     starting_hp = next(stat.current for stat in entity.stats if stat.name == "체력")
 
+    _seed_character_created(tmp_db_path, "s1", "bram")
     store = EventStore(tmp_db_path)
     store.initialize()
     store.append(
         ResourceChanged(
             session_id="s1",
-            seq=0,
+            seq=store.next_seq("s1"),
             schema_version=EVENT_SCHEMA_VERSION,
             caused_by_seq=None,
             recorded_at=utc_now_iso(),

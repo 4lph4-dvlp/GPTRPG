@@ -51,8 +51,9 @@ _REGISTERED_ENTITIES_FOR_AXIS_CHECK: dict[str, tuple[Entity, ...]] = {
     OPENQUEST_ID: OPENQUEST_CREATURES,
     CAIRN_ID: (CAIRN_EXAMPLE_ADVENTURER,),
 }
-"""등록 시점에 축 정합성을 검사할 개체 상수 — `web/characters_data.py`의
-플레이어 캐릭터 넷은 여기 없다. `rulebooks` 패키지가 `web` 패키지를
+"""등록 시점에 축 정합성을 검사할 개체 상수 — 플레이어 캐릭터 넷
+(`tests/fixtures/characters.py`, 12.1-05가 제품 코드에서 시험 재료로
+옮겼다, D-12)은 여기 없다. `rulebooks` 패키지가 `web`이든 `tests`든
 import하면 층 방향이 뒤집힌다(`.importlinter` contract 2) — 대신
 `tests/test_rulebook.py`의 `test_all_player_characters_match_their_rulebook_axes`가
 그 캐릭터들을 검사한다."""

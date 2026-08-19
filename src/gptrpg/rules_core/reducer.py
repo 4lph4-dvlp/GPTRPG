@@ -130,7 +130,7 @@ class GameState:
     )
     """(character_id, axis 이름) -> 그 축에 적용된 연산 이력 튜플(판 8+,
     D-05/D-65/RULE-09). `resource_changed` 사건에서만 채워진다 — 이 표 +
-    캐릭터 시작값(`characters_data.py`, `rules_core` 밖)을
+    캐릭터 시작값(만들기 완료 사건이 기록한 `Entity`, `rules_core` 밖)을
     `resource_change.resolve_character_stats`에 넘긴 결과가 「지금 값」이다
     (RULE-06). 사건 순번 순서를 보존한 튜플이라 접는 순서를 바꾸면 결과가
     달라질 수 있는 연산에서도 순서가 기록 순서와 같다(RULE-09 ordering)."""

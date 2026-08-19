@@ -41,7 +41,6 @@ from gptrpg.rules_core.rulebook import Rulebook
 from gptrpg.rulebooks import get_rulebook
 from gptrpg.session_actor.actor import AlreadyOccupied, CommandRejected, OccupyCharacter
 from gptrpg.session_actor.projection import rebuild_state_from_events
-from gptrpg.web.characters_data import get_character, list_characters
 from gptrpg.web.cookie_auth import (
     COOKIE_NAME,
     new_browser_id,
@@ -100,8 +99,8 @@ def _visible_stats(stats: tuple[StatEntry, ...], rulebook: Rulebook) -> tuple[St
     (등록 시점의 `validate_entity_axes`가 이미 둘이 어긋나면 등록 자체를
     거부하므로 정상 등록된 개체라면 두 신호는 항상 일치하지만, 이 함수는
     그 전제에 기대지 않고 독립적으로 둘 다 본다.) `stats`를 훑는 순서를
-    그대로 유지한다 — `list_characters()`가 세운 "선언 순서를 다시
-    정렬하지 않는다" 관례와 같은 이유다.
+    그대로 유지한다 — 「선언 순서를 다시 정렬하지 않는다」 관례와 같은
+    이유다.
 
     **`stats`는 시작값(`entity.stats`)이 아니라 `_current_stats`가 접어
     만든 지금 값이다(RULE-06, D-65, 12-01)** — 마지막 단계는 여전히
@@ -144,12 +143,14 @@ def _current_stats(character_id: str, entity: Entity, state: GameState) -> tuple
 
 
 class CharacterSummaryView(BaseModel):
-    """입장 화면용 한 줄 요약 — `characters_data.CharacterSummary`를 옮긴 것.
+    """입장 화면용 한 줄 요약(12.1-05부터 이 세션에서 만들어진 캐릭터 기준).
 
     `portrait_url`은 요약에만 있고 시트(`CharacterSheetView`)에는 없다. 시트는
     `Entity`의 네 칸을 그대로 옮기는 그릇이고(D-20이 확정한 네 칸), 초상화는
     룰북이 정하는 것이 아니라 이 실험 화면이 붙인 그림이다 — `archetype`을
-    `Entity`에 넣지 않은 것과 같은 이유로 시트에도 넣지 않는다.
+    `Entity`에 넣지 않은 것과 같은 이유로 시트에도 넣지 않는다. `archetype`은
+    `character_created` 사건의 `one_line_intro`에서 온다(CHAR-03) — GM이
+    정리하며 자동으로 만든 한 줄 소개가 그대로 이 요약 자리에 들어간다.
     """
 
     character_id: str
@@ -180,21 +181,44 @@ class MyCharacterResponse(BaseModel):
     response_model=list[CharacterSummaryView],
 )
 async def get_characters(session_id: str, request: Request) -> list[CharacterSummaryView]:
-    """입장 화면용 캐릭터 목록. `list_characters()`의 선언 순서를 그대로 옮긴다.
+    """입장 화면용 캐릭터 목록 — **이 세션에서 실제로 만들어진 캐릭터만**
+    돌려준다(CHAR-02, D-12). 아무도 안 만들었으면 빈 목록이다(CHAR-02 empty)
+    — 완성된 캐릭터를 즉시 집어드는 정적 목록은 제품 코드 어디에도 없다.
+
+    순서는 `GameState.created_characters`(사건에서 접은 「이 세션에서 만들어진
+    캐릭터」)의 삽입 순서 그대로다 — 파이썬 딕셔너리는 삽입 순서를 보존하고,
+    같은 캐릭터의 `character_created`가 재제출돼도(GM 정리가 `one_line_intro`
+    만 갱신, Phase 12.1-04) 기존 키 갱신은 자리를 옮기지 않으므로 「먼저
+    완성한 순서」가 그대로 유지된다.
+
+    `archetype`은 `Entity`가 아니라 `character_created` 사건의
+    `one_line_intro`에서 직접 온다 — `Entity`에 그 칸을 두지 않는다(CHAR-04).
+    `GameState`도 이 값을 따로 담지 않으므로(파생 칸을 늘리지 않는다) 사건을
+    한 번 더 훑어 캐릭터별 마지막 값을 뽑는다 — `created_characters`가 같은
+    방식(딕셔너리 갱신 = 나중 값이 이긴다)으로 마지막 stats를 담는 것과 같은
+    규칙이다.
 
     초상화 파일이 있는 캐릭터에만 `portrait_url`을 채운다 — 파일 존재를 여기서
     한 번 확인하고, 없으면 `None`으로 둔다. 화면이 404 나는 `<img>`를 그리게
-    두지 않기 위해서다.
+    두지 않기 위해서다(12.1-05부터 동적 캐릭터는 애초에 초상화 파일이 없다 —
+    `web/portraits.py` 모듈 도크스트링의 알려진 한계 참조).
     """
     media_dir = request.app.state.imagery_config.media_dir
+    store = request.app.state.store
+    events = store.read_events(session_id)
+    state = rebuild_state_from_events(session_id, events)
+    intros: dict[str, str] = {}
+    for event in events:
+        if event.event_type == "character_created":
+            intros[event.character_id] = event.one_line_intro
     return [
         CharacterSummaryView(
-            character_id=summary.character_id,
-            display_name=summary.display_name,
-            archetype=summary.archetype,
-            portrait_url=_portrait_url_if_present(media_dir, summary.character_id),
+            character_id=character_id,
+            display_name=entity.display_name,
+            archetype=intros.get(character_id, entity.display_name),
+            portrait_url=_portrait_url_if_present(media_dir, character_id),
         )
-        for summary in list_characters()
+        for character_id, entity in state.created_characters.items()
     ]
 
 
@@ -226,14 +250,19 @@ async def get_character_sheet(
     `_current_stats`에서 다시 살아날 여지가 생긴다. 이 경로에는 여전히
     쓰기 처리기가 하나도 없다 — 사건은 다른 라우트가 쓰고, 이 라우트는
     그 사건을 다시 접어 읽기만 한다.
+
+    **12.1-05부터 시작값의 출처는 `GameState.created_characters`다** —
+    `character_created` 사건이 기록한 `Entity`(만들기 완료 산출물)가
+    시작값이고, 만들어지지 않은 `character_id`는 404다(CHAR-02 empty와
+    같은 「없다」와 「조회 실패」 구분).
     """
-    entity = get_character(character_id)
-    if entity is None:
-        raise HTTPException(status_code=404, detail="그런 캐릭터가 없다")
-    rulebook = get_rulebook(entity.rulebook_id)
     store = request.app.state.store
     events = store.read_events(session_id)
     state = rebuild_state_from_events(session_id, events)
+    entity = state.created_characters.get(character_id)
+    if entity is None:
+        raise HTTPException(status_code=404, detail="그런 캐릭터가 없다")
+    rulebook = get_rulebook(entity.rulebook_id)
     current_stats = _current_stats(character_id, entity, state)
     return CharacterSheetView(
         entity_id=entity.entity_id,
@@ -271,9 +300,14 @@ async def select_character(
     서명 자체가 없었다) 08-01이 declare/confirm에 유효 쿠키를 요구하게
     만들었으므로 이미 403으로 막힌다. 이 경로만 옛 세션에 대해 닫으면
     된다(D-14, T-08-11).
+
+    **12.1-05부터 「알려진 캐릭터」는 이 세션에서 만들어진 캐릭터다** —
+    `GameState.created_characters`에 없는 `character_id`는 400이다. 완성된
+    캐릭터를 미리 보여주고 고르게 하는 목록은 어디에도 없다(CHAR-02).
     """
-    entity = get_character(body.character_id)
-    if entity is None:
+    store = request.app.state.store
+    state = rebuild_state_from_events(session_id, store.read_events(session_id))
+    if body.character_id not in state.created_characters:
         raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
 
     identity = read_identity(request, session_id)
@@ -322,6 +356,9 @@ async def my_character(session_id: str, request: Request) -> MyCharacterResponse
     캐릭터는 전부 조용히 `selected: false`로 떨어진다 — 파싱·검증 실패를
     예외로 터뜨리지 않는다. 위조되었거나 낡은 쿠키를 가진 브라우저가 화면을
     못 여는 것이 더 나쁘다.
+
+    **12.1-05부터 「모르는 캐릭터」는 이 세션의 `GameState.created_characters`
+    에 없는 캐릭터다.**
     """
     raw = request.cookies.get(COOKIE_NAME)
     if raw is None:
@@ -332,6 +369,10 @@ async def my_character(session_id: str, request: Request) -> MyCharacterResponse
     if payload.get("session_id") != session_id:
         return MyCharacterResponse(selected=False, character_id=None)
     character_id = payload.get("character_id")
-    if not isinstance(character_id, str) or get_character(character_id) is None:
+    if not isinstance(character_id, str):
+        return MyCharacterResponse(selected=False, character_id=None)
+    store = request.app.state.store
+    state = rebuild_state_from_events(session_id, store.read_events(session_id))
+    if character_id not in state.created_characters:
         return MyCharacterResponse(selected=False, character_id=None)
     return MyCharacterResponse(selected=True, character_id=character_id)

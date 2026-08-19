@@ -255,7 +255,7 @@ class ResolveCheck:
     넘어가지 않는다(RULE-02 empty)."""
     character_stats: tuple[StatEntry, ...] = ()
     """`stat`이 가리키는 능력치 값을 찾을 캐릭터 상태값(D-01). 액터는
-    `web.characters_data`를 알 수 없으므로(층 계약) 호출부가 값으로
+    `web` 계층의 캐릭터 데이터를 알 수 없으므로(층 계약) 호출부가 값으로
     넘긴다."""
     difficulty: str | None = None
     """룰북이 선언한 닫힌 이름 목록에서 고른 난이도(D-02). `None`이면
@@ -1265,7 +1265,7 @@ class SessionActor:
                 "amount": op.amount,
                 "rolls": list(op.rolls),
                 # `before`/`after`는 이 계층(액터)이 캐릭터 시작값에 접근할
-                # 수 없어(층 계약 — `web.characters_data`는 `session_actor`
+                # 수 없어(층 계약 — `web` 계층의 캐릭터 데이터는 `session_actor`
                 # 아래가 아니다) 계산하지 못한다 — "계산 안 함"을 `None`으로
                 # 남긴다("0"과 섞이지 않는다). 캐릭터 시트가 실제 지금 값을
                 # 돌려주는 것(RULE-06)은 `resolve_character_stats`가 시작값 +

@@ -16,6 +16,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from conftest import FakeProvider
+from conftest import seed_character_created as _seed_character_created
 from gptrpg.session_actor.actor import CommandRejected, ConfirmAction, SessionRegistry
 from gptrpg.web.cookie_auth import COOKIE_SECRET_FILENAME, verify_cookie
 
@@ -52,6 +53,10 @@ def _confirm_body(declare_seq: int, **overrides) -> dict:
 
 
 def _select_character(client, character_id: str, session_id: str = SESSION_ID):
+    """12.1-05부터 select-character가 통과하려면 그 캐릭터가 이 세션에서
+    먼저 「만들어져」 있어야 한다(CHAR-02) — `seed_character_created`로
+    시험 재료(`tests/fixtures/characters.py`)의 값을 먼저 심는다."""
+    _seed_character_created(client.app.state.db_path, session_id, character_id)
     response = client.post(
         f"/api/sessions/{session_id}/select-character",
         json={"character_id": character_id},
@@ -195,7 +200,12 @@ def test_confirm_with_mismatched_character_returns_403_at_route_layer(
 # ---------------------------------------------------------------------------
 
 
-async def _select_character_async(client, character_id: str, session_id: str = SESSION_ID):
+async def _select_character_async(client, character_id: str, db_path, session_id: str = SESSION_ID):
+    """12.1-05부터 select-character가 통과하려면 그 캐릭터가 이 세션에서
+    먼저 「만들어져」 있어야 한다(CHAR-02). `httpx.AsyncClient`는
+    `client.app`을 노출하지 않으므로(`TestClient`와 다르다) 호출부가
+    `app.state.db_path`를 직접 넘긴다."""
+    _seed_character_created(db_path, session_id, character_id)
     response = await client.post(
         f"/api/sessions/{session_id}/select-character",
         json={"character_id": character_id},
@@ -216,7 +226,7 @@ async def test_actor_level_ownership_check_rejects_bypassing_route(
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            await _select_character_async(client, "bram")
+            await _select_character_async(client, "bram", app.state.db_path)
             declare_response = await client.post(
                 f"/api/sessions/{SESSION_ID}/actions/declare",
                 json=_declare_body(character_id="bram"),
@@ -247,7 +257,7 @@ async def test_actor_level_ownership_check_survives_actor_restart(
     async with app.router.lifespan_context(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            await _select_character_async(client, "bram")
+            await _select_character_async(client, "bram", app.state.db_path)
             declare_response = await client.post(
                 f"/api/sessions/{SESSION_ID}/actions/declare",
                 json=_declare_body(character_id="bram"),

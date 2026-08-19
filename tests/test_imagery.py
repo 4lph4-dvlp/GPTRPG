@@ -22,6 +22,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import FakeProvider
+from conftest import seed_character_created as _seed_character_created
+from conftest import select_character as _select_character
 from gptrpg.imagery import (
     ImageryConfig,
     RenderedImage,
@@ -42,13 +44,13 @@ from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.reducer import fold
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT
 from gptrpg.web.app import create_app
-from gptrpg.web.characters_data import PLAYER_CHARACTERS
 from gptrpg.web.portraits import (
     CHARACTER_APPEARANCES,
     generate_portraits,
     portrait_relative_path,
     portrait_seed,
 )
+from tests.fixtures.characters import PLAYER_CHARACTERS
 
 SESSION_ID = "s1"
 _NARRATION_TEXT = "문이 요란하게 부서진다. 안에서 서늘한 바람이 흘러나온다."
@@ -319,10 +321,7 @@ def _imagery_client(
 
 
 def _run_one_turn(client: TestClient) -> dict:
-    select = client.post(
-        f"/api/sessions/{SESSION_ID}/select-character", json={"character_id": "bram"}
-    )
-    assert select.status_code == 200
+    _select_character(client, SESSION_ID, "bram")
     declare = client.post(
         f"/api/sessions/{SESSION_ID}/actions/declare",
         json={
@@ -464,10 +463,7 @@ def test_rejected_confirm_makes_no_illustration(tmp_db_path: Path, tmp_path: Pat
     """거부된 확인은 판정이 없으므로 그릴 장면도 없다."""
     renderer = FakeRenderer()
     with _imagery_client(tmp_db_path, tmp_path, renderer=renderer) as client:
-        select = client.post(
-            f"/api/sessions/{SESSION_ID}/select-character", json={"character_id": "bram"}
-        )
-        assert select.status_code == 200
+        _select_character(client, SESSION_ID, "bram")
         declare = client.post(
             f"/api/sessions/{SESSION_ID}/actions/declare",
             json={
@@ -558,6 +554,7 @@ def test_character_list_portrait_url_is_null_without_files(
     tmp_db_path: Path, tmp_path: Path
 ) -> None:
     """초상화를 아직 안 뽑았다고 입장 화면이 깨지지 않는다."""
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram")
     with _imagery_client(tmp_db_path, tmp_path, renderer=FakeRenderer()) as client:
         summaries = client.get(f"/api/sessions/{SESSION_ID}/characters").json()
 
@@ -570,6 +567,8 @@ def test_character_list_portrait_url_points_at_the_written_file(
 ) -> None:
     media_dir = tmp_path / "media"
     generate_portraits(FakeRenderer(), media_dir=media_dir, character_ids=["bram"])
+    _seed_character_created(tmp_db_path, SESSION_ID, "bram")
+    _seed_character_created(tmp_db_path, SESSION_ID, "nari")
 
     with _imagery_client(tmp_db_path, tmp_path, renderer=FakeRenderer()) as client:
         summaries = client.get(f"/api/sessions/{SESSION_ID}/characters").json()

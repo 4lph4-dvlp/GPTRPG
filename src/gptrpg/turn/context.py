@@ -87,7 +87,7 @@ def build_turn_context(
     (character_id -> display_name)를 넘기면, 지나간 `action_declared`
     사건 각각을 실제로 그 사건을 낸 캐릭터 이름으로 표시한다 — 넷이
     한 세션에서 번갈아 행동해도 모델이 "지금까지 전부 한 사람이 한 말"로
-    뭉뚱그리지 않는다. 이 층(`gptrpg.turn`)은 `gptrpg.web.characters_data`를
+    뭉뚱그리지 않는다. 이 층(`gptrpg.turn`)은 `gptrpg.web`의 캐릭터 데이터를
     import하지 않는다(층 계약 — 웹이 turn을 내려다보지, 그 반대가 아니다) —
     그래서 이름 사전은 호출부가 만들어서 넘긴다.
 

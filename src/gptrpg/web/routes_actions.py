@@ -104,15 +104,9 @@ from gptrpg.session_actor.live_roller import LiveRoller
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
-from gptrpg.web.characters_data import get_character, list_characters
 from gptrpg.web.cookie_auth import read_identity
 from gptrpg.web.media import media_file_path, media_url, scene_relative_path
 from gptrpg.session_actor.projection import rebuild_state_from_events
-
-_CHARACTER_NAMES: dict[str, str] = {c.character_id: c.display_name for c in list_characters()}
-"""character_id -> display_name, `build_turn_context`의 `character_names`로
-그대로 넘긴다 — 최근 대화에서 "플레이어: "만 찍히면 네 명의 발화가 전부
-한 사람 것처럼 뭉뚱그려진다(2026-08-04 실전에서 발견, T-05-16급)."""
 
 _NO_CHECK_GRADE_BAND = GradeBand(
     name="__no_check__", counts_as_failure=False, succeeded=True, costs=False
@@ -126,16 +120,37 @@ _NO_CHECK_GRADE_BAND = GradeBand(
 router = APIRouter()
 
 
+def _created_character(store: EventStore, session_id: str, character_id: str) -> Entity | None:
+    """이 세션에서 실제로 만들어진 캐릭터의 시작값 `Entity`를 돌려준다
+    (12.1-05, D-12) — 만들어지지 않았으면 `None`이다.
+
+    `declare()`/`confirm()`/`confirm_resource_change()`/`proceed()`가
+    캐릭터 존재(그리고 그 캐릭터가 실제로 가진 축)를 확인하던 자리가 전부
+    이 함수를 쓴다. `_current_party_state`(아래)가 사건을 접어 만든
+    「지금 값」을 돌려주는 것과 달리, 이 함수는 완성 시점의 구조(축 목록)
+    만 있으면 되는 호출부를 위해 `GameState.created_characters`의 시작값을
+    그대로 돌려준다.
+    """
+    state = rebuild_state_from_events(session_id, store.read_events(session_id))
+    return state.created_characters.get(character_id)
+
+
 def _current_party_state(store: EventStore, session_id: str) -> tuple[Entity, ...]:
     """세션에 있는 캐릭터 **전원**을 접은 「지금 값」으로 만든 개체 튜플을
-    조립한다(12-05, D-17/D-18/RULE-06) — `build_turn_context`의
+    조립한다(12-05/12.1-05, D-17/D-18/RULE-06) — `build_turn_context`의
     `party_state`로 그대로 넘긴다.
 
-    `list_characters()`가 돌려주는 선언 순서 그대로 각 식별자에
-    `get_character()`를 부르고, 사건에서 접은 `GameState.
-    character_resource_ops`를 `resolve_character_stats`에 넘겨 새 `Entity`를
-    만든다. **선언 순서를 다시 정렬하지 않는다**(`list_characters()`가 세운
-    관례).
+    **12.1-05부터 「파티」는 「저장소에 선언된 캐릭터 전부」가 아니라 「이
+    세션에서 만들어진 캐릭터」다(D-01/D-12)** — 사건에서 접은
+    `GameState.created_characters`가 유일한 출처다. **명단이 잠겼으면
+    (`state.party_roster`가 있으면) 그 순서를 따른다** — 잠긴 명단이 파티의
+    정의다(D-08). 안 잠겼으면 `created_characters`의 삽입 순서(= 먼저 완성한
+    순서)를 그대로 쓴다. **선언 순서를 다시 정렬하지 않는다**는 관례는
+    그대로다. 만들어진 캐릭터가 0명이면 빈 튜플을 돌려준다(CHAR-02 empty)
+    — 예외를 던지지 않는다.
+
+    각 파티 구성원의 축별 연산 이력(`GameState.character_resource_ops`)을
+    `resolve_character_stats`에 넘겨 새 `Entity`를 만든다.
 
     **`web/routes_characters.py`의 `_current_stats`와 같은 결합 규칙을
     쓴다** — 두 경로가 갈리면 시트와 프롬프트가 서로 다른 값을 보여준다.
@@ -146,28 +161,48 @@ def _current_party_state(store: EventStore, session_id: str) -> tuple[Entity, ..
     갈리지 않는다는 것은 이 도크스트링과 `_current_stats`의 도크스트링이
     서로를 지목하는 것으로 못박는다.
 
-    각 파티 구성원의 `entity_id`는 **짧은 캐릭터 식별자**(`"bram"` 등)로
-    다시 쓴다 — `characters_data.PLAYER_CHARACTERS`가 쓰는 긴 형태
-    (`"player.bram"`)가 아니다. `identity.character_id`도 짧은 형태이고,
-    `agents.prompt_assembly.actor_stats`가 `party_state`에서 `entity_id ==
-    actor_character_id`로 행위자를 찾으므로 두 값의 식별자 공간이 일치해야
-    한다.
+    각 파티 구성원의 `entity_id`는 **짧은 캐릭터 식별자**(`"bram"` 등)다 —
+    `identity.character_id`와 같은 공간이다. **12.1-05 이전에는 이 함수가
+    긴 형태(`"player.bram"`)를 짧은 형태로 다시 쓰는 변환을 했다 — 이제는
+    필요 없다.** 만들기(`CreateCharacter`)가 처음부터 짧은 식별자를 그대로
+    `Entity.entity_id`로 써서 캐릭터를 만들기 때문이다
+    (`session_actor.actor._prepare_create_character`가
+    `entity_id=command.character_id`로 조립한다). 아래 `replace(...)`가
+    `entity_id`를 다시 쓰는 것은 이제 안전장치일 뿐이다 — 두 값의 식별자
+    공간이 일치해야 `agents.prompt_assembly.actor_stats`가 `party_state`에서
+    `entity_id == actor_character_id`로 행위자를 찾을 수 있다는 사실 자체는
+    그대로다.
     """
-    events = store.read_events(session_id)
-    state = rebuild_state_from_events(session_id, events)
+    state = rebuild_state_from_events(session_id, store.read_events(session_id))
+    order = (
+        state.party_roster if state.party_roster is not None else tuple(state.created_characters)
+    )
     party: list[Entity] = []
-    for summary in list_characters():
-        entity = get_character(summary.character_id)
+    for character_id in order:
+        entity = state.created_characters.get(character_id)
         if entity is None:
             continue
         ops: dict[str, tuple[ResourceOp, ...]] = {}
         for (op_character_id, axis_name), axis_ops in state.character_resource_ops.items():
-            if op_character_id != summary.character_id:
+            if op_character_id != character_id:
                 continue
             ops[axis_name] = axis_ops
         current_stats = resolve_character_stats(entity.stats, ops)
-        party.append(replace(entity, entity_id=summary.character_id, stats=current_stats))
+        party.append(replace(entity, entity_id=character_id, stats=current_stats))
     return tuple(party)
+
+
+def _character_names(party: tuple[Entity, ...]) -> dict[str, str]:
+    """character_id -> display_name, `build_turn_context`의 `character_names`로
+    그대로 넘긴다 — 최근 대화에서 "플레이어: "만 찍히면 여러 명의 발화가
+    전부 한 사람 것처럼 뭉뚱그려진다(2026-08-04 실전에서 발견, T-05-16급).
+
+    **12.1-05부터 이 세션의 `party_state`(즉 이 세션에서 만들어진 캐릭터)
+    에서 매 요청마다 다시 만든다** — 예전에는 저장소에 선언된 캐릭터 넷
+    전부를 모듈 임포트 시점에 한 번 계산해 두는 상수(`_CHARACTER_NAMES`)
+    였다. 「파티」의 정의가 세션마다 다른 「이 세션의 명단」으로 바뀌었으므로
+    (D-01/D-12) 이름 사전도 더는 모듈 전역 상수일 수 없다."""
+    return {entity.entity_id: entity.display_name for entity in party}
 
 MAX_RAW_TEXT_LEN = 2000
 """플레이어가 친 자유 문장의 상한 — 이 자리가 처음으로 신뢰할 수 없는 HTTP
@@ -358,7 +393,7 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
             )
         )
 
-        character = get_character(body.character_id)
+        character = _created_character(store, session_id, body.character_id)
         if character is None:
             raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
 
@@ -371,13 +406,14 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
         # 아니라 예시 개체(`EXAMPLE_SINGLE_STAT_FOE`)를 보게 된다
         # (`test_prompt_carries_the_acting_character_real_stat_names`가
         # 잡는 회귀).
+        party = _current_party_state(store, session_id)
         ctx = build_turn_context(
             store,
             session_id,
             body.rulebook_id,
-            party_state=_current_party_state(store, session_id),
+            party_state=party,
             actor_character_id=identity.character_id,
-            character_names=_CHARACTER_NAMES,
+            character_names=_character_names(party),
         )
 
         rulebook = get_rulebook(body.rulebook_id)
@@ -713,7 +749,7 @@ async def confirm(
     character = None
     rulebook = None
     if body.confirmed:
-        character = get_character(body.character_id)
+        character = _created_character(store, session_id, body.character_id)
         if character is None:
             raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
 
@@ -779,7 +815,7 @@ async def confirm(
         try:
             # ④ 판정 — 서사 호출은 아직 시작하지 않았다. `character_stats`는
             # 서버가 이미 불러 둔 `character.stats`를 그대로 넘긴다 —
-            # 액터는 `web.characters_data`를 모르므로(층 계약) 호출부가
+            # 액터는 `web` 계층의 캐릭터 데이터를 모르므로(층 계약) 호출부가
             # 값으로 넘긴다. `stat`/`difficulty`가 있으면 액터가 룰북
             # 선언에서 보정치를 조립한다(RULE-02/03, D-01/D-02).
             resolve_seq = await actor.submit(
@@ -833,13 +869,14 @@ async def confirm(
     ) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    party = _current_party_state(store, session_id)
     ctx = build_turn_context(
         store,
         session_id,
         body.rulebook_id,
-        party_state=_current_party_state(store, session_id),
+        party_state=party,
         actor_character_id=identity.character_id,
-        character_names=_CHARACTER_NAMES,
+        character_names=_character_names(party),
     )
 
     # 상황판단·장면 신규 대상 판단·시계 신호 관문·결과 선택(12-06)을
@@ -1298,7 +1335,7 @@ async def confirm_resource_change(
     # 그 사건이 기록된 뒤 `resolve_character_stats`가 조용히 버려서, 화면엔
     # 「변했다」가 뜨는데 실제로는 아무 일도 안 일어난다 — 잘못된 기록이
     # 영구히 남는다(2026-08-18 플레이테스트 관측).
-    actor_entity = get_character(identity.character_id)
+    actor_entity = _created_character(request.app.state.store, session_id, identity.character_id)
     if actor_entity is None:
         raise HTTPException(status_code=404, detail="캐릭터를 찾을 수 없다")
     try:
@@ -1450,7 +1487,7 @@ async def proceed(
     except SequenceConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    character = get_character(body.character_id)
+    character = _created_character(store, session_id, body.character_id)
     if character is None:
         raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
 
@@ -1478,13 +1515,14 @@ async def proceed(
     # 넘긴다(12-05, D-17/D-18) — **웹 안에서도 호출부가 둘이라는 것이 이
     # 함정이다.** 하나만 고치면 「굴린 턴은 파티를 보고 안 굴린 턴은 못
     # 보는」 어긋남이 생긴다.
+    party = _current_party_state(store, session_id)
     ctx = build_turn_context(
         store,
         session_id,
         body.rulebook_id,
-        party_state=_current_party_state(store, session_id),
+        party_state=party,
         actor_character_id=identity.character_id,
-        character_names=_CHARACTER_NAMES,
+        character_names=_character_names(party),
     )
 
     # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에

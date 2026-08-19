@@ -96,6 +96,14 @@ def create_app(
         store = EventStore(db_path)
         store.initialize()
         app.state.store = store
+        # 이 세션 기록 파일의 경로. 요청 처리 코드는 쓰지 않는다(항상
+        # `app.state.store`를 통해 접근한다) — 시험 전용 이음매다.
+        # `EventStore` 연결은 만든 스레드에서만 쓸 수 있어(sqlite3 스레드
+        # 제약), 시험이 앱의 이벤트 루프 밖에서 사건을 직접 심어야 할 때
+        # (예: `tests/conftest.py`의 `select_character` 지름길, 12.1-05) 이
+        # 경로로 **별도의** `EventStore` 연결을 새로 열어야 한다 —
+        # `app.state.store`를 다른 스레드에서 재사용하면 안 된다.
+        app.state.db_path = db_path
         app.state.registry = SessionRegistry(store)
         # 비밀 열쇠도 store/registry와 같은 이유로 lifespan 안에서 만든다 —
         # import 시점에 만들면 「이 모듈을 import하면 저장소에 흔적이

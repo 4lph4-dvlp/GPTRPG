@@ -80,7 +80,7 @@ from gptrpg.rulebooks.openquest import (
 )
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rulebooks.openquest_creatures import OPENQUEST_CREATURES
-from gptrpg.web.characters_data import PLAYER_CHARACTERS
+from tests.fixtures.characters import PLAYER_CHARACTERS
 
 _EMPTY_BANDS: tuple[GradeBand, ...] = ()
 
