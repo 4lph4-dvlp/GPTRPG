@@ -134,6 +134,38 @@ export function resourceOperationLabel(operation: string): string {
 }
 
 /**
+ * 계산 조각의 역할 이름(`CalculationSegmentView.role`)을 사람 말로 옮긴다
+ * (Phase 12.2, D-09). 역할 이름은 자유 문자열이고 닫힌 목록이 아니다
+ * (D-10) — 이 표에 없는 이름은 `resourceOperationLabel`과 같은 규율로
+ * 조용히 숨기지 않고 원문 그대로 보인다.
+ */
+const SEGMENT_ROLE_GLOSS: Record<string, string> = {
+  die: "눈",
+  tens: "십의 자리",
+  units: "일의 자리",
+  percentile: "백분위",
+  flat: "보정치",
+};
+
+export function segmentRoleLabel(role: string): string {
+  return SEGMENT_ROLE_GLOSS[role] ?? role;
+}
+
+/** 판정 방향(`CheckCalculationView.direction`, D-07) — 룰북 선언에서
+ * 파생된 해석이라 사건이 아니라 응답으로만 온다. */
+const DIRECTION_GLOSS: Record<string, string> = {
+  roll_over: "넘어야 성공",
+  roll_under: "밑돌아야 성공",
+};
+
+export function directionLabel(direction: string | null): string {
+  if (direction === null) {
+    return "";
+  }
+  return DIRECTION_GLOSS[direction] ?? direction;
+}
+
+/**
  * 04-UI-SPEC.md의 Copywriting Contract 문구 — 문구는 그 표가 권위다.
  * 화면을 새로 짜면서 문구까지 바꾸지 않았다.
  */
@@ -184,6 +216,8 @@ export const COPY = {
   usageDieSpent: "다 씀",
   /** D-04 — 판정 검산 표시(`CheckBreakdown.tsx`). */
   checkTarget: "목표",
+  /** D-05 — 합계가 안 남은 판 10 미만 판정(`TurnCard.tsx`·`CheckBreakdown.tsx`). */
+  checkTotalMissing: "합계 기록 없음",
   /** RULE-07/D-19, 12-06/12-07 — 자원 변화 확인 카드(`ChatPane.tsx`). */
   resourceChangeHeading: "이 판정으로 자원이 바뀔 예정이에요",
   resourceChangeApply: "그대로 반영",

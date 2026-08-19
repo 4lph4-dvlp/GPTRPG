@@ -138,6 +138,8 @@ def _failed_check(session_id: str, seq: int) -> CheckResolved:
         counts_as_failure=True,
         person_id="p1",
         character_id="bram",
+        total=2,
+        rulebook_id="dungeonworld_like",
         session_id=session_id,
         seq=seq,
         schema_version=EVENT_SCHEMA_VERSION,
@@ -176,3 +178,28 @@ def test_poll_response_auto_advance_threshold_matches_actor_constant(
     state = response.json()["state"]
     assert state["auto_advance_threshold"] == AUTO_ADVANCE_FAILURE_THRESHOLD
     assert state["auto_advance_threshold"] == 3
+
+
+def test_poll_events_carries_check_calculations(tmp_db_path: Path, web_client: TestClient) -> None:
+    """판정 사건 하나 있는 세션의 폴링 응답에 계산 줄 하나가 실리고, 그
+    `seq`가 그 판정 사건의 순번과 같다(Phase 12.2, RESEARCH §6)."""
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    store.append(_failed_check("s1", 0))
+    store.close()
+
+    response = web_client.get("/api/sessions/s1/events", params={"from_seq": 0})
+
+    assert response.status_code == 200
+    calculations = response.json()["check_calculations"]
+    assert len(calculations) == 1
+    assert calculations[0]["seq"] == 0
+    assert calculations[0]["total"] == 2
+
+
+def test_poll_events_check_calculations_empty_when_no_checks(web_client: TestClient) -> None:
+    """판정이 없는 세션에서는 계산 줄 목록이 빈 목록이다."""
+    response = web_client.get("/api/sessions/never-seen/events", params={"from_seq": 0})
+
+    assert response.status_code == 200
+    assert response.json()["check_calculations"] == []

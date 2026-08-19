@@ -2,9 +2,10 @@
  * 서버 응답 모양 — 파이썬 쪽 pydantic 모델과 칸 이름을 한 글자도 다르게 짓지
  * 않는다. 권위는 다음 세 파일이고 이쪽은 화면 전용 사본이다:
  *
- *   src/gptrpg/event_log/schema.py       사건 6종
- *   src/gptrpg/web/routes_events.py      폴링 응답
- *   src/gptrpg/web/routes_characters.py  캐릭터 목록·시트
+ *   src/gptrpg/event_log/schema.py             사건 6종
+ *   src/gptrpg/web/routes_events.py            폴링 응답
+ *   src/gptrpg/web/routes_characters.py        캐릭터 목록·시트
+ *   src/gptrpg/rules_core/check_calculation.py 계산 조각 모양의 권위(Phase 12.2)
  */
 
 export interface EventEnvelope {
@@ -58,6 +59,43 @@ export interface CheckResolvedEvent extends EventEnvelope {
    */
   person_id: string | null;
   character_id: string | null;
+  /**
+   * 규칙 코어 `CheckOutcome.total`을 그대로 옮긴 값(Phase 12.2, D-01). 판
+   * 10 이상 기록에서만 필수이고, 판 10 미만 기록은 `null`로 읽힌다 —
+   * 「합계 기록 없음」(D-05). 0으로 때우지 않는다.
+   */
+  total: number | null;
+  /**
+   * 이 판정이 어느 룰북으로 굴렸는지(Phase 12.2, D-03). `total`과 같은
+   * 하위 호환 규칙 — 판 10 미만 기록은 `null`이다.
+   */
+  rulebook_id: string | null;
+}
+
+/** 계산 줄 하나를 이루는 조각 — 역할·값·출처·버려짐 여부(D-08/D-09/D-10).
+ * `role`은 자유 문자열이다 — 유니온 리터럴 타입을 쓰지 않는다(D-10). */
+export interface CalculationSegmentView {
+  role: string;
+  value: number;
+  source: string | null;
+  discarded: boolean;
+}
+
+/** 조각의 순서 있는 목록 하나. 다시 굴림이 있으면 줄이 여럿이고 합계는
+ * 마지막 줄에만 붙는다(D-12) — 이번 계획은 줄이 하나뿐인 보통 판정만 만든다. */
+export interface CalculationRowView {
+  segments: CalculationSegmentView[];
+  total: number | null;
+}
+
+/** 계산 줄 전체 — 줄 목록 + 합계 + 목표값 + 방향. `seq`가 이 계산 줄이
+ * 딸린 `check_resolved` 사건의 순번이다(폴링 응답의 병렬 목록에서 쓴다). */
+export interface CheckCalculationView {
+  seq: number;
+  rows: CalculationRowView[];
+  total: number;
+  target: number;
+  direction: string;
 }
 
 export interface NarrationAppendedEvent extends EventEnvelope {
@@ -154,6 +192,11 @@ export interface GameStateView {
 export interface PollResponse {
   events: GameEvent[];
   state: GameStateView;
+  /**
+   * `events`와 나란한 파생값 목록(Phase 12.2) — 사건 객체 자체는 안
+   * 바뀐다. 각 항목의 `seq`가 그 순번의 `check_resolved` 사건을 가리킨다.
+   */
+  check_calculations: CheckCalculationView[];
 }
 
 export interface CharacterSummary {

@@ -321,6 +321,8 @@ def _turn_with_narration_after(confirm_ms: int, narration_ms: int) -> list:
             counts_as_failure=False,
             person_id="p1",
             character_id="bram",
+            total=9,
+            rulebook_id="dungeonworld_like",
             seq=2,
             caused_by_seq=1,
             recorded_at=_at(confirm_ms + 10),

@@ -5,6 +5,13 @@
 `event_log.store.EventStore.read_events`가 돌려주는 `GameEvent`를 그대로
 응답 모델로 쓴다 — 두 번째 전송용 스키마를 손으로 만들지 않는다.
 
+**파생값은 사건과 나란한 다른 칸에 싣는다(Phase 12.2, RESEARCH §6).**
+`check_calculations`가 이 규약의 첫 사례다 — 판정의 눈이 어떻게 합계가
+되는지는 사건에 없는 파생값(D-08/D-09)이라 사건 객체 자체를 바꾸지
+않고, `seq`로 사건과 짝지어지는 **병렬 목록**으로 싣는다. `events` 목록의
+사건 객체는 이 처리기에서 여전히 한 글자도 안 바뀐다 — 위 문단의 원래
+원칙은 그대로다.
+
 처리기는 반드시 `async def`다. FastAPI는 동기 `def` 처리기를 워커
 스레드에서 돌리는데, `EventStore`의 sqlite3 연결은 만든 스레드에 묶여 있어
 (`check_same_thread` 기본값) 다른 스레드에서 만지면 `ProgrammingError`가 난다.
@@ -23,6 +30,7 @@ from gptrpg.event_log.schema import GameEvent
 from gptrpg.session_actor.actor import AUTO_ADVANCE_FAILURE_THRESHOLD
 from gptrpg.session_actor.projection import rebuild_state_from_events
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT
+from gptrpg.web.check_views import CheckCalculationView, calculation_view_for
 
 router = APIRouter()
 
@@ -58,6 +66,10 @@ class GameStateView(BaseModel):
 class PollResponse(BaseModel):
     events: list[GameEvent]
     state: GameStateView
+    check_calculations: list[CheckCalculationView] = []
+    """`events`와 나란한 파생값 목록(Phase 12.2) — 사건 객체 자체는 안
+    바뀐다. 각 항목의 `seq`가 그 순번의 `check_resolved` 사건을 가리킨다.
+    판 10 미만 기록이거나 등록 안 된 룰북이면 그 판정에는 항목이 없다."""
 
 
 @router.get("/sessions/{session_id}/events", response_model=PollResponse)
@@ -86,6 +98,12 @@ async def poll_events(
     all_events = store.read_events(session_id)
     game_state = rebuild_state_from_events(session_id, all_events)
     events = [event for event in all_events if event.seq >= from_seq]
+    check_calculations = [
+        view
+        for event in events
+        if event.event_type == "check_resolved"
+        and (view := calculation_view_for(event)) is not None
+    ]
     state_view = GameStateView(
         session_id=game_state.session_id,
         last_seq=game_state.last_seq,
@@ -105,4 +123,4 @@ async def poll_events(
         clock_segment_count=CLOCK_SEGMENT_COUNT,
         auto_advance_threshold=AUTO_ADVANCE_FAILURE_THRESHOLD,
     )
-    return PollResponse(events=events, state=state_view)
+    return PollResponse(events=events, state=state_view, check_calculations=check_calculations)

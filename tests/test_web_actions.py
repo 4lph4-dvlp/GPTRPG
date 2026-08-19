@@ -1738,6 +1738,8 @@ def _seed_occupied_and_confirmed_check(
             counts_as_failure=counts_as_failure,
             person_id=character_id,
             character_id=character_id,
+            total=7,
+            rulebook_id="dungeonworld_like",
         )
     )
     return declare_seq, confirm_seq, resolve_seq

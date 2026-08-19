@@ -16,8 +16,32 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
-EVENT_SCHEMA_VERSION = 9
-"""판 8 -> 판 9: 캐릭터 만들기(Phase 12.1, D-03~D-09)가 사건 형식에 닿았다.
+EVENT_SCHEMA_VERSION = 10
+"""판 9 -> 판 10: 판정 합계를 서버가 보낸다(Phase 12.2, D-01/D-02/D-03)가
+사건 형식에 닿았다. **새 사건 종류는 늘지 않는다** — 기존 `CheckResolved`에
+칸 두 개가 늘었을 뿐이다.
+
+늘어난 칸: `CheckResolved.total`(규칙 코어 `CheckOutcome.total`을 그대로
+옮긴 값) · `CheckResolved.rulebook_id`(이 판정이 어느 룰북으로 굴렸는지).
+판 5가 `person_id`/`character_id` 두 칸에 쓴 것과 **같은 하위 호환 방식**
+— 기본값 없는 선택 칸 + `schema_version >= 10`에서만 필수를 강제하는
+검증기(`_require_total_from_schema_10`, 아래 `_require_identity_from_schema_5`
+바로 옆) — 이라 판 10 미만 기록은 두 칸이 없어도 그대로 읽힌다. 이미 쓰인
+기록을 고쳐 쓰는 마이그레이션은 없다(D-01) — `.gptrpg/events.db`(판 2,
+판정 895건)와 `tests/fixtures/session1_events.jsonl`(판 2, 판정 38건)
+둘 다 이 판 올리기 뒤에도 예외 없이 읽혀야 한다.
+
+`rulebook_id`는 **사실**이다(「이 판정은 이 규칙으로 굴렸다」) — 판정
+방향·등급 의미 같은 해석은 여전히 룰북 선언이 갖고 사건에 복사하지
+않는다(D-03의 경계).
+
+`rules_core/reducer.py`는 **이 판 올리기와 같은 커밋에서 무변경이다** —
+08-CONTEXT.md D-06의 「같은 커밋」 규율은 새 사건 종류가 늘 때의 것이고,
+이번은 기존 종류에 칸이 늘 뿐이며 `check_resolved` 분기는 `grade`·
+`counts_as_failure`·`caused_by_seq`만 읽고 새 두 칸을 읽지 않는다 —
+이 무변경 판단은 `tests/test_event_log.py`(fold 시험)로 확정된다.
+
+판 8 -> 판 9: 캐릭터 만들기(Phase 12.1, D-03~D-09)가 사건 형식에 닿았다.
 새 사건 종류가 다섯 늘었다 — `PartySizeFixed`(방을 여는 사람이 인원을
 확정했다) · `CreationStepCompleted`(만들기 항목 하나의 값이 확정됐다,
 같은 (character_id, step_id)가 다시 오면 나중 것이 이기고 `superseded_seq`가
@@ -208,11 +232,27 @@ class CheckResolved(EventEnvelope):
     기록에서는 아래 검증기가 두 칸을 필수로 강제한다 — 판정 기록에 누구의
     판정인지가 반드시 남는다. 판 5 미만 기록은 이 칸이 없어도 그대로 읽힌다
     (`.gptrpg/events.db`의 판 2 판정 기록 38건, D-13)."""
+    total: int | None = None
+    """규칙 코어 `CheckOutcome.total`을 그대로 옮긴 값(Phase 12.2, D-01).
+    판 10부터 필수 칸이다 — 아래 `_require_total_from_schema_10`이 강제한다.
+    판 10 미만 기록은 이 칸이 없어도 그대로 읽힌다(`합계 기록 없음`,
+    D-05) — 0으로 때우지 않는다."""
+    rulebook_id: str | None = None
+    """이 판정이 어느 룰북으로 굴렸는지(Phase 12.2, D-03). 판 10부터 필수
+    칸이다 — 아래 `_require_total_from_schema_10`이 강제한다. **사실**이지
+    해석이 아니다 — 판정 방향·등급 의미는 여전히 룰북 선언이 갖고 사건에
+    복사하지 않는다. 판 10 미만 기록은 이 칸이 없어도 그대로 읽힌다."""
 
     @model_validator(mode="after")
     def _require_identity_from_schema_5(self) -> "CheckResolved":
         if self.schema_version >= 5 and (self.person_id is None or self.character_id is None):
             raise ValueError("판 5부터 person_id·character_id는 필수 칸이다")
+        return self
+
+    @model_validator(mode="after")
+    def _require_total_from_schema_10(self) -> "CheckResolved":
+        if self.schema_version >= 10 and (self.total is None or self.rulebook_id is None):
+            raise ValueError("판 10부터 total·rulebook_id는 필수 칸이다")
         return self
 
 

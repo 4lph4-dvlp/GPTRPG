@@ -248,6 +248,7 @@ export function SessionScreen({
           segmentCount={feed.state?.clock_segment_count ?? 4}
           justRevealedSeq={justRevealedSeq}
           failedDeclareSeqs={failedDeclareSeqs}
+          calculations={feed.calculations}
         />
 
         <ChatPane

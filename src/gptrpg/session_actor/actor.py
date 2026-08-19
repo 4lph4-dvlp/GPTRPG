@@ -1047,6 +1047,8 @@ class SessionActor:
                 "counts_as_failure": band.counts_as_failure,
                 "person_id": command.person_id,
                 "character_id": command.character_id,
+                "total": outcome.total,
+                "rulebook_id": command.rulebook_id,
             },
         )
 

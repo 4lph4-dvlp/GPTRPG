@@ -127,6 +127,8 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             counts_as_failure=True,
             person_id="bram",
             character_id="bram",
+            total=5,
+            rulebook_id="dungeonworld_like",
             **_env(session_id, 4, 2, 450),
         ),
         AiInvoked(
@@ -162,6 +164,8 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             counts_as_failure=False,
             person_id="nari",
             character_id="nari",
+            total=11,
+            rulebook_id="dungeonworld_like",
             **_env(session_id, 8, 3, 2200),
         ),
         # --- 턴 3 (bram 재선언): 재굴림 한 번 → 여전히 실패 → 위협 시계 1칸 ---
@@ -202,6 +206,8 @@ def _make_fake_events(session_id: str) -> list[GameEvent]:
             counts_as_failure=True,
             person_id="bram",
             character_id="bram",
+            total=5,
+            rulebook_id="dungeonworld_like",
             **_env(session_id, 12, 11, 3400),
         ),
         ClockAdvanced(
@@ -344,6 +350,8 @@ def four_player_session(tmp_db_path: Path) -> FakeSession:
                 counts_as_failure=False,
                 person_id=character_id,
                 character_id=character_id,
+                total=7,
+                rulebook_id="dungeonworld_like",
                 **_env(session_id, resolve_seq, confirm_seq, ms),
             )
         )

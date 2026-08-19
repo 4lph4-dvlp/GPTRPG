@@ -85,6 +85,8 @@ describe("isVisibleTurn", () => {
         counts_as_failure: true,
         person_id: "bram",
         character_id: "bram",
+        total: 9,
+        rulebook_id: "dungeonworld_like",
       },
     ];
 
@@ -159,6 +161,8 @@ describe("isVisibleTurn", () => {
         counts_as_failure: true,
         person_id: "bram",
         character_id: "bram",
+        total: 9,
+        rulebook_id: "dungeonworld_like",
       },
       {
         ...envelope(20, null),

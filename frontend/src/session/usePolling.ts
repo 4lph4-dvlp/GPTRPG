@@ -15,7 +15,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, fetchEvents } from "../api/client.ts";
-import type { GameEvent, GameStateView } from "../api/types.ts";
+import type { CheckCalculationView, GameEvent, GameStateView } from "../api/types.ts";
+import { indexCalculations } from "./checkSummary.ts";
 
 /** D-38의 1~2초 범위. */
 export const POLL_INTERVAL_MS = 1500;
@@ -33,6 +34,12 @@ export interface SessionFeed {
   lastSuccessAt: number | null;
   /** 지금 즉시 한 번 더 폴링한다 — 확인 직후 결과를 1.5초 기다리지 않게. */
   pollNow: () => void;
+  /**
+   * `events`와 같은 방식(순번 열쇠)으로 합친 계산 줄(Phase 12.2) — 사건이
+   * 아니라 파생값이라 병렬 지도로 둔다. `check_resolved` 사건의 `seq`로
+   * 찾는다.
+   */
+  calculations: Map<number, CheckCalculationView>;
 }
 
 export function usePolling(
@@ -40,6 +47,9 @@ export function usePolling(
   onLiveEvents?: (events: GameEvent[]) => void,
 ): SessionFeed {
   const [events, setEvents] = useState<GameEvent[]>([]);
+  const [calculations, setCalculations] = useState<Map<number, CheckCalculationView>>(
+    () => new Map(),
+  );
   const [state, setState] = useState<GameStateView | null>(null);
   const [status, setStatus] = useState<FeedStatus>("loading");
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
@@ -84,6 +94,16 @@ export function usePolling(
           liveHandlerRef.current?.(response.events);
         }
       }
+      if (response.check_calculations.length > 0) {
+        const incoming = indexCalculations(response.check_calculations);
+        setCalculations((previous) => {
+          const merged = new Map(previous);
+          for (const [seq, calculation] of incoming) {
+            merged.set(seq, calculation);
+          }
+          return merged;
+        });
+      }
       primedRef.current = true;
     } catch (error) {
       if (!aliveRef.current) {
@@ -123,5 +143,5 @@ export function usePolling(
     void poll();
   }, [poll]);
 
-  return { events, state, status, lastSuccessAt, pollNow };
+  return { events, state, status, lastSuccessAt, pollNow, calculations };
 }

@@ -65,6 +65,10 @@ UNIQUE_FIELDS: dict[str, dict] = {
         # 이 표를 쓰는 모든 시험이 판 5 기록을 만들므로 여기서도 채워야 한다.
         "person_id": "p1",
         "character_id": "bram",
+        # 판 10부터 필수(Phase 12.2, D-01/D-02/D-03) — 이 표를 쓰는 모든
+        # 시험이 판 10 기록을 만들므로 여기서도 채워야 한다.
+        "total": 9,
+        "rulebook_id": "dungeonworld_like",
     },
     "narration_appended": {"text": "문이 부서진다", "chunk_index": 0},
     "clock_advanced": {"clock_id": "threat-1", "segment_index": 1, "trigger": "fail_counter"},

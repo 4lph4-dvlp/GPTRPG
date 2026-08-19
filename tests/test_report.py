@@ -249,6 +249,8 @@ def test_cli_report_prints_placeholder_when_clock_never_advanced(tmp_db_path, tm
             counts_as_failure=True,
             person_id="p1",
             character_id="bram",
+            total=5,
+            rulebook_id="dungeonworld_like",
             session_id=session_id,
             seq=1,
             schema_version=EVENT_SCHEMA_VERSION,

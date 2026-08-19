@@ -32,6 +32,7 @@ from conftest import PROJECT_ROOT
 from gptrpg.event_log.schema import (
     EVENT_SCHEMA_VERSION,
     CharacterCreated,
+    CheckResolved,
     CreationInterjection,
     CreationStatEntryRecord,
     CreationStepCompleted,
@@ -329,11 +330,18 @@ def test_event_schema_version_was_eight_before_phase_12_1():
     assert EVENT_SCHEMA_VERSION >= 8
 
 
-def test_event_schema_version_is_nine():
-    """판 9 못박기(Phase 12.1, D-03~D-09) — 캐릭터 만들기 다섯 사건이
+def test_event_schema_version_was_nine_before_phase_12_2():
+    """판 9 시절의 사실만 남긴다(Phase 12.1, D-03~D-09) — 캐릭터 만들기
+    다섯 사건이 사건 형식에 닿았을 때의 판이다. 그 이후 12.2-01이
+    `CheckResolved.total`/`rulebook_id`로 판을 10으로 올렸다(아래 시험)."""
+    assert EVENT_SCHEMA_VERSION >= 9
+
+
+def test_event_schema_version_is_ten():
+    """판 10 못박기(Phase 12.2, D-01/D-02/D-03) — 판정 합계·룰북 이름이
     사건 형식에 닿은 현재 판이다. 누가 무심코 판을 또 올리거나 내리면 이
     값이 바뀌어 이 시험이 잡는다."""
-    assert EVENT_SCHEMA_VERSION == 9
+    assert EVENT_SCHEMA_VERSION == 10
 
 
 def _tuple_key_to_str(key: tuple) -> str:
@@ -503,6 +511,47 @@ def test_freshly_written_schema_8_resource_changed_event_folds_without_exception
     state = rebuild_state_from_events("fresh-resource-session", events)
     assert state.last_seq == 0
     assert state.character_resource_ops[("bram", "체력")][0].amount == -6
+
+
+def test_freshly_written_schema_10_check_resolved_event_folds_without_exception(tmp_path):
+    """새로 쓴 `check_resolved` 사건(판 10, `total`/`rulebook_id` 포함)이
+    접기 경로를 깨지 않는다 — `test_freshly_written_schema_8_resource_changed_event_folds_without_exception`과
+    같은 모양이다. 리듀서는 이 두 새 칸을 안 읽으므로(D-06의 이번 판
+    무변경 판단) `check_count`/`failure_count`/`last_grade`가 판 9 때와
+    똑같이 나온다."""
+    store_path = tmp_path / "fresh-check-total.db"
+    store = EventStore(store_path)
+    store.initialize()
+    try:
+        event = CheckResolved(
+            session_id="fresh-check-total-session",
+            seq=0,
+            schema_version=10,
+            caused_by_seq=None,
+            recorded_at=utc_now_iso(),
+            event_type="check_resolved",
+            move="hack_and_slash",
+            rolls=[4, 3],
+            modifiers=[],
+            target=10,
+            grade="miss",
+            counts_as_failure=True,
+            person_id="p1",
+            character_id="bram",
+            total=7,
+            rulebook_id="dungeonworld_like",
+        )
+        store.append(event)
+        events = store.read_events("fresh-check-total-session")
+    finally:
+        store.close()
+
+    assert len(events) == 1
+    state = rebuild_state_from_events("fresh-check-total-session", events)
+    assert state.last_seq == 0
+    assert state.check_count == 1
+    assert state.failure_count == 1
+    assert state.last_grade == "miss"
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TurnCard } from "../components/TurnCard.tsx";
-import type { ClockAdvancedEvent } from "../api/types.ts";
+import type { CheckCalculationView, ClockAdvancedEvent } from "../api/types.ts";
 import { COPY } from "../labels.ts";
 import { isVisibleTurn, type Turn } from "../session/groupTurns.ts";
 
@@ -47,6 +47,9 @@ interface StoryPaneProps {
   segmentCount: number;
   justRevealedSeq: number | null;
   failedDeclareSeqs: Set<number>;
+  /** 판정 사건의 `seq`로 찾는 계산 줄(Phase 12.2) — `TurnCard`가 이것으로
+   * 검산 줄을 그린다(자체 산수 없음). */
+  calculations: Map<number, CheckCalculationView>;
 }
 
 export function StoryPane({
@@ -55,6 +58,7 @@ export function StoryPane({
   segmentCount,
   justRevealedSeq,
   failedDeclareSeqs,
+  calculations,
 }: StoryPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
@@ -137,6 +141,7 @@ export function StoryPane({
                   justRevealed={justRevealedSeq === turn.check?.seq}
                   failed={failedDeclareSeqs.has(turn.declareSeq)}
                   imageUrl={turn.illustration?.image_path ?? null}
+                  calculation={turn.check === null ? null : (calculations.get(turn.check.seq) ?? null)}
                 />
                 {turn.clock !== null ? (
                   <div

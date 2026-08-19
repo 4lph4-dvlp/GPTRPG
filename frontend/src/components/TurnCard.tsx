@@ -14,7 +14,9 @@
  */
 
 import { SHOW_IMAGE_PLACEHOLDER } from "../config.ts";
-import { gradeLabel, gradeTone, moveLabel, statLabel } from "../labels.ts";
+import type { CheckCalculationView } from "../api/types.ts";
+import { COPY, directionLabel, gradeLabel, gradeTone, moveLabel, segmentRoleLabel, statLabel } from "../labels.ts";
+import { buildCheckSummary } from "../session/checkSummary.ts";
 import type { Turn } from "../session/groupTurns.ts";
 
 interface TurnCardProps {
@@ -25,9 +27,20 @@ interface TurnCardProps {
   /** 이 턴의 서사 요청이 실패했다고 내 브라우저가 아는 경우. */
   failed: boolean;
   imageUrl?: string | null;
+  /** 이 턴의 판정 계산 줄(Phase 12.2) — `null`이면 판 10 미만 기록이라
+   * `COPY.checkTotalMissing`을 보인다(D-05). */
+  calculation: CheckCalculationView | null;
 }
 
-function CheckLine({ turn, justRevealed }: { turn: Turn; justRevealed: boolean }) {
+function CheckLine({
+  turn,
+  justRevealed,
+  calculation,
+}: {
+  turn: Turn;
+  justRevealed: boolean;
+  calculation: CheckCalculationView | null;
+}) {
   const check = turn.check;
   if (check === null) {
     if (turn.confirmed === null) {
@@ -53,9 +66,10 @@ function CheckLine({ turn, justRevealed }: { turn: Turn; justRevealed: boolean }
     );
   }
 
-  const modifierTotal = check.modifiers.reduce((sum, modifier) => sum + modifier.value, 0);
-  const rollTotal = check.rolls.reduce((sum, value) => sum + value, 0);
-  const total = rollTotal + modifierTotal;
+  // 이 컴포넌트는 산수를 하지 않는다 — `buildCheckSummary`가 서버가 만든
+  // 계산 줄을 그대로 옮겨 담고, 여기는 그 값을 순서대로 그리기만 한다
+  // (D-08/D-09/D-14).
+  const summary = buildCheckSummary(check, calculation);
 
   return (
     <div
@@ -70,19 +84,34 @@ function CheckLine({ turn, justRevealed }: { turn: Turn; justRevealed: boolean }
           </span>
         ))}
       </span>
-      <span className="check__total">{total}</span>
-      {modifierTotal !== 0 ? (
+      {summary.totalMissing ? (
+        <span className="check__total check__total--missing">{COPY.checkTotalMissing}</span>
+      ) : (
         <span className="check__mods">
-          ({rollTotal} {modifierTotal > 0 ? "+" : "−"} {Math.abs(modifierTotal)})
+          {summary.rows.map((row, rowIndex) => (
+            <span key={rowIndex}>
+              {row.segments.map((segment, segmentIndex) => (
+                <span key={segmentIndex}>
+                  {segmentIndex > 0 ? " · " : ""}
+                  {segmentRoleLabel(segment.role)} {segment.value}
+                </span>
+              ))}
+              {" = "}
+              <span className="check__total">{row.total}</span>
+            </span>
+          ))}
         </span>
-      ) : null}
-      <span className="check__target">목표 {check.target}</span>
+      )}
+      <span className="check__target">
+        목표 {summary.target}
+        {summary.direction !== null ? ` (${directionLabel(summary.direction)})` : ""}
+      </span>
       <span className={`stamp stamp--${gradeTone(check.grade)}`}>{gradeLabel(check.grade)}</span>
     </div>
   );
 }
 
-export function TurnCard({ turn, actorName, justRevealed, failed, imageUrl }: TurnCardProps) {
+export function TurnCard({ turn, actorName, justRevealed, failed, imageUrl, calculation }: TurnCardProps) {
   const confirmed = turn.confirmed;
   const hasNarration = turn.narration.length > 0;
 
@@ -100,7 +129,7 @@ export function TurnCard({ turn, actorName, justRevealed, failed, imageUrl }: Tu
 
       <p className="turn__quote">“{turn.rawText}”</p>
 
-      <CheckLine turn={turn} justRevealed={justRevealed} />
+      <CheckLine turn={turn} justRevealed={justRevealed} calculation={calculation} />
 
       {imageUrl != null ? (
         <div className="turn__plate">
