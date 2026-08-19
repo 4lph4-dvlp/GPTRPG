@@ -566,9 +566,16 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 12.2-01-PLAN.md — 사건 판 10(합계·룰북 이름) · 서버가 계산 줄을 만들어 폴링 피드에 싣고 이야기 화면이 그린다 (뼈대)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 12.2-02-PLAN.md — 즉시 응답에 계산 줄을 싣고, 검산 창·주사위 연출을 같은 한 곳에 꽂는다
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 12.2-03-PLAN.md — 버려진 눈 흐림 · 다시 굴림 줄 나눔 · OpenQuest 브라우저 사람 확인
 
 > **왜 새로 생겼나 (2026-08-18 코드 리뷰 CR-02).** 12-07이 만든 검산 화면
