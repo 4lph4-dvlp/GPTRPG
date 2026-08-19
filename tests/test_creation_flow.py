@@ -284,6 +284,32 @@ def test_interjection_mentioning_an_unknown_character_is_rejected(web_client):
     assert response.status_code == 409
 
 
+def test_interjection_naming_an_unknown_during_character_id_is_rejected(web_client):
+    """WR-01 (12.1-REVIEW.md) — `mentioned_character_ids`는 이미 닫힌
+    목록(`known_character_ids`)과 대조되지만, `during_character_id`(누구의
+    차례에 끼어들었는가) 자신은 실재하는 캐릭터인지 검증되지 않았다.
+    이 세션에 없는 `during_character_id`로도 `creation_interjection`
+    사건이 그대로 기록되면 Phase 14(관계 장부)가 가리키는 대상이 없는
+    색인을 만난다."""
+    client = web_client
+    session_id = SESSION_ID + "-interject-unknown-during"
+    assert _fix_party_size(client, session_id=session_id).status_code == 200
+    assert _complete_step(client, session_id=session_id, step_id="name").status_code == 200
+
+    response = _interject(
+        client,
+        session_id=session_id,
+        speaker_character_id=SECOND_CHARACTER_ID,
+        browser_id=SECOND_BROWSER_ID,
+        during_character_id="ghost-character-that-does-not-exist",
+        text="유령의 차례에 끼어드는 척",
+    )
+    assert response.status_code == 409
+
+    events = _events_of_type(client, "creation_interjection", session_id=session_id)
+    assert events == []
+
+
 def test_interjection_never_changes_creation_step_completed_or_character_created_counts(
     web_client,
 ):

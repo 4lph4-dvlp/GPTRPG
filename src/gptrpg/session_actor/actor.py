@@ -1685,9 +1685,20 @@ class SessionActor:
 
         ①본문이 비었으면 거절 ②명단이 잠겼으면 `RosterAlreadyLocked`
         ③화자가 지금 차례인 사람(`during_character_id`)과 같으면 거절 —
-        자기 차례에는 끼어드는 것이 아니라 말하는 것이다 ④언급 대상이
-        전부 이 세션에 존재하는 `character_id`인지 확인한다 — 없는
-        사람을 가리키는 기록을 남기면 Phase 14가 그 색인을 못 푼다.
+        자기 차례에는 끼어드는 것이 아니라 말하는 것이다 ④`during_character_id`
+        자신이 이 세션에 실재하는 `character_id`인지 확인한다(WR-01,
+        12.1-REVIEW.md) ⑤언급 대상이 전부 이 세션에 존재하는 `character_id`인지
+        확인한다 — 없는 사람을 가리키는 기록을 남기면 Phase 14가 그 색인을
+        못 푼다.
+
+        **WR-01 (12.1-REVIEW.md):** 예전에는 `mentioned_character_ids`만
+        `known_character_ids`와 대조하고 `during_character_id`(누구의
+        차례에 끼어들었는가) 자신은 전혀 대조하지 않았다 — 존재하지 않는
+        `during_character_id`로도 사건이 그대로 기록되어 Phase 14(관계
+        장부)가 가리키는 대상이 없는 색인을 만났다. 같은 `known_character_ids`
+        집합, 같은 「닫힌 목록 밖은 거절」 방식으로 `during_character_id`도
+        대조한다 — 이 파일이 이미 `mentioned_character_ids`에 쓰는 검증
+        모양을 그대로 옮긴 것이지 새 방식을 만들지 않는다.
 
         **이 명령은 어떤 캐릭터의 값도 바꾸지 않는다** — `RecordInterjection`
         도크스트링이 그 근거(CHAR-04가 관계 칸을 금지하고 D-07이 지난
@@ -1703,6 +1714,10 @@ class SessionActor:
         known_character_ids = set(self.state.created_characters) | {
             character_id for character_id, _step_id in self.state.creation_step_values
         }
+        if command.during_character_id not in known_character_ids:
+            raise CommandRejected(
+                f"이 세션에 없는 캐릭터의 차례를 가리켰다: {command.during_character_id!r}"
+            )
         unknown_mentions = [
             character_id
             for character_id in command.mentioned_character_ids
