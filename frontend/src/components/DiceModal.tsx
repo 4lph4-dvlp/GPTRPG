@@ -159,6 +159,26 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
     };
   }, [after, beginLeaving, clearTimers, diceCount]);
 
+  /**
+   * **클릭은 「드러내기」에만 쓴다 — 닫기에는 안 쓴다.**
+   *
+   * 겹판은 `pointer-events: none`이라 클릭을 못 받는다(뒤의 입력칸·스크롤이
+   * 살아 있어야 하므로 의도된 것이다). 그래서 창 전역에서 받는다. 다만
+   * 그 클릭은 화면 아무 데나 눌린 것이라 **닫기 신호로 쓰면 안 된다** —
+   * 결과를 읽는 동안 다음 행동을 치려고 입력칸을 누른 사람의 창이 그
+   * 순간 닫혀, 저절로 사라지던 예전 문제가 그대로 돌아온다. 닫는 것은
+   * 확인 단추와 Esc뿐이다.
+   */
+  useEffect(() => {
+    if (showStamp) {
+      return;
+    }
+    window.addEventListener("pointerdown", reveal);
+    return () => {
+      window.removeEventListener("pointerdown", reveal);
+    };
+  }, [reveal, showStamp]);
+
   useEffect(() => {
     window.addEventListener("keydown", skipOnEscape);
     return () => {
@@ -174,7 +194,6 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
       role="dialog"
       aria-modal="true"
       aria-label={COPY.diceModalTitle}
-      onPointerDown={revealOrDismiss}
     >
       <div className="dice-modal">
         <p className="dice-modal__who">{actorName}</p>
@@ -256,7 +275,6 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
           <button
             type="button"
             className="dice-modal__confirm"
-            onPointerDown={(event) => event.stopPropagation()}
             onClick={beginLeaving}
             autoFocus
           >

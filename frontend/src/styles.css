@@ -1695,6 +1695,10 @@ details.record > summary::-webkit-details-marker {
 }
 
 .dice-modal__confirm {
+  /* 겹판이 `pointer-events: none`이라(뒤의 입력칸을 살려 두려고) 그 안의
+     것은 기본적으로 클릭을 못 받는다. 눌러야 하는 것은 이 단추 하나뿐이니
+     여기서만 되살린다 — 겹판 전체를 되살리면 뒤가 다시 막힌다. */
+  pointer-events: auto;
   margin-top: var(--space-md);
   padding: var(--space-xs) var(--space-lg);
   font: inherit;
