@@ -500,7 +500,7 @@ Phase 11 (담을 그릇 — 자원 축 표현), Phase 12 (`StatEntry` 쓰기 경
   5. 만든 사람이 그 캐릭터를 자동으로 점유한 상태로 시작한다 (Phase 8의 점유 규칙과 같은
      방식 — 게임 사건으로 기록)
 
-**Plans**: 2/6 plans executed
+**Plans**: 3/6 plans executed
 
 Plans:
 **Wave 1**
@@ -510,7 +510,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 12.1-02-PLAN.md — 선언 형식 완성: 일곱 조작 · 인원 범위(D-01/D-02) · `4d6k3` · 세 룰북이 서로 다른 조합 · Format Test
-- [ ] 12.1-03-PLAN.md — GM 진행 자기소개: `creation_gm` 역할 · 안내 · 차례 지목(D-06) · 갈고리 목적의 되묻기(D-05)
+- [x] 12.1-03-PLAN.md — GM 진행 자기소개: `creation_gm` 역할 · 안내 · 차례 지목(D-06) · 갈고리 목적의 되묻기(D-05)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -891,7 +891,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 7/7 | Complete    | 2026-08-14 |
 | 11. 룰북 표현 어휘 확장 | v1.1 | 7/7 | Complete    | 2026-08-17 |
 | 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 7/7 | Complete    | 2026-08-18 |
-| 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 2/6 | In Progress|  |
+| 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 3/6 | In Progress|  |
 | 12.2. 판정 합계를 서버가 보낸다 (INSERTED) | v1.1 | 0/TBD | Not started | - |
 | 13. 장면 — 오프닝과 대상 | v1.1 | 0/TBD | Not started | - |
 | 13.1. GM이 이야기를 이끈다 — 행동과 필연적 지점을 잇는다 (INSERTED) | v1.1 | 0/TBD | Not started | - |

@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.1
 current_phase_name: character-creation
 status: executing
-stopped_at: Completed 12.1-02-PLAN.md
-last_updated: "2026-08-18T16:44:41.325Z"
+stopped_at: Completed 12.1-03-PLAN.md
+last_updated: "2026-08-19T00:28:47.633Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 12.1 execution started
 progress:
   total_phases: 13
   completed_phases: 5
   total_plans: 35
-  completed_plans: 31
+  completed_plans: 32
   percent: 38
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.1 (character-creation) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-19 — Phase 12.1 execution started
@@ -42,7 +42,7 @@ Last activity: 2026-08-19 — Phase 12.1 execution started
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [█████████░] 89%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -122,6 +122,7 @@ Progress: [█████████░] 89%
 | Phase 12 P07 | ~2h | 3 tasks | 18 files |
 | Phase 12.1 P01 | not tracked (checkpoint-resumed session) | 3 tasks | 11 files |
 | Phase 12.1 P02 | not tracked precisely (single continuous session) | 3 tasks | 13 files |
+| Phase 12.1 P03 | ~1h | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -274,6 +275,10 @@ Progress: [█████████░] 89%
 - [Phase ?]: [Phase 12.1] 12.1-02: PARTY_MEMBER_LIMIT 검사는 session_actor가 agents를 import할 수 없다는 층 규약(.importlinter contract:2) 때문에 액터가 아니라 web/routes_creation.py에 둔다 — 계획의 <behavior>와 <action> 절이 서로 다른 자리를 가리키던 자기모순을 아키텍처 규약 우선으로 해소
 - [Phase ?]: [Phase 12.1] 12.1-02: build_creation_stats는 max/depleted_effect_ref를 채우지 않는다 — ResourceAxisDecl에 그 두 칸을 선언할 자리가 아직 없어 축 이름으로 추측하면 축 이름 문자열을 코드가 해석하지 않는다는 규약을 어기게 된다. 알려진 한계로 문서화(기존 _prepare_create_character 손 조립과 동일 동작)
 - [Phase ?]: [Phase 12.1] 12.1-02: PLAN.md frontmatter가 requirements:[CHAR-01, CHAR-04]로 적었지만 REQUIREMENTS.md의 CHAR-04 원문(characters_data.py 대체까지 요구)은 이 계획이 안 건드린 characters_data.py 교체(12.1-05 몫, D-12)를 포함한다 — CHAR-01만 Complete로 남기고 CHAR-04는 되돌려 Pending 유지(여러 계획에 걸친 요구사항 조기 완료 표시 함정 회피, 12.1-01-SUMMARY.md가 이미 경고)
+- [Phase ?]: [Phase 12.1] 12.1-03 Task 1 체크포인트 자동 승인: D-03(GM 진행 대화, 상태 기계는 코드가 돈다)을 재확정 — 12.1-CONTEXT.md와 12.1-01의 동일 체크포인트에서 이미 승인된 결정의 재확인이라 auto 모드에서 자동 선택(option-a)
+- [Phase ?]: [Phase 12.1] 12.1-03: 아직 안 끝난 사람 후보 목록은 GameState.creation_step_values 키(character_id)에서 계산한다 — 아직 항목을 하나도 제출하지 않은 참가자는 플랫폼이 식별할 방법이 없어 이 목록에 못 들어간다(방을 여는 사람이 정한 인원수와 실제 참가자 식별자는 다른 정보)
+- [Phase ?]: [Phase 12.1] 12.1-03: 제공자 설정 해석 실패(ConfigNotFound 등)는 503, GM 호출·계약 위반(CreationGmContractViolation)은 200 폴백 — 두 실패 층을 declare()/confirm()과 같은 구분으로 갈랐다
+- [Phase ?]: [Phase 12.1] 12.1-03: CHAR-03을 REQUIREMENTS.md에서 Complete로 찍지 않았다 — 원문이 요구하는 'GM 정리로 자동 생성'은 12.1-04(정리·동의 관문) 몫이라 계획 자신의 알려진 한계 절이 이미 명시했다. CHAR-01은 12.1-02에서 이미 Complete
 
 ### Pending Todos
 
@@ -331,8 +336,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-18T16:42:53.926Z
-Stopped at: Completed 12.1-02-PLAN.md
+Last session: 2026-08-19T00:28:47.589Z
+Stopped at: Completed 12.1-03-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
