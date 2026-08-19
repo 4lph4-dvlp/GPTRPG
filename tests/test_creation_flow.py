@@ -729,3 +729,303 @@ def _transcript_line_for(client, session_id: str, character_id: str) -> tuple[st
         for event in events
         if event["character_id"] == character_id and event["text_value"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — 자기소개 자리 전체를 한 번에 통과시키는 흐름 시험
+# (사장님이 직접 그린 아홉 마디, 두 사람, 12.1-VALIDATION.md의 근거)
+# ---------------------------------------------------------------------------
+
+
+class _CreationGmRoleAwareStub:
+    """`announce`/`nominate`/`follow-up`/`wrap-up` 네 마디를 한 시험
+    안에서 같이 부를 때 쓰는 이중체. 각 함수의 세션 고정 블록(system[1])
+    첫 줄이 서로 겹치지 않는 표식이라는 것을 이용해, 지금 어느 역할이
+    불렸는지 보고 그 역할이 기대하는 JSON 모양으로 답한다. 값 자체를
+    AI가 정하지 않는다는 것(D14)은 그대로다 — 이 이중체는 코드가 이미
+    닫힌 목록으로 넘긴 것(후보·완성된 캐릭터)을 그대로 되읽을 뿐이다.
+    """
+
+    name = "creation-gm-role-aware-stub"
+
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s):
+        from gptrpg.agents.envelope import AgentResult
+
+        self.call_count += 1
+        session_text = system[1]["text"] if len(system) > 1 else ""
+
+        if session_text.startswith("필요한 항목"):
+            value = "이 자리는 이름과 지난 이야기, 능력치, 체력이 필요합니다."
+        elif session_text.startswith("아직 자기소개를 안 끝낸 사람"):
+            candidate = None
+            for line in session_text.splitlines():
+                line = line.strip()
+                if line.startswith("- "):
+                    candidate = line[2:]
+                    break
+            value = json.dumps(
+                [{"character_id": candidate, "say": f"{candidate} 님, 이야기를 들려주시겠어요?"}]
+            )
+        elif session_text.startswith("참고할 항목 목록"):
+            value = json.dumps([{"needs_more": False, "question": None}])
+        elif session_text.startswith("완성된 캐릭터"):
+            ids = [
+                line.strip()[2:]
+                for line in session_text.splitlines()
+                if line.strip().startswith("- ")
+            ]
+            intros = [
+                {"character_id": cid, "intro": f"{cid}는 이 자리에서 나온 이야기의 주인공이다."}
+                for cid in ids
+            ]
+            value = json.dumps([{"intros": intros, "say": "이렇게 게임을 진행할까요?"}])
+        else:
+            value = "[]"
+        return AgentResult(ok=True, value=value, elapsed_ms=1, prompt_tokens=1, completion_tokens=1)
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        raise NotImplementedError("이 이중체는 스트리밍하지 않는다")
+
+    def last_result(self):
+        raise NotImplementedError("이 이중체는 complete()만 시험한다")
+
+
+def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_fake_provider):
+    """사장님 흐름도 아홉 마디 — 인원 확정 → 필수 항목 안내 → 지목 →
+    서사·값 → (되돌리기) → (끼어들기) → 되묻기 → 완성 → 정리 → 동의 →
+    잠금 — 이 두 사람 기준으로 순서대로 통과한다(12.1-CONTEXT.md
+    `<domain>`). 중간에 되돌리기 한 번(D-07)과 끼어들기 한 번(D-09)을
+    끼워 넣는다.
+    """
+    provider = _CreationGmRoleAwareStub()
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-full-flow"
+
+        # ① 인원 확정(D-01) — 룰북 권장 범위(3~5) 안에서, 실제 참가자는
+        # 둘뿐이다(출석과 명단은 다르다, D-08).
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+
+        # ② 필수 항목 안내(D-03)
+        announce_response = client.post(
+            f"/api/sessions/{session_id}/creation/announce",
+            json={"rulebook_id": "dungeonworld_like"},
+        )
+        assert announce_response.status_code == 200
+        assert announce_response.json()["message"]
+
+        # hero-1이 먼저 자기 항목을 하나 제출해 플랫폼에 "시작한 사람"으로
+        # 등록된다(지목 후보 목록의 정보원, 12.1-03-SUMMARY.md가 문서화한
+        # 알려진 한계 — 아직 항목을 하나도 안 낸 사람은 지목 후보에 못
+        # 들어간다).
+        assert (
+            _complete_step(
+                client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+                step_id="archetype", text_value=None, picked=["몸으로 먼저 막아선다"],
+            ).status_code
+            == 200
+        )
+
+        # ③ 지목(D-06) — 아직 안 끝난 사람은 hero-1 하나뿐이다.
+        nominate_response = client.post(
+            f"/api/sessions/{session_id}/creation/nominate",
+            json={"rulebook_id": "dungeonworld_like"},
+        )
+        assert nominate_response.status_code == 200
+        assert nominate_response.json()["character_id"] == CHARACTER_ID
+
+        # ④ 서사·값 — backstory·ability_array·hp를 채운다.
+        assert (
+            _complete_step(
+                client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+                step_id="backstory", text_value="우물 마을 순찰대에 뒤늦게 합류한 떠돌이 검객",
+            ).status_code
+            == 200
+        )
+        assert (
+            _complete_step(
+                client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+                step_id="ability_array", text_value=None,
+                axis_values=[
+                    {"axis_name": "STR", "value": 2},
+                    {"axis_name": "DEX", "value": 1},
+                    {"axis_name": "CON", "value": 1},
+                    {"axis_name": "INT", "value": 0},
+                    {"axis_name": "WIS", "value": 0},
+                    {"axis_name": "CHA", "value": -1},
+                ],
+            ).status_code
+            == 200
+        )
+        assert (
+            _complete_step(
+                client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+                step_id="hp", text_value=None,
+            ).status_code
+            == 200
+        )
+
+        # (되돌리기, D-07) — 이름을 한 번 냈다가 물린다.
+        assert (
+            _complete_step(
+                client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+                step_id="name", text_value="가명",
+            ).status_code
+            == 200
+        )
+        rename_response = _complete_step(
+            client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+            step_id="name", text_value="브람",
+        )
+        assert rename_response.status_code == 200
+        name_events = [
+            event
+            for event in _events_of_type(client, "creation_step_completed", session_id=session_id)
+            if event["character_id"] == CHARACTER_ID and event["step_id"] == "name"
+        ]
+        assert len(name_events) == 2
+        assert name_events[1]["superseded_seq"] == name_events[0]["seq"]
+
+        # (끼어들기, D-09) — hero-2가 hero-1의 차례에 끼어든다. hero-2는
+        # 아직 이 세션에 없으므로(항목을 하나도 안 냄) 언급 대상으로
+        # 자기 자신은 못 넣는다 — hero-1만 언급한다.
+        interject_response = _interject(
+            client, session_id=session_id, speaker_character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID, during_character_id=CHARACTER_ID,
+            mentioned_character_ids=(CHARACTER_ID,), text="저도 그 마을 출신이에요!",
+        )
+        assert interject_response.status_code == 200
+
+        # ⑤ 되묻기(D-05 위층)
+        follow_up_response = client.post(
+            f"/api/sessions/{session_id}/creation/follow-up",
+            json={"character_id": CHARACTER_ID, "rulebook_id": "dungeonworld_like"},
+        )
+        assert follow_up_response.status_code == 200
+
+        # ⑥ 완성(D-03) — 자동 점유가 같은 요청 안에서 일어난다(CHAR-05).
+        assert (
+            _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
+            == 200
+        )
+        client.cookies.clear()  # 이제 hero-2 차례 — 다른 브라우저를 흉내낸다.
+
+        # hero-2도 같은 절차를 따른다(지목 → 서사·값 → 완성).
+        assert (
+            _complete_step(
+                client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
+                browser_id=SECOND_BROWSER_ID, step_id="archetype", text_value=None,
+                picked=["말로 상대의 마음을 움직이려 한다"],
+            ).status_code
+            == 200
+        )
+        nominate_again_response = client.post(
+            f"/api/sessions/{session_id}/creation/nominate",
+            json={"rulebook_id": "dungeonworld_like"},
+        )
+        assert nominate_again_response.status_code == 200
+        assert nominate_again_response.json()["character_id"] == SECOND_CHARACTER_ID
+
+        _complete_all_required_steps(
+            client, character_id=SECOND_CHARACTER_ID, browser_id=SECOND_BROWSER_ID,
+            session_id=session_id, name="나리",
+        )
+        assert (
+            _complete_creation(
+                client, character_id=SECOND_CHARACTER_ID, browser_id=SECOND_BROWSER_ID,
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+
+        # ⑦ 정리와 한 줄 소개(CHAR-03/D-10)
+        wrap_up_response = _wrap_up(client, session_id=session_id)
+        assert wrap_up_response.status_code == 200
+        wrap_up_body = wrap_up_response.json()
+        assert wrap_up_body["say"]
+        assert {intro["character_id"] for intro in wrap_up_body["intros"]} == {
+            CHARACTER_ID,
+            SECOND_CHARACTER_ID,
+        }
+
+        # ⑧ 동의(D-10) — 전원 동의에서만 잠긴다.
+        client.cookies.clear()
+        first_consent = _consent(
+            client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+            agree=True,
+        )
+        assert first_consent.status_code == 200
+        assert first_consent.json()["locked"] is False
+
+        second_consent = _consent(
+            client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID, agree=True,
+        )
+        assert second_consent.status_code == 200
+        assert second_consent.json()["locked"] is True
+
+        # ⑨ 잠금 — 전원 점유 상태로 잠금을 맞는다(CHAR-05가 여러 사람에서도
+        # 성립하는지). `client.app`은 이 세션의 살아 있는 액터를 그대로
+        # 들고 있다(라우트가 실제로 쓰는 그 상태) — 재시작 생존 시험의
+        # 비교 기준이 여기서 나온다.
+        live_state = client.app.state.registry.get_or_create(session_id).state
+
+        assert live_state.party_roster is not None
+        assert set(live_state.party_roster) == {CHARACTER_ID, SECOND_CHARACTER_ID}
+        assert set(live_state.created_characters) == {CHARACTER_ID, SECOND_CHARACTER_ID}
+        assert live_state.occupied_by == {
+            CHARACTER_ID: BROWSER_ID,
+            SECOND_CHARACTER_ID: SECOND_BROWSER_ID,
+        }
+
+        # 재시작 생존 — 사건 기록만 저장소에서 다시 읽어 접어도(새 액터를
+        # 만드는 것과 같은 경로) 라이브 상태와 같은 결과가 나온다. 개별
+        # 동의(`_creation_consents`)는 액터 메모리라 비교 대상이 아니다
+        # (D-10 결정 — 서버가 재시작하면 GM이 다시 정리해서 다시 묻는다).
+        response = client.get(f"/api/sessions/{session_id}/events")
+        assert response.status_code == 200
+        events = response.json()["events"]
+        rebuilt_state = fold(session_id, ((event["event_type"], event) for event in events))
+        assert rebuilt_state.created_characters.keys() == live_state.created_characters.keys()
+        assert rebuilt_state.party_roster == live_state.party_roster
+        assert rebuilt_state.occupied_by == live_state.occupied_by
+        assert rebuilt_state.creation_step_values.keys() == live_state.creation_step_values.keys()
+
+        # 잠긴 뒤 만들기 계열 일곱 경로가 전부 409다.
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 409
+        assert (
+            _complete_step(
+                client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+                step_id="name", text_value="다시",
+            ).status_code
+            == 409
+        )
+        assert (
+            _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
+            == 409
+        )
+        assert (
+            _interject(
+                client, session_id=session_id, speaker_character_id=SECOND_CHARACTER_ID,
+                browser_id=SECOND_BROWSER_ID, during_character_id=CHARACTER_ID,
+            ).status_code
+            == 409
+        )
+        assert _wrap_up(client, session_id=session_id).status_code == 409
+        assert (
+            _consent(
+                client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
+                agree=True,
+            ).status_code
+            == 409
+        )
+        lock_again_response = client.post(
+            f"/api/sessions/{session_id}/creation/lock-roster",
+            json={"character_ids": [CHARACTER_ID, SECOND_CHARACTER_ID]},
+        )
+        assert lock_again_response.status_code == 409
