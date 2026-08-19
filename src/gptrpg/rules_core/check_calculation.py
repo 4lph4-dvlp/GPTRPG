@@ -80,7 +80,7 @@ class CalculationSegment:
 @dataclass(frozen=True)
 class CalculationRow:
     """조각의 순서 있는 목록 하나. 다시 굴림이 있으면 줄이 여럿이고 합계는
-    마지막 줄에만 붙는다(D-12) — 이번 계획은 줄이 하나뿐인 보통 판정만 만든다."""
+    마지막 줄에만 붙는다(D-12) — 앞 줄들은 `total=None`이다."""
 
     segments: tuple[CalculationSegment, ...]
     total: int | None = None
@@ -109,39 +109,100 @@ def _flat_segments(modifiers: Sequence[Modifier]) -> tuple[CalculationSegment, .
 def _build_two_d6(
     *, rolls: Sequence[int], modifiers: Sequence[Modifier], total: int, target: int
 ) -> CheckCalculation:
-    if len(rolls) != 2:
-        raise MalformedRollRecord(TWO_D6, rolls, f"2d6은 눈이 정확히 2개여야 한다 (받음 {len(rolls)}개)")
-    segments = tuple(CalculationSegment(role=ROLE_DIE, value=roll) for roll in rolls)
-    segments += _flat_segments(modifiers)
-    row = CalculationRow(segments=segments, total=total)
-    return CheckCalculation(rows=(row,), total=total, target=target, direction=ROLL_OVER)
+    # 줄 나눔은 겹침 횟수에 무관한 구조적 규칙이다(D-12, RESEARCH A2) — 눈을
+    # 앞에서부터 2개씩 끊어 줄로 만든다. `reroll_2d6`은 앞선 눈을 지우지 않고
+    # 뒤에 새 눈 2개를 이어 붙이며, 합계는 새 눈만으로 다시 계산한다
+    # (resolution.py:174) — 그래서 보정치·합계는 **마지막 줄에만** 붙는다.
+    if len(rolls) < 2 or len(rolls) % 2 != 0:
+        raise MalformedRollRecord(
+            TWO_D6, rolls, f"2d6은 눈이 2개씩 짝수여야 한다 (받음 {len(rolls)}개)"
+        )
+    flat = _flat_segments(modifiers)
+    num_rows = len(rolls) // 2
+    rows: list[CalculationRow] = []
+    for row_index in range(num_rows):
+        chunk = rolls[row_index * 2 : row_index * 2 + 2]
+        segments = tuple(CalculationSegment(role=ROLE_DIE, value=roll) for roll in chunk)
+        if row_index == num_rows - 1:
+            rows.append(CalculationRow(segments=segments + flat, total=total))
+        else:
+            rows.append(CalculationRow(segments=segments, total=None))
+    return CheckCalculation(rows=tuple(rows), total=total, target=target, direction=ROLL_OVER)
 
 
 def _build_d100_roll_under(
     *, rolls: Sequence[int], modifiers: Sequence[Modifier], total: int, target: int
 ) -> CheckCalculation:
     # 채택된 십의 자리는 `dice_delta`(BONUS_DICE 합)의 부호로 정해진다
-    # (resolution_d100.py:124-137) — 첫 값을 항상 채택으로 가정하지 않는다
-    # (RESEARCH Pitfall 4). 이번 계획은 dice_delta == 0(십의 자리 하나)인
-    # 경우만 만든다 — 여러 개일 때의 discarded=True는 12.2-03이 채운다.
+    # (resolution_d100.py:124-137) — `rolls` 배열에는 채택 표시가 없으므로
+    # 저장된 BONUS_DICE 합의 부호를 다시 읽어야 하고, 첫 값을 채택으로
+    # 가정하면 페널티에서 틀린다(RESEARCH Pitfall 4).
     dice_delta = sum(modifier.value for modifier in modifiers if modifier.type == BONUS_DICE)
-    if dice_delta != 0:
+    extra = abs(dice_delta)
+    first_chunk_size = 1 + extra + 1  # 십의 자리(1+extra개) + 일의 자리(1개)
+    if len(rolls) < first_chunk_size:
         raise MalformedRollRecord(
-            D100_ROLL_UNDER, rolls, "BONUS_DICE가 있는 판정(여러 십의 자리)은 이 빌더가 아직 못 만든다"
+            D100_ROLL_UNDER,
+            rolls,
+            f"BONUS_DICE 합 {dice_delta}이면 눈이 최소 {first_chunk_size}개여야 한다"
+            f" (받음 {len(rolls)}개)",
         )
-    if len(rolls) != 2:
+    remaining = len(rolls) - first_chunk_size
+    # 다시 굴림(`push_d100`)은 보너스 주사위를 다시 받지 않는다 — 이어 붙는
+    # 줄마다 십의 자리 1개 + 일의 자리 1개뿐이다(resolution_d100.py:168).
+    # 이 규칙 자체는 겹침 횟수에 무관하지만, 지금은 다시 굴림이 실제 플레이
+    # 경로에 연결돼 있지 않아 겹침이 최대 1회라고 가정한다(RESEARCH A2).
+    if remaining % 2 != 0:
         raise MalformedRollRecord(
-            D100_ROLL_UNDER, rolls, f"d100_roll_under는 눈이 정확히 2개여야 한다 (받음 {len(rolls)}개)"
+            D100_ROLL_UNDER,
+            rolls,
+            f"첫 줄({first_chunk_size}개) 뒤에 남는 눈은 2개씩 짝수여야 한다"
+            f" (받음 {len(rolls)}개, 남는 눈 {remaining}개)",
         )
-    tens, units = rolls[0], rolls[1]
-    segments = (
-        CalculationSegment(role=ROLE_TENS, value=tens),
+    num_extra_rows = remaining // 2
+    flat = _flat_segments(modifiers)
+
+    tens_rolls = tuple(rolls[: 1 + extra])
+    units = rolls[1 + extra]
+    # 같은 값이 여럿이면 값이 아니라 자리로 정한다 — 가장 앞 자리가 채택된다
+    # (`list.index`가 항상 첫 일치 위치를 돌려준다). 채택 조각은 정확히
+    # 하나다.
+    if dice_delta > 0:
+        chosen_index = tens_rolls.index(min(tens_rolls))
+    elif dice_delta < 0:
+        chosen_index = tens_rolls.index(max(tens_rolls))
+    else:
+        chosen_index = 0
+    chosen_tens = tens_rolls[chosen_index]
+    first_row_segments = tuple(
+        CalculationSegment(role=ROLE_TENS, value=value, discarded=(index != chosen_index))
+        for index, value in enumerate(tens_rolls)
+    ) + (
         CalculationSegment(role=ROLE_UNITS, value=units),
-        CalculationSegment(role=ROLE_PERCENTILE, value=percentile_value(tens, units)),
+        CalculationSegment(role=ROLE_PERCENTILE, value=percentile_value(chosen_tens, units)),
     )
-    segments += _flat_segments(modifiers)
-    row = CalculationRow(segments=segments, total=total)
-    return CheckCalculation(rows=(row,), total=total, target=target, direction=ROLL_UNDER)
+
+    rows: list[CalculationRow] = []
+    if num_extra_rows == 0:
+        rows.append(CalculationRow(segments=first_row_segments + flat, total=total))
+    else:
+        rows.append(CalculationRow(segments=first_row_segments, total=None))
+
+    offset = first_chunk_size
+    for row_index in range(num_extra_rows):
+        row_tens, row_units = rolls[offset], rolls[offset + 1]
+        offset += 2
+        segments = (
+            CalculationSegment(role=ROLE_TENS, value=row_tens),
+            CalculationSegment(role=ROLE_UNITS, value=row_units),
+            CalculationSegment(role=ROLE_PERCENTILE, value=percentile_value(row_tens, row_units)),
+        )
+        if row_index == num_extra_rows - 1:
+            rows.append(CalculationRow(segments=segments + flat, total=total))
+        else:
+            rows.append(CalculationRow(segments=segments, total=None))
+
+    return CheckCalculation(rows=tuple(rows), total=total, target=target, direction=ROLL_UNDER)
 
 
 _BUILDERS: dict[str, Callable[..., CheckCalculation]] = {
