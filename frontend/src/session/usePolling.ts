@@ -44,7 +44,7 @@ export interface SessionFeed {
 
 export function usePolling(
   sessionId: string,
-  onLiveEvents?: (events: GameEvent[]) => void,
+  onLiveEvents?: (events: GameEvent[], calculations: CheckCalculationView[]) => void,
 ): SessionFeed {
   const [events, setEvents] = useState<GameEvent[]>([]);
   const [calculations, setCalculations] = useState<Map<number, CheckCalculationView>>(
@@ -91,7 +91,7 @@ export function usePolling(
           return [...merged.values()].sort((a, b) => a.seq - b.seq);
         });
         if (primedRef.current) {
-          liveHandlerRef.current?.(response.events);
+          liveHandlerRef.current?.(response.events, response.check_calculations);
         }
       }
       if (response.check_calculations.length > 0) {

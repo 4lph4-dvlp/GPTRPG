@@ -17,14 +17,23 @@ import { ChatPane } from "../panes/ChatPane.tsx";
 import type { RecentResourceChange } from "../panes/StatusPane.tsx";
 import { StatusPane } from "../panes/StatusPane.tsx";
 import { StoryPane } from "../panes/StoryPane.tsx";
+import { indexCalculations } from "../session/checkSummary.ts";
 import { groupTurns } from "../session/groupTurns.ts";
 import { usePolling } from "../session/usePolling.ts";
 import type {
   CharacterSheet,
   CharacterSummary,
+  CheckCalculationView,
   CheckResolvedEvent,
   GameEvent,
 } from "../api/types.ts";
+
+/** 연출 큐 항목 하나 — 판정 사건과 그 계산 줄이 순번으로 짝지어 함께
+ * 다닌다(Phase 12.2, D-14). 계산 줄이 없으면(판 10 미만 기록) `null`이다. */
+interface QueuedRoll {
+  check: CheckResolvedEvent;
+  calculation: CheckCalculationView | null;
+}
 
 /** 동시에 밀릴 수 있는 주사위 연출의 최대 개수. */
 const MAX_QUEUED_ROLLS = 3;
@@ -46,7 +55,7 @@ export function SessionScreen({
   characterId,
   onChangeCharacter,
 }: SessionScreenProps) {
-  const [queue, setQueue] = useState<CheckResolvedEvent[]>([]);
+  const [queue, setQueue] = useState<QueuedRoll[]>([]);
   const [justRevealedSeq, setJustRevealedSeq] = useState<number | null>(null);
   const [clockPulsing, setClockPulsing] = useState(false);
   const [failedDeclareSeqs, setFailedDeclareSeqs] = useState<Set<number>>(new Set());
@@ -106,14 +115,18 @@ export function SessionScreen({
   );
 
   const onLiveEvents = useCallback(
-    (events: GameEvent[]) => {
-      const checks: CheckResolvedEvent[] = [];
+    (events: GameEvent[], calculations: CheckCalculationView[]) => {
+      // 계산 줄을 새로 찾는 코드를 만들지 않는다 — 12.2-01의 `indexCalculations`
+      // 한 함수로 이 배치의 계산 줄을 seq별로 짝지은 뒤, 판정 사건을 큐에 넣는
+      // 바로 이 자리에서 함께 묶는다(D-14).
+      const calcBySeq = indexCalculations(calculations);
+      const checks: QueuedRoll[] = [];
       let clockAdvanced = false;
       const myResourceChanges: { axis: string; amount: number }[] = [];
       for (const event of events) {
         if (event.event_type === "check_resolved" && !shownRef.current.has(event.seq)) {
           shownRef.current.add(event.seq);
-          checks.push(event);
+          checks.push({ check: event, calculation: calcBySeq.get(event.seq) ?? null });
         }
         if (event.event_type === "clock_advanced") {
           clockAdvanced = true;
@@ -182,7 +195,7 @@ export function SessionScreen({
 
   const head = queue[0];
   const headTurn =
-    head === undefined ? undefined : turns.find((turn) => turn.check?.seq === head.seq);
+    head === undefined ? undefined : turns.find((turn) => turn.check?.seq === head.check.seq);
 
   const archetype =
     characters.find((character) => character.character_id === characterId)?.archetype ?? null;
@@ -263,13 +276,14 @@ export function SessionScreen({
 
       {head !== undefined ? (
         <DiceModal
-          key={head.seq}
+          key={head.check.seq}
           roll={{
-            check: head,
+            check: head.check,
+            calculation: head.calculation,
             actorName: headTurn === undefined ? "" : nameOf(headTurn.playerId),
           }}
           onDone={() => {
-            setJustRevealedSeq(head.seq);
+            setJustRevealedSeq(head.check.seq);
             setQueue((previous) => previous.slice(1));
           }}
         />

@@ -154,6 +154,43 @@ describe("buildCheckSummaryFromConfirmResponse", () => {
   });
 });
 
+describe("세 화면 자리가 같은 입력에서 같은 요약을 낸다(D-14, 12.2-02 Task 3)", () => {
+  it("이야기 화면·검산 창·주사위 연출이 부르는 자리(순수 함수 수준)가 같은 결과를 낸다", () => {
+    const calculation: CheckCalculationView = {
+      seq: 3,
+      rows: [
+        {
+          segments: [
+            { role: "tens", value: 3, source: null, discarded: false },
+            { role: "units", value: 7, source: null, discarded: false },
+            { role: "percentile", value: 37, source: null, discarded: false },
+          ],
+          total: 39,
+        },
+      ],
+      total: 39,
+      target: 55,
+      direction: "roll_under",
+    };
+    const check = checkEvent({ rolls: [3, 7], target: 55, total: 39, rulebook_id: "openquest" });
+
+    // TurnCard.tsx·DiceModal.tsx는 이 자리(사건 + 계산 줄)를 그대로 부른다.
+    const fromEventSource = buildCheckSummary(check, calculation);
+    // ChatPane.tsx(CheckBreakdown 배선)는 이 얇은 진입점을 부른다.
+    const fromResponseSource = buildCheckSummaryFromConfirmResponse({
+      rolls: check.rolls,
+      modifiers: check.modifiers,
+      target: check.target,
+      grade: check.grade,
+      calculation,
+    });
+
+    expect(fromEventSource).toEqual(fromResponseSource);
+    expect(fromEventSource.total).toBe(39);
+    expect(fromEventSource.rows[0].segments.map((segment) => segment.value)).toEqual([3, 7, 37]);
+  });
+});
+
 describe("indexCalculations", () => {
   it("계산 줄 목록을 seq로 색인한다", () => {
     const list: CheckCalculationView[] = [

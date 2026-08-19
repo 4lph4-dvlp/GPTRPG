@@ -13,15 +13,27 @@
  *  · 과거를 재생하지 않는다 — 새로고침하면 전 역사가 다시 오는데(D-41) 그걸로
  *    연출이 돌면 주사위가 수십 번 굴러간다. 걸러내는 일은 `usePolling`의
  *    `onLiveEvents`가 이미 했다.
+ *
+ * **합계는 이제 화면이 더한 값이 아니라 서버가 사건에 남긴 값이다**(Phase
+ * 12.2, D-14) — `session/checkSummary.ts::buildCheckSummary`가 만든
+ * `CheckSummary`를 그대로 그리고, 연출과 이야기 화면(`TurnCard`)·검산 창
+ * (`CheckBreakdown`)이 같은 숫자를 말한다. 연출 자체(굴리는 눈·타이밍·
+ * 착지값)는 안 건드린다 — `check.rolls`가 여전히 굴릴 주사위 개수와
+ * 착지값의 유일한 출처다.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CheckResolvedEvent } from "../api/types.ts";
-import { gradeLabel, gradeTone, moveLabel } from "../labels.ts";
+import type { CheckCalculationView, CheckResolvedEvent } from "../api/types.ts";
+import { COPY, directionLabel, gradeLabel, gradeTone, moveLabel, segmentRoleLabel } from "../labels.ts";
+import { buildCheckSummary } from "../session/checkSummary.ts";
 import { DIE_FACES, Die } from "./Die.tsx";
 
 export interface PendingRoll {
   check: CheckResolvedEvent;
+  /** 이 판정의 계산 줄(Phase 12.2) — `null`이면 판 10 미만 기록이라
+   * `COPY.checkTotalMissing`을 보인다(D-05). `usePolling`이 `seq`로 짝지어
+   * 넘긴 값을 `SessionScreen`이 그대로 옮긴다 — 새 짝짓기를 안 만든다. */
+  calculation: CheckCalculationView | null;
   actorName: string;
 }
 
@@ -42,8 +54,9 @@ function randomFace(): number {
 }
 
 export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => void }) {
-  const { check, actorName } = roll;
+  const { check, calculation, actorName } = roll;
   const diceCount = check.rolls.length;
+  const summary = buildCheckSummary(check, calculation);
 
   const [landed, setLanded] = useState(0);
   const [showSum, setShowSum] = useState(false);
@@ -133,9 +146,6 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
     };
   }, [skip, skipOnEscape]);
 
-  const modifierTotal = check.modifiers.reduce((sum, modifier) => sum + modifier.value, 0);
-  const rollTotal = check.rolls.reduce((sum, value) => sum + value, 0);
-  const total = rollTotal + modifierTotal;
   const tone = gradeTone(check.grade);
 
   return (
@@ -164,13 +174,27 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
         <div className="dice-modal__sum">
           {showSum ? (
             <>
-              <span className="dice-modal__total">{total}</span>
-              {modifierTotal !== 0 ? (
+              <span className="dice-modal__total">
+                {summary.totalMissing ? COPY.checkTotalMissing : summary.total}
+              </span>
+              {!summary.totalMissing ? (
                 <span className="dice-modal__vs">
-                  ({rollTotal} {modifierTotal > 0 ? "+" : "−"} {Math.abs(modifierTotal)})
+                  (
+                  {summary.rows
+                    .flatMap((row) => row.segments)
+                    .map((segment, index) => (
+                      <span key={index}>
+                        {index > 0 ? " · " : ""}
+                        {segmentRoleLabel(segment.role)} {segment.value}
+                      </span>
+                    ))}
+                  )
                 </span>
               ) : null}
-              <span className="dice-modal__vs">목표 {check.target}</span>
+              <span className="dice-modal__vs">
+                목표 {summary.target}
+                {summary.direction !== null ? ` (${directionLabel(summary.direction)})` : ""}
+              </span>
             </>
           ) : null}
         </div>
