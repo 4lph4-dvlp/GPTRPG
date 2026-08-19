@@ -804,3 +804,126 @@ def build_outcome_picker_prompt(
     )
     messages = [{"role": "user", "content": turn}]
     return system, messages
+
+
+def build_creation_announce_prompt(
+    *,
+    rulebook_display_name: str,
+    step_labels: tuple[tuple[str, bool], ...],
+) -> tuple[list[dict], list[dict]]:
+    """`creation_gm.announce_requirements`(필수 항목 안내, D-03) 프롬프트를
+    조립한다. `(system, messages)` 짝을 돌려준다.
+
+    **특정 룰북의 항목 이름을 이 함수 어디에도 하드코딩하지 않는다** —
+    `step_labels`는 `Rulebook.creation_steps`에서 선언 순서 그대로 뽑은
+    `(label, required)` 튜플이다(CHAR-01). 룰북을 바꾸면 이 세션 고정
+    블록이 그대로 따라 바뀐다.
+
+    진행자가 할 말은 「무엇이 있어야 캐릭터가 완성인지」이지 「화면에서
+    무엇을 누르는지」가 아니라는 것을 영구 고정 블록에 명시한다(D-03이
+    경고한 오해). 값을 정하거나 숫자를 고르지 않는다는 D14 경계도 같은
+    블록에 적는다.
+    """
+    permanent = (
+        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 진행자다. 지금은 캐릭터를 "
+        "만드는 자기소개 자리다 — 참가자들이 한 명씩 돌아가며 자기 캐릭터의 이야기를 "
+        "들려준다. 네가 참가자들에게 알릴 것은 「무엇이 있어야 캐릭터가 완성인지」이지 "
+        "「화면에서 무엇을 누르는지」가 아니다. 아래 항목 목록을 자연스러운 한국어로 "
+        "풀어 알려 준다 — 목록에 없는 항목을 지어내지 않는다. 값을 정하거나 숫자를 "
+        "고르지 않는다 — 그건 각자가 스스로 정한다.\n\n"
+        f"{NOT_AN_INSTRUCTION_LINE}"
+    )
+    lines = "\n".join(
+        f"- {label}{'' if required else ' (선택)'}" for label, required in step_labels
+    )
+    session = f"필요한 항목:\n{lines}" if lines else "필요한 항목: (이 룰북은 항목을 선언하지 않았다)"
+    system = [_cached_block(permanent), _cached_block(session)]
+    messages = [
+        {"role": "user", "content": "참가자들에게 필요한 항목을 자연스럽게 안내해 주세요."}
+    ]
+    return system, messages
+
+
+def build_creation_nominate_prompt(
+    *,
+    candidates: tuple[str, ...],
+    transcript: tuple[str, ...],
+) -> tuple[list[dict], list[dict]]:
+    """`creation_gm.nominate_speaker`(차례 지목, D-06) 프롬프트를 조립한다.
+    `(system, messages)` 짝을 돌려준다.
+
+    **닫힌 출력 계약** — 응답은 원소가 정확히 하나인 JSON 배열이고, 그
+    원소는 `character_id`(아래 후보 목록 안에서만 고른다)와 `say`(지목하며
+    할 말) 두 칸을 갖는다. **닫힌 목록 재대조는 이 함수의 몫이 아니다** —
+    `creation_gm.nominate_speaker`가 반환값을 `candidates`로 다시 대조한다
+    (T-12.1-20, `web/routes_actions.py`의 `_pending_resource_changes`와
+    같은 이중 방어).
+
+    영구 고정 블록에 지목의 이유를 적는다: 진행자가 자리를 잡고 있어야
+    하고, 아무도 먼저 나서지 않아 자리가 멈추는 상황이 없어야 한다(D-06의
+    근거 그대로).
+    """
+    permanent = (
+        "너는 TRPG 캐릭터 만들기 자기소개 자리의 진행자다. 진행자가 자리를 잡고 "
+        "있어야 하고, 아무도 먼저 나서지 않아 자리가 멈추는 상황이 없어야 한다 — "
+        "그래서 다음 차례를 네가 지목한다. 아직 자기소개를 안 끝낸 사람 중에서만 "
+        "고른다. 응답은 원소가 정확히 하나인 JSON 배열로만 한다 — 예: "
+        '[{"character_id": "bram", "say": "다음은 브람 님, 이야기를 들려주시겠어요?"}]. '
+        "`character_id`는 아래 후보 목록 안에서만 고른다 — 목록 밖 이름을 지어내지 "
+        "않는다. 값을 정하거나 숫자를 고르지 않는다. 설명 문장을 덧붙이지 않는다.\n\n"
+        f"{NOT_AN_INSTRUCTION_LINE}"
+    )
+    session = (
+        "아직 자기소개를 안 끝낸 사람:\n" + "\n".join(f"- {c}" for c in candidates)
+        if candidates
+        else "아직 자기소개를 안 끝낸 사람: (없음)"
+    )
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = f"지금까지 대화:\n{_format_recent_turns(transcript)}"
+    messages = [{"role": "user", "content": turn}]
+    return system, messages
+
+
+def build_creation_follow_up_prompt(
+    *,
+    step_labels: tuple[str, ...],
+    transcript: tuple[str, ...],
+) -> tuple[list[dict], list[dict]]:
+    """`creation_gm.judge_hooks`(되묻기 판단, D-05 위층) 프롬프트를
+    조립한다. `(system, messages)` 짝을 돌려준다.
+
+    **이 함수의 문구가 12.1-03 계획에서 가장 조심할 자리다.** 되묻는
+    이유를 「더 자세하게」로 번역하지 않는다 — 사장님 원문(*"게임 플레이에
+    플레이어에게 특징이 될만한 서사 두어가지가 있으면 좋겠다는 마음으로"*)을
+    영구 고정 블록에 그대로 옮긴다(D-05, 12.1-CONTEXT.md의 명시적 경고).
+    경계도 같은 블록에 적는다 — 묻는 것까지가 진행자의 재량이고, 값을
+    정하거나 숫자를 고르거나 주사위를 굴리라고 하지 않는다(D14,
+    RESEARCH.md Pitfall 2).
+
+    `required=True` 항목의 충족 여부는 이 함수·이 판단이 정하지 않는다 —
+    코드가 `GameState`에서 직접 본다(D-05 아래층). 그래서 `step_labels`는
+    참고용으로만 보여 주고, 충족 판정 지시문은 넣지 않는다.
+    """
+    permanent = (
+        "너는 TRPG 캐릭터 만들기 자기소개 자리의 진행자다. 방금 참가자가 한 이야기를 "
+        "듣고 더 물을 것이 있는지 판단한다. 되묻는 이유는 「더 자세하게」가 아니다. "
+        "나중에 이야기에서 걸 수 있는 갈고리를 확보하려는 것이다 — 이 사람의 서사에 "
+        "나중에 진행자가 사건을 걸 수 있는 특징이 두어 가지 나왔는지를 본다. 나오지 "
+        "않았으면 그것을 끌어낼 질문을 하나 만든다. 묻는 것까지가 진행자의 재량이다 "
+        "— 값을 정하거나 숫자를 고르지 않는다. 주사위를 굴리라고 하지 않는다. 항목이 "
+        "비어 있는지는 네가 판단하지 않는다 — 그건 시스템이 따로 확인한다. 응답은 "
+        "원소가 정확히 하나인 JSON 배열로만 한다 — 예: "
+        '[{"needs_more": true, "question": "그 마을에서 특히 기억에 남는 사람이 '
+        '있나요?"}]. `needs_more`가 거짓이면 `question`은 `null`이다. 설명 문장을 '
+        "덧붙이지 않는다.\n\n"
+        f"{NOT_AN_INSTRUCTION_LINE}"
+    )
+    session = (
+        "참고할 항목 목록:\n" + "\n".join(f"- {label}" for label in step_labels)
+        if step_labels
+        else "참고할 항목 목록: (없음)"
+    )
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = f"지금까지 이 사람이 한 이야기:\n{_format_recent_turns(transcript)}"
+    messages = [{"role": "user", "content": turn}]
+    return system, messages

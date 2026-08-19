@@ -31,10 +31,11 @@ AGENT_ROLES: tuple[str, ...] = (
     "scene_entity_judge",
     "clock_judge",
     "outcome_picker",
+    "creation_gm",
 )
 """D-32가 요구한 두 역할(`action_classifier`/`master_gm`)이 D-64로 다섯이
-됐고(09-01), 12-06이 여섯째(`outcome_picker`)를 더했다 — 각자 따로 제공자·
-모델을 고른다.
+됐고(09-01), 12-06이 여섯째(`outcome_picker`)를, 12.1-03이 일곱째
+(`creation_gm`)를 더했다 — 각자 따로 제공자·모델을 고른다.
 
 - `action_classifier`: 자유 문장을 닫힌 무브 목록과 대조한다.
 - `master_gm`: 판정 결과를 받아 서술한다.
@@ -43,6 +44,9 @@ AGENT_ROLES: tuple[str, ...] = (
 - `clock_judge`: 위협 시계 조건 검사(관문 + 깊은 판단) — 구현은 09-01.
 - `outcome_picker`: 판정 등급이 나온 뒤 룰북의 결과 목록에서 카테고리를
   고른다(RULE-13/D-11) — 이 계획이 구현한다.
+- `creation_gm`: 캐릭터 만들기 자기소개를 진행한다 — 필수 항목을 알리고,
+  차례를 지목하고, 부족한 곳을 되묻는다(D-03/D-05/D-06). 값 결정에는
+  닿지 않는다(D14) — 구현은 12.1-03.
 """
 
 STRICT_AGENT_ROLES: tuple[str, ...] = ("action_classifier", "master_gm")
@@ -54,13 +58,15 @@ ROLE_FALLBACKS: dict[str, str] = {
     "scene_entity_judge": "action_classifier",
     "clock_judge": "action_classifier",
     "outcome_picker": "action_classifier",
+    "creation_gm": "master_gm",
 }
-"""새 역할 넷의 대체 표 — 설정 파일에 없으면 이 역할의 선택을 그대로 물려받는다.
+"""새 역할 다섯의 대체 표 — 설정 파일에 없으면 이 역할의 선택을 그대로 물려받는다.
 
 대체 대상 선택 근거: `situation_judge`는 서술과 같은 급의 추론이 필요하므로
 `master_gm`을 물려받는다. `scene_entity_judge`/`clock_judge`/`outcome_picker`는
 닫힌 목록에서 고르는 경량 판단이므로 `action_classifier`와 같은 급이라 그것을
-물려받는다.
+물려받는다. `creation_gm`은 자기소개 진행이 서술과 같은 급의 추론이므로
+`situation_judge`와 같은 이유로 `master_gm`을 물려받는다(12.1-03).
 """
 
 DEFAULT_CONFIG_PATH = Path(".gptrpg/agents.json")
