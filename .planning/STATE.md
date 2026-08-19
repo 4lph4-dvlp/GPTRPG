@@ -5,8 +5,8 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.1
 current_phase_name: character-creation
 status: executing
-stopped_at: Completed 12.1-03-PLAN.md
-last_updated: "2026-08-19T00:28:47.633Z"
+stopped_at: Completed 12.1-04-PLAN.md
+last_updated: "2026-08-19T01:22:50.833Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 12.1 execution started
 progress:
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.1 (character-creation) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-19 — Phase 12.1 execution started
@@ -123,6 +123,7 @@ Progress: [█████████░] 91%
 | Phase 12.1 P01 | not tracked (checkpoint-resumed session) | 3 tasks | 11 files |
 | Phase 12.1 P02 | not tracked precisely (single continuous session) | 3 tasks | 13 files |
 | Phase 12.1 P03 | ~1h | 2 tasks | 6 files |
+| Phase 12.1-character-creation P04 | not tracked precisely (single continuous session) | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -279,6 +280,8 @@ Progress: [█████████░] 91%
 - [Phase ?]: [Phase 12.1] 12.1-03: 아직 안 끝난 사람 후보 목록은 GameState.creation_step_values 키(character_id)에서 계산한다 — 아직 항목을 하나도 제출하지 않은 참가자는 플랫폼이 식별할 방법이 없어 이 목록에 못 들어간다(방을 여는 사람이 정한 인원수와 실제 참가자 식별자는 다른 정보)
 - [Phase ?]: [Phase 12.1] 12.1-03: 제공자 설정 해석 실패(ConfigNotFound 등)는 503, GM 호출·계약 위반(CreationGmContractViolation)은 200 폴백 — 두 실패 층을 declare()/confirm()과 같은 구분으로 갈랐다
 - [Phase ?]: [Phase 12.1] 12.1-03: CHAR-03을 REQUIREMENTS.md에서 Complete로 찍지 않았다 — 원문이 요구하는 'GM 정리로 자동 생성'은 12.1-04(정리·동의 관문) 몫이라 계획 자신의 알려진 한계 절이 이미 명시했다. CHAR-01은 12.1-02에서 이미 Complete
+- [Phase ?]: wrap-up의 '전원 완성' 판정 기준을 party_size_fixed(룰북 권장 인원)가 아니라 _unfinished_candidates(시작한 사람 전원이 끝났는가)로 잡았다 — D-08의 '명단과 출석은 다르다'를 그대로 코드에 반영, 룰북 권장 3~5명 방이어도 실제 참가자 둘이면 정리·동의로 진행된다
+- [Phase ?]: RecordConsent/ReopenCreationStep은 사건이 아니라 액터 메모리 상태다(D-10 결정) — 이 저장소에서 사건이 아닌 유일한 만들기 상태. LockPartyRoster를 직접 불러도 완성된 전원의 동의 집계가 없으면 거절된다
 
 ### Pending Todos
 
@@ -336,8 +339,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-19T00:28:47.589Z
-Stopped at: Completed 12.1-03-PLAN.md
+Last session: 2026-08-19T01:22:50.789Z
+Stopped at: Completed 12.1-04-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
