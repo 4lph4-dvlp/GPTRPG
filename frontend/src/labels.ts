@@ -6,11 +6,25 @@
  * 어휘를 안다고 가정하지 않는다.
  */
 
-/** `src/gptrpg/rulebooks/dungeonworld_like.py`의 등급 세 개. */
+/** `src/gptrpg/rulebooks/dungeonworld_like.py`의 등급 세 개 +
+ * `src/gptrpg/rulebooks/openquest.py`의 등급 네 개(IN-01, 12.1-REVIEW.md).
+ * OpenQuest는 아직 실제 플레이어 캐릭터를 만드는 경로가 없어 당장
+ * 화면에 닿지 않지만(12.1 시점), `GRADE_TONE`에는 이미 이 네 등급이
+ * 들어 있었다 — 여기 없으면 실제로 열릴 때 "critical"/"fumble" 같은
+ * 영어 원문이 그대로 노출된다(이 파일의 "TRPG 비전문가도 읽을 수 있게
+ * 옮긴다"는 방향과 어긋난다). 네 이름의 뜻은 `openquest.py`의
+ * `OPENQUEST_GRADE_BANDS` 도크스트링이 근거다 — 크리티컬/성공/실패는
+ * 굴림이 기술값 이하/초과로 갈리고, 두 주사위 눈이 같으면서 성공이면
+ * 크리티컬, 실패면 펌블(대실패)이다. */
 const GRADE_GLOSS: Record<string, string> = {
   strong_hit: "완전 성공",
   weak_hit: "대가 있는 성공",
   miss: "실패",
+  // openquest (rulebooks/openquest.py)
+  critical: "결정적 성공",
+  success: "성공",
+  failure: "실패",
+  fumble: "대실패",
 };
 
 /** 등급별 시각 톤 — 화면 색을 고르는 데만 쓴다. 모르는 등급은 중립. */
