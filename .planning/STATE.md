@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.2
 current_phase_name: check-total
-status: executing
-stopped_at: Completed 12.2-02-PLAN.md
-last_updated: "2026-08-19T14:57:37.708Z"
+status: verifying
+stopped_at: Completed 12.2-03-PLAN.md (D-15 human-verify gate approved)
+last_updated: "2026-08-19T19:11:17.128Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 12.1 execution started
 progress:
   total_phases: 14
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 38
-  completed_plans: 37
-  percent: 43
+  completed_plans: 38
+  percent: 50
 ---
 
 # Project State
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 12.2 (check-total) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-19 — Phase 12.2 execution started
 
@@ -42,7 +42,7 @@ Last activity: 2026-08-19 — Phase 12.2 execution started
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -129,6 +129,7 @@ Progress: [██████████] 97%
 | Phase 12.1 P06 | ~5h (사람 확인 대기 포함) | 2 tasks | 5 files |
 | Phase 12.2 P01 | not tracked (checkpoint-resumed) | 3 tasks | 24 files |
 | Phase 12.2 P02 | not tracked precisely | 3 tasks | 10 files |
+| Phase 12.2 P03 | ~4h | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -299,6 +300,9 @@ Progress: [██████████] 97%
 - [Phase ?]: 12.2-01 [deviation, Rule 3]: 판 올리기로 깨진 기존 CheckResolved() 생성부 6개 파일(conftest.py 등)에 total/rulebook_id 추가
 - [Phase ?]: 12.2-02: buildCheckSummary 매개변수를 CheckFacts(Pick<rolls|modifiers|target|grade>)로 좁혀 ConfirmResponse·CheckResolvedEvent 양쪽이 새 타입 변환 없이 같은 함수를 공유하게 함
 - [Phase ?]: 12.2-02: DiceModal 괄호 표시를 summary.rows flatMap으로 교체 — 다시 굴림(D-12) 줄 나눔이 실제로 연결되면 이 자리를 재검토(알려진 한계)
+- [Phase ?]: 12.2-03: 채택 판정은 값이 아니라 자리(순서)로 정한다 — 동값 두 개일 때 값 비교로 채택을 고르면 채택 조각이 둘 이상 될 수 있어 항상 앞 자리를 채택으로 본다
+- [Phase ?]: 12.2-03 [deviation, D-15 관문에서 발견, 계획 밖]: 액션 라우트가 rulebook_id를 요청 기본값(DUNGEONWORLD_LIKE_ID)에서 가져오던 사전 존재 결함을 character.rulebook_id 읽기로 교체(6e7c2e5) — OpenQuest 캐릭터가 던전월드류 무브를 받아 판정이 400으로 끊기던 문제, D-15 확인을 완전히 막고 있었다
+- [Phase ?]: 12.2-03 [deviation, D-15 관문에서 발견, 일부만 계획 안]: 주사위 모양이 값이 아니라 서버 role(die/tens/units)을 따르도록 고침(0a0c9fe, D-13 갭) — 모달 자동 닫힘 제거·죽은 턴 스피너 수정은 계획 밖. 확인 버튼 pointer-events 복구(5c28766)도 계획 밖
 
 ### Pending Todos
 
@@ -356,8 +360,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-19T14:57:37.665Z
-Stopped at: Completed 12.2-02-PLAN.md
+Last session: 2026-08-19T19:11:17.083Z
+Stopped at: Completed 12.2-03-PLAN.md (D-15 human-verify gate approved)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 

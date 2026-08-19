@@ -563,7 +563,7 @@ Plans:
 **Depends on**: Phase 12 (검산 화면 `CheckBreakdown`이 이 단계에서 만들어졌다)
 **Requirements**: 없음 — REQUIREMENTS.md가 이 단계에 REQ-ID를 매핑하지 않는다.
 `12.2-CONTEXT.md`의 결정 D-01~D-15가 사실상의 요구사항이고, 세 계획의 `must_haves`가 전부 인용한다
-**Plans:** 2/3 plans executed
+**Plans:** 3/3 plans executed
 
 Plans:
 **Wave 1**
@@ -576,7 +576,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 12.2-03-PLAN.md — 버려진 눈 흐림 · 다시 굴림 줄 나눔 · OpenQuest 브라우저 사람 확인
+- [x] 12.2-03-PLAN.md — 버려진 눈 흐림 · 다시 굴림 줄 나눔 · OpenQuest 브라우저 사람 확인
 
 > **왜 새로 생겼나 (2026-08-18 코드 리뷰 CR-02).** 12-07이 만든 검산 화면
 > (`CheckBreakdown.tsx`)이 **주사위 눈을 전부 더한다.** 던전월드류(2d6)에서는 맞지만,
@@ -951,7 +951,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 11. 룰북 표현 어휘 확장 | v1.1 | 7/7 | Complete    | 2026-08-17 |
 | 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 7/7 | Complete    | 2026-08-18 |
 | 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 6/6 | Complete    | 2026-08-19 |
-| 12.2. 판정 합계를 서버가 보낸다 (INSERTED) | v1.1 | 2/3 | In Progress|  |
+| 12.2. 판정 합계를 서버가 보낸다 (INSERTED) | v1.1 | 3/3 | In Progress|  |
 | 13. 장면 — 오프닝과 대상 | v1.1 | 0/TBD | Not started | - |
 | 13.1. GM이 이야기를 이끈다 — 행동과 필연적 지점을 잇는다 (INSERTED) | v1.1 | 0/TBD | Not started | - |
 | 14. 기억 유지 — 관계 장부 · 문맥 압축기 · 저장소 색인 | v1.1 | 0/TBD | Not started | - |
