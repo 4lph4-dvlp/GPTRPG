@@ -171,6 +171,14 @@ async def complete_creation_step(
     유일한 값이다. 이 값의 완전한 위조 방지는 12.1-03/04(GM이 진행하는
     다회 대화, 차례 관리)가 붙인다 — 이 트레이서는 한 줄기를 뚫는 것이
     목적이라 그 방어를 아직 완성하지 않는다.
+
+    **CR-01 (12.1-REVIEW.md) 검토 결과 — 여기는 고치지 않는다.** 이
+    경로가 다루는 `character_id`는 완성되기 전(`created_characters`에
+    없는 동안)에는 정의상 쿠키가 없을 수밖에 없다 — `identity is None`을
+    거절하면 정상적인 첫 제출 자체가 막힌다. `/creation/consent`(항상
+    이미 완성된 캐릭터만 다룬다)와 `/creation/interject`(완성된 캐릭터
+    사칭만 좁게 막는다)와는 상황이 다르다 — **뒤에서 이 검사를 `is None
+    or ...`로 "고치지" 말 것.**
     """
     identity = read_identity(request, session_id)
     if identity is not None and identity.character_id != body.character_id:
@@ -228,6 +236,16 @@ async def complete_creation(
 ) -> CreationCompleteResponse:
     """확정된 항목 값으로 캐릭터를 완성하고, 만든 사람이 곧바로 그
     캐릭터를 점유한 채로 쿠키를 받는다(CHAR-05).
+
+    **CR-01 (12.1-REVIEW.md) 검토 결과 — 여기는 고치지 않는다.** 이
+    경로는 쿠키를 **처음으로 발급하는** 자리다(아래 `response.set_cookie`
+    참조) — 첫 완성 요청은 정의상 쿠키가 없는 상태에서 온다. `identity is
+    None`을 거절하면 첫 완성 자체가 막힌다. (완성된 캐릭터를 같은
+    `character_id`로 다시 완성하려는 요청이 여전히 `browser_id`를
+    대조하지 않는 것은 12.1-REVIEW.md CR-01 "추가로" 항목이 이미 짚은
+    별도의 알려진 한계다 — `_prepare_create_character`가 확정된
+    `creation_step_completed`의 `browser_id`와 `command.browser_id`를
+    대조하는 관문은 이번 두 블로커 수정 범위 밖이라 아직 붙지 않았다.)
     """
     identity = read_identity(request, session_id)
     if identity is not None and identity.character_id != body.character_id:
@@ -337,10 +355,29 @@ async def record_interjection(
     척 끼어들 수 없다. **이 말은 어느 캐릭터의 데이터도 바꾸지 않는다**
     (D-09 결정) — 응답 모델(`SeqResponse`)에 바뀐 값 칸을 두지 않는
     것이 그 표현이다.
+
+    **CR-01 (12.1-REVIEW.md) — 쿠키가 없는 요청은 "이미 완성된 캐릭터"
+    행세를 할 수 없다.** `/creation/step`과 달리 이 경로가 다루는
+    `speaker_character_id`는 두 가지 상태 다 정당하게 올 수 있다 —
+    ①아직 한창 자기소개를 만드는 중이라 쿠키가 없는 사람이 자기 이름으로
+    끼어드는 경우(정당, 예: 시험
+    `test_interjection_is_recorded_with_speaker_and_mentioned`)와
+    ②쿠키를 아예 안 보내면서 이미 완성되어 쿠키를 갖고 있어야 할 남의
+    `speaker_character_id`를 자칭하는 경우(위조)다. 그래서 다섯 자리 중
+    유일하게 이 자리만 "완성 여부"로 갈라 좁게 막는다 — `identity`가
+    `None`이어도, 자칭하는 `speaker_character_id`가 `state.created_characters`에
+    이미 있으면(=완성돼 쿠키를 받았어야 할 사람이면) 거절한다. 아직
+    만드는 중인 사람(①)은 그대로 통과한다 — 그 값의 완전한 위조 방지는
+    `/creation/step`과 같은 이유로 이번 패스의 범위 밖이다(12.1-REVIEW.md
+    CR-01 "추가로" 항목 참조).
     """
     identity = read_identity(request, session_id)
+    actor = request.app.state.registry.get_or_create(session_id)
     if identity is not None and identity.character_id != body.speaker_character_id:
         print("경고: 신원 검증 실패 — creation/interject 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+    if identity is None and body.speaker_character_id in actor.state.created_characters:
+        print("경고: 신원 검증 실패 — creation/interject 거부(완성된 캐릭터 사칭)", file=sys.stderr)
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
 
     if len(body.mentioned_character_ids) > PARTY_MEMBER_LIMIT:
@@ -349,7 +386,6 @@ async def record_interjection(
             detail=f"언급 대상은 {PARTY_MEMBER_LIMIT}명을 넘을 수 없다(안전 상한)",
         )
 
-    actor = request.app.state.registry.get_or_create(session_id)
     try:
         seq = await actor.submit(
             RecordInterjection(
@@ -572,6 +608,17 @@ async def creation_follow_up(
     에서 직접 계산한 룰북 최소선 충족 여부다(D-05 아래층). GM 호출이
     계약을 어기면(`CreationGmContractViolation`) 되묻지 않는 것으로
     폴백하고 500을 내지 않는다(ARCH-05).
+
+    **CR-01 (12.1-REVIEW.md) 검토 결과 — 여기는 고치지 않는다.** 이
+    경로는 ①`GameState`를 바꾸는 사건을 하나도 만들지 않고(`actor.submit`
+    호출이 없다 — GM이 되물을지만 판단해 응답으로 돌려줄 뿐이다) ②완성
+    전(쿠키가 없는) 참가자가 정당하게 부를 수 있다(`/creation/step`과
+    같은 문서화된 범위, 위 문단이 스스로 그렇게 적었다 — 실제로 시험
+    `test_the_whole_creation_flow_passes_for_two_people_in_order`의 ⑤
+    되묻기가 hero-1이 아직 완성되기 **전에** 쿠키 없이 불린다). 상태를
+    바꾸지 않으므로 쿠키 없는 요청이 통과해도 남길 수 있는 부수효과가
+    없다 — `/creation/consent`·`/creation/interject`(둘 다 사건을
+    남기거나 명단 잠금에 영향을 준다)와 위험 등급이 다르다.
     """
     identity = read_identity(request, session_id)
     if identity is not None and identity.character_id != body.character_id:
@@ -743,9 +790,22 @@ async def record_creation_consent(
     전부 무효**가 된다(D-11). 이 경로에 「명단에서 사람을 뺀다」는
     없다 — `ReopenCreationStep`은 항목 하나를 다시 여는 것이지 명단을
     바꾸지 않는다(D-11 경계, D-08).
+
+    **CR-01 (12.1-REVIEW.md) — 쿠키가 아예 없는 요청도 거절한다.**
+    `_process_consent`(`session_actor/actor.py`)는 `character_id`가
+    `state.created_characters`에 있어야만 통과시킨다 — 즉 이 경로가
+    다루는 캐릭터는 **항상 이미 완성되어 있고, 완성된 순간
+    `/creation/complete`가 이미 쿠키를 구웠다**(`complete_creation`
+    참조). 따라서 이 경로에는 `/creation/step`처럼 "완성 전이라 쿠키가
+    아직 없을 수 있다"는 정당한 경우가 **존재하지 않는다** — 쿠키가
+    없으면 그것은 항상 신원을 아예 대지 않고 남의 동의·재오픈을
+    위조하려는 시도다. 그래서 다른 다섯 자리 중 이 자리만
+    `routes_actions.py`(`declare`/`confirm` 등)가 이미 쓰는 `is None or`
+    패턴을 그대로 쓴다(예전에는 `is not None and`라서 쿠키를 안 보내면
+    이 대조 전체가 통과됐다).
     """
     identity = read_identity(request, session_id)
-    if identity is not None and identity.character_id != body.character_id:
+    if identity is None or identity.character_id != body.character_id:
         print("경고: 신원 검증 실패 — creation/consent 거부", file=sys.stderr)
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
 

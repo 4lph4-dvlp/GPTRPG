@@ -168,6 +168,22 @@ def _events_of_type(client, event_type: str, session_id: str = SESSION_ID) -> li
     return [event for event in response.json()["events"] if event["event_type"] == event_type]
 
 
+def _act_as(client, cookie_value: str) -> None:
+    """진짜 그 사람의 서명 쿠키로 (다시) 갈아 끼운다(CR-01, 12.1-REVIEW.md).
+
+    같은 `TestClient`로 여러 참가자를 흉내낼 때, 예전에는 `cookies.clear()`
+    만으로 "다른 브라우저"를 흉내냈다 — 신원 검사가 `identity is not None
+    and ...`라서 쿠키가 아예 없으면 대조 자체가 통과됐기 때문이다. 그
+    검사가 `is None or ...`로 고쳐진 뒤에는(consent가 다루는 캐릭터는
+    항상 이미 완성돼 있어 쿠키가 없는 경우가 정당하지 않다) 그 방식이
+    더 이상 통하지 않는다 — 진짜로 그 사람이 완성 시점에 받은 서명
+    쿠키를 다시 심어야 한다. `complete_creation()`이 돌려준 쿠키 값을
+    호출부가 미리 저장해 뒀다가 여기로 넘긴다.
+    """
+    client.cookies.clear()
+    client.cookies.set("gptrpg_character", cookie_value)
+
+
 # ---------------------------------------------------------------------------
 # Task 1 — 자기 차례 되돌리기(D-07)와 끼어들기(D-09)
 # ---------------------------------------------------------------------------
@@ -548,9 +564,10 @@ def test_consent_locks_only_once_everyone_created_has_agreed(web_client_with_fak
             _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
             == 200
         )
-        # 브라우저(client)가 이미 hero-1 쿠키를 들고 있다 — 두 번째 사람을
-        # 흉내내려면 그 쿠키를 지운다(신원 대조가 hero-2로 오는 요청을
-        # 막지 않도록).
+        # hero-1의 서명 쿠키를 저장해 둔다(CR-01 뒤에는 consent가 신원을
+        # 반드시 요구하므로, 뒤에서 다시 hero-1 행세를 하려면 진짜 이
+        # 쿠키가 있어야 한다) — 그 다음 두 번째 사람을 흉내내려면 지운다.
+        hero1_cookie = client.cookies.get("gptrpg_character")
         client.cookies.clear()
         _complete_all_required_steps(
             client,
@@ -566,10 +583,12 @@ def test_consent_locks_only_once_everyone_created_has_agreed(web_client_with_fak
             ).status_code
             == 200
         )
+        hero2_cookie = client.cookies.get("gptrpg_character")
 
-        # 지금 client 쿠키는 hero-2다(방금 완성) — hero-1의 동의를 보내려면
-        # 지운다(진짜로는 서로 다른 브라우저다).
-        client.cookies.clear()
+        # hero-1의 동의를 보내려면 hero-1의 진짜 쿠키로 돌아간다(진짜로는
+        # 서로 다른 브라우저다 — CR-01 뒤에는 `cookies.clear()`만으로는
+        # 더 이상 이 캐릭터 행세를 할 수 없다).
+        _act_as(client, hero1_cookie)
         first_consent = _consent(
             client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
             agree=True,
@@ -588,6 +607,7 @@ def test_consent_locks_only_once_everyone_created_has_agreed(web_client_with_fak
         assert repeat_consent.json()["locked"] is False
         assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
 
+        _act_as(client, hero2_cookie)
         second_consent = _consent(
             client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
             browser_id=SECOND_BROWSER_ID, agree=True,
@@ -613,6 +633,42 @@ def test_consent_with_someone_elses_character_id_is_rejected(web_client_with_fak
             browser_id=SECOND_BROWSER_ID, agree=True,
         )
         assert response.status_code == 403
+
+
+def test_consent_without_any_cookie_for_someone_elses_already_created_character_is_rejected(
+    web_client_with_fake_provider,
+):
+    """CR-01 (12.1-REVIEW.md) 재현 — 쿠키를 아예 안 보내면 신원 검사가
+    통과되어 남의 완성된 캐릭터로 동의를 위조할 수 있었다.
+
+    `read_identity()`는 쿠키가 없으면 조용히 `None`을 돌려주고
+    (`web/cookie_auth.py:106-127`), 고쳐지기 전 조건문
+    (`identity is not None and identity.character_id != body.character_id`)은
+    `identity`가 `None`이면 대조 자체를 건너뛰었다 — 요청에서 쿠키 헤더만
+    빼면 남의 `character_id`로 동의를 넣을 수 있었다. 바로 위 시험
+    (`test_consent_with_someone_elses_character_id_is_rejected`)은 "다른
+    사람의 *유효한* 쿠키"를 붙인 요청만 확인해 이 구멍을 못 잡는다 — 이
+    시험은 쿠키를 아예 안 붙인 요청이 403을 받는지 확인한다.
+    """
+    provider = _WrapUpStub(fail_times=99)
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-consent-no-cookie-403"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        _complete_all_required_steps(client, session_id=session_id)
+        assert _complete_creation(client, session_id=session_id).status_code == 200
+        assert client.cookies.get("gptrpg_character") is not None
+
+        # 공격자는 쿠키를 아예 들고 있지 않다 — 남의 신원을 훔친 게
+        # 아니라 애초에 아무 신원도 제시하지 않는다.
+        client.cookies.clear()
+        response = _consent(
+            client, session_id=session_id, character_id=CHARACTER_ID,
+            browser_id=BROWSER_ID, agree=True,
+        )
+        assert response.status_code == 403
+        # 403만 보고 부수효과가 없다고 넘겨짚지 않는다 — 위조된 동의가
+        # 실제로 집계되지 않았는지(명단이 안 잠겼는지)도 확인한다.
+        assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
 
 
 def test_consent_does_not_lock_the_roster_while_another_participant_is_still_mid_creation(
@@ -700,9 +756,9 @@ def test_disagreeing_reopens_only_that_step_and_invalidates_prior_consent(
             _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
             == 200
         )
-        # 브라우저(client)가 이미 hero-1 쿠키를 들고 있다 — 두 번째 사람을
-        # 흉내내려면 그 쿠키를 지운다(신원 대조가 hero-2로 오는 요청을
-        # 막지 않도록).
+        # hero-1의 서명 쿠키를 저장해 둔다(CR-01 뒤에는 consent가 신원을
+        # 반드시 요구한다) — 그 다음 두 번째 사람을 흉내내려면 지운다.
+        hero1_cookie = client.cookies.get("gptrpg_character")
         client.cookies.clear()
         _complete_all_required_steps(
             client,
@@ -718,9 +774,10 @@ def test_disagreeing_reopens_only_that_step_and_invalidates_prior_consent(
             ).status_code
             == 200
         )
+        hero2_cookie = client.cookies.get("gptrpg_character")
 
-        # hero-1이 먼저 동의한다 — 지금 쿠키는 hero-2다, 지운다.
-        client.cookies.clear()
+        # hero-1이 먼저 동의한다 — hero-1의 진짜 쿠키로 돌아간다.
+        _act_as(client, hero1_cookie)
         assert (
             _consent(
                 client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
@@ -731,7 +788,9 @@ def test_disagreeing_reopens_only_that_step_and_invalidates_prior_consent(
 
         first_hero_backstory_before = _transcript_line_for(client, session_id, CHARACTER_ID)
 
-        # hero-2가 「아니요」를 하고 backstory를 다시 받는다.
+        # hero-2가 「아니요」를 하고 backstory를 다시 받는다 — hero-2의
+        # 진짜 쿠키로 돌아간다.
+        _act_as(client, hero2_cookie)
         disagree_response = _consent(
             client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
             browser_id=SECOND_BROWSER_ID, agree=False, step_id="backstory",
@@ -775,9 +834,9 @@ def test_disagreeing_reopens_only_that_step_and_invalidates_prior_consent(
         assert hero2_reconsent.json()["locked"] is False
         assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
 
-        # hero-1이 다시 동의하면 그제서야 전원 동의로 잠긴다 — 지금 쿠키는
-        # hero-2다(방금 재완성), 지운다.
-        client.cookies.clear()
+        # hero-1이 다시 동의하면 그제서야 전원 동의로 잠긴다 — hero-1의
+        # 진짜 쿠키로 돌아간다(지금 쿠키는 hero-2다, 방금 재완성).
+        _act_as(client, hero1_cookie)
         hero1_reconsent = _consent(
             client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
             agree=True,
@@ -981,6 +1040,10 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
             _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
             == 200
         )
+        # hero-1의 서명 쿠키를 저장해 둔다 — CR-01 뒤에는 consent가, 그리고
+        # 이미 완성된 캐릭터를 대상으로 한 interject가 신원을 요구하므로
+        # 뒤에서 다시 hero-1 행세를 하려면 진짜 이 쿠키가 있어야 한다.
+        hero1_cookie = client.cookies.get("gptrpg_character")
         client.cookies.clear()  # 이제 hero-2 차례 — 다른 브라우저를 흉내낸다.
 
         # hero-2도 같은 절차를 따른다(지목 → 서사·값 → 완성).
@@ -1010,6 +1073,7 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
             ).status_code
             == 200
         )
+        hero2_cookie = client.cookies.get("gptrpg_character")
 
         # ⑦ 정리와 한 줄 소개(CHAR-03/D-10)
         wrap_up_response = _wrap_up(client, session_id=session_id)
@@ -1021,8 +1085,9 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
             SECOND_CHARACTER_ID,
         }
 
-        # ⑧ 동의(D-10) — 전원 동의에서만 잠긴다.
-        client.cookies.clear()
+        # ⑧ 동의(D-10) — 전원 동의에서만 잠긴다. 각자 자기 쿠키로 보낸다
+        # (CR-01 뒤에는 consent가 신원을 반드시 요구한다).
+        _act_as(client, hero1_cookie)
         first_consent = _consent(
             client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
             agree=True,
@@ -1030,6 +1095,7 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
         assert first_consent.status_code == 200
         assert first_consent.json()["locked"] is False
 
+        _act_as(client, hero2_cookie)
         second_consent = _consent(
             client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
             browser_id=SECOND_BROWSER_ID, agree=True,
@@ -1064,8 +1130,15 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
         assert rebuilt_state.occupied_by == live_state.occupied_by
         assert rebuilt_state.creation_step_values.keys() == live_state.creation_step_values.keys()
 
-        # 잠긴 뒤 만들기 계열 일곱 경로가 전부 409다.
+        # 잠긴 뒤 만들기 계열 일곱 경로가 전부 409다. `/creation/step`은
+        # 신원이 없어도 통과하는 경로라 쿠키를 지운 채로도 확인할 수
+        # 있지만, `interject`/`consent`는 각각 이미 완성된 캐릭터를
+        # 대상으로 하므로(CR-01 뒤에는 신원이 반드시 필요하다) 그 캐릭터의
+        # 진짜 쿠키를 붙여야 신원 검사(403)가 아니라 명단 잠금
+        # 검사(409)까지 도달한다 — 이 블록이 확인하려는 것은 "잠겼으면
+        # 진짜 신원으로도 더 진행할 수 없다"이지 "신원이 없다"가 아니다.
         assert _fix_party_size(client, count=3, session_id=session_id).status_code == 409
+        client.cookies.clear()
         assert (
             _complete_step(
                 client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
@@ -1077,6 +1150,7 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
             _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
             == 409
         )
+        _act_as(client, hero2_cookie)
         assert (
             _interject(
                 client, session_id=session_id, speaker_character_id=SECOND_CHARACTER_ID,
@@ -1085,6 +1159,7 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
             == 409
         )
         assert _wrap_up(client, session_id=session_id).status_code == 409
+        _act_as(client, hero1_cookie)
         assert (
             _consent(
                 client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
