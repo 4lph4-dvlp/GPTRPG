@@ -22,11 +22,15 @@ import type {
 
 export class ApiError extends Error {
   readonly status: number;
+  /** 서버가 응답 본문에 담아 보낸 사람이 읽을 이유(`detail`) — 있을 때만
+   * 채워진다. `selectCharacter`의 409가 이 칸을 쓴다(12.1-06, 결함 B). */
+  readonly detail: string | undefined;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, detail?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -75,10 +79,34 @@ export function fetchMyCharacter(sessionId: string): Promise<MyCharacterResponse
   return getJson<MyCharacterResponse>(`${sessionBase(sessionId)}/my-character`);
 }
 
-export function selectCharacter(sessionId: string, characterId: string): Promise<unknown> {
-  return postJson(`${sessionBase(sessionId)}/select-character`, {
-    character_id: characterId,
+/**
+ * 캐릭터 점유를 요청한다. **다른 POST 함수와 달리 공용 `postJson`을 쓰지
+ * 않는다** — 서버는 409에서 이미 사람이 읽을 한국어로 이유를 말하는데
+ * (`_prepare_occupy`, D-05/D-07), `postJson`은 그 `detail`을 버리고
+ * `POST url → status` 같은 기술 문자열만 남긴다. 그 이유가 화면(`CharacterSelect`)에
+ * 그대로 전해지도록 `detail`을 읽어 `ApiError.detail`에 담는다. 서버가
+ * 이유를 안 주면(`detail` 없음) `ApiError.detail`은 `undefined`로 남고,
+ * 화면이 자신의 대체 문구(`COPY.characterSelectError`)를 고른다 — 여기서
+ * 새 문구를 만들지 않는다.
+ */
+export async function selectCharacter(sessionId: string, characterId: string): Promise<unknown> {
+  const url = `${sessionBase(sessionId)}/select-character`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ character_id: characterId }),
   });
+  if (!response.ok) {
+    let detail: string | undefined;
+    try {
+      const body = (await response.json()) as { detail?: unknown };
+      detail = typeof body.detail === "string" && body.detail.length > 0 ? body.detail : undefined;
+    } catch {
+      detail = undefined;
+    }
+    throw new ApiError(response.status, `POST ${url} → ${response.status}`, detail);
+  }
+  return (await response.json()) as unknown;
 }
 
 export function declareAction(

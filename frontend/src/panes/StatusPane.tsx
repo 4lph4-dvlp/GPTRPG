@@ -273,9 +273,24 @@ export function StatusPane({
         ) : (
           <p className="t-label">{COPY.loading}</p>
         )}
-        <button type="button" className="linkish" onClick={onChangeCharacter}>
-          캐릭터 바꾸기
-        </button>
+        {/*
+         * D-08 — 한 번 잡으면 놓을 수 없다. `myCharacterId`가 채워져 있다는
+         * 것은 이 화면(`SessionScreen`)이 이미 이 캐릭터를 점유했다는
+         * 뜻이다(`App.tsx`의 gate가 `selected`가 참일 때만 `SessionScreen`을
+         * 그린다) — 그래서 이 조건은 지금 구조에서 항상 참이지만, 「점유
+         * 여부로 버튼을 숨긴다」는 서버 규칙을 화면 코드에도 명시적으로
+         * 남겨 둔다. 점유 중에는 「캐릭터 바꾸기」(눌러도 서버가 거절하는
+         * 막다른 길, 접힌 할 일 결함 A)를 아예 렌더하지 않는다 — 비활성화가
+         * 아니라 숨김이다. 「지금은 안 되지만 언젠가 된다」로 읽히면 안
+         * 된다. 대신 왜 없는지가 적힌 한계 문구를 그 자리에 보여준다.
+         */}
+        {myCharacterId.length > 0 ? (
+          <p className="t-label">{COPY.characterIdentityLimit}</p>
+        ) : (
+          <button type="button" className="linkish" onClick={onChangeCharacter}>
+            캐릭터 바꾸기
+          </button>
+        )}
       </div>
 
       <div className="status-block">

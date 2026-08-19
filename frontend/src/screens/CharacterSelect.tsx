@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { fetchCharacters, selectCharacter } from "../api/client.ts";
+import { ApiError, fetchCharacters, selectCharacter } from "../api/client.ts";
 import type { CharacterSummary } from "../api/types.ts";
 import { COPY } from "../labels.ts";
 
@@ -64,7 +64,12 @@ function CharacterCard({
 
 export function CharacterSelect({ sessionId, onSelected }: CharacterSelectProps) {
   const [characters, setCharacters] = useState<CharacterSummary[] | null>(null);
+  // 목록 조회 실패 — `choose()`의 선택 실패와 독립된 상태다(결함 B).
   const [failed, setFailed] = useState(false);
+  // 선택 실패 — 서버 409의 `detail`(사람이 읽을 이유) 또는
+  // `COPY.characterSelectError`(이유가 없을 때의 대체)를 담는다. 목록
+  // fetch가 성공했는데도 이 상태를 `characterListError`로 보여주지 않는다.
+  const [selectError, setSelectError] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
 
   useEffect(() => {
@@ -87,12 +92,17 @@ export function CharacterSelect({ sessionId, onSelected }: CharacterSelectProps)
 
   async function choose(characterId: string): Promise<void> {
     setPending(characterId);
+    setSelectError(null);
     try {
       await selectCharacter(sessionId, characterId);
       onSelected(characterId);
-    } catch {
+    } catch (err) {
       setPending(null);
-      setFailed(true);
+      setSelectError(
+        err instanceof ApiError && err.detail !== undefined
+          ? err.detail
+          : COPY.characterSelectError,
+      );
     }
   }
 
@@ -108,17 +118,23 @@ export function CharacterSelect({ sessionId, onSelected }: CharacterSelectProps)
           <p className="t-label">{COPY.characterListError}</p>
         ) : characters === null ? (
           <div className="spinner" aria-label={COPY.loading} />
+        ) : characters.length === 0 ? (
+          <p className="t-label">{COPY.characterListEmpty}</p>
         ) : (
-          <div className="char-grid">
-            {characters.map((character) => (
-              <CharacterCard
-                key={character.character_id}
-                character={character}
-                disabled={pending !== null}
-                onChoose={() => void choose(character.character_id)}
-              />
-            ))}
-          </div>
+          <>
+            {selectError !== null ? <p className="t-label">{selectError}</p> : null}
+            <div className="char-grid">
+              {characters.map((character) => (
+                <CharacterCard
+                  key={character.character_id}
+                  character={character}
+                  disabled={pending !== null}
+                  onChoose={() => void choose(character.character_id)}
+                />
+              ))}
+            </div>
+            <p className="t-label">{COPY.characterIdentityLimit}</p>
+          </>
         )}
       </div>
     </div>
