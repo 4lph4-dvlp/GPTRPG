@@ -67,6 +67,7 @@ from gptrpg.session_actor.actor import (
     FixPartySize,
     LockPartyRoster,
     OccupyCharacter,
+    RecordInterjection,
     RosterAlreadyLocked,
 )
 from gptrpg.web.cookie_auth import COOKIE_NAME, read_identity, sign_cookie
@@ -309,6 +310,61 @@ async def lock_party_roster(
 
 
 # ---------------------------------------------------------------------------
+# 되돌리기와 끼어들기 — D-07 경계 · D-09 (Phase 12.1-04)
+# ---------------------------------------------------------------------------
+
+
+class InterjectionRequest(BaseModel):
+    speaker_character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    browser_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    during_character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    mentioned_character_ids: list[str] = Field(default_factory=list)
+    text: str = Field(min_length=1, max_length=MAX_RAW_TEXT_LEN)
+
+
+@router.post("/sessions/{session_id}/creation/interject", response_model=SeqResponse)
+async def record_interjection(
+    session_id: str, body: InterjectionRequest, request: Request
+) -> SeqResponse:
+    """남의 차례에 자유롭게 끼어드는 말을 사건으로 남긴다(D-09).
+
+    **신원 대조가 맨 앞이다** — 이미 쿠키를 든 브라우저가 다른 캐릭터인
+    척 끼어들 수 없다. **이 말은 어느 캐릭터의 데이터도 바꾸지 않는다**
+    (D-09 결정) — 응답 모델(`SeqResponse`)에 바뀐 값 칸을 두지 않는
+    것이 그 표현이다.
+    """
+    identity = read_identity(request, session_id)
+    if identity is not None and identity.character_id != body.speaker_character_id:
+        print("경고: 신원 검증 실패 — creation/interject 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+
+    if len(body.mentioned_character_ids) > PARTY_MEMBER_LIMIT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"언급 대상은 {PARTY_MEMBER_LIMIT}명을 넘을 수 없다(안전 상한)",
+        )
+
+    actor = request.app.state.registry.get_or_create(session_id)
+    try:
+        seq = await actor.submit(
+            RecordInterjection(
+                speaker_character_id=body.speaker_character_id,
+                browser_id=body.browser_id,
+                during_character_id=body.during_character_id,
+                mentioned_character_ids=tuple(body.mentioned_character_ids),
+                text=body.text,
+            )
+        )
+    except RosterAlreadyLocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CommandRejected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return SeqResponse(seq=seq)
+
+
+# ---------------------------------------------------------------------------
 # 자기소개 진행 — 안내 · 지목 · 되묻기 (D-03/D-05/D-06, 12.1-03)
 # ---------------------------------------------------------------------------
 
@@ -525,3 +581,4 @@ async def creation_follow_up(
         question=follow_up.question,
         required_steps_filled=required_steps_filled,
     )
+

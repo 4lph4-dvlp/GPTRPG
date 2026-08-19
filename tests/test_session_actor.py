@@ -46,6 +46,7 @@ from gptrpg.session_actor.actor import (
     ProceedEligible,
     RecordActionClassification,
     RecordAiCall,
+    RecordInterjection,
     ResolveCheck,
     SessionActor,
     SessionRegistry,
@@ -1886,3 +1887,163 @@ async def test_record_action_classification_appends_one_action_classified_event(
     assert classified.seq == seq
     assert classified.caused_by_seq == declare_seq
     assert classified.no_check is True
+
+
+# ---------------------------------------------------------------------------
+# 12.1-04 Task 1 — RecordInterjection의 거절 경로 셋과 「끼어든 뒤 상태가
+# 안 바뀐다」(D-09).
+# ---------------------------------------------------------------------------
+
+
+async def test_interjection_is_rejected_when_text_is_empty(tmp_db_path):
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(FixPartySize(player_character_count=3, rulebook_id=DUNGEONWORLD_LIKE_ID))
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                RecordInterjection(
+                    speaker_character_id="nari",
+                    browser_id="B2",
+                    during_character_id="bram",
+                    mentioned_character_ids=(),
+                    text="   ",
+                )
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+
+async def test_interjection_during_own_turn_is_rejected(tmp_db_path):
+    """자기 차례에는 끼어드는 것이 아니라 말하는 것이다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(FixPartySize(player_character_count=3, rulebook_id=DUNGEONWORLD_LIKE_ID))
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                RecordInterjection(
+                    speaker_character_id="bram",
+                    browser_id="B1",
+                    during_character_id="bram",
+                    mentioned_character_ids=(),
+                    text="제 이야기입니다",
+                )
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+
+async def test_interjection_mentioning_an_unknown_character_is_rejected(tmp_db_path):
+    """이 세션에 없는 사람을 가리키는 기록을 남기지 않는다 — Phase 14가
+    그 색인을 못 푼다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await _submit_minimal_creation(actor, "bram", "B1")
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                RecordInterjection(
+                    speaker_character_id="nari",
+                    browser_id="B2",
+                    during_character_id="bram",
+                    mentioned_character_ids=("ghost",),
+                    text="같은 마을 출신이네요",
+                )
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+
+async def test_interjection_leaves_creation_state_unchanged(tmp_db_path):
+    """끼어든 뒤에도 어느 캐릭터의 `creation_step_values`도
+    `created_characters`도 안 바뀐다(D-09 결정)."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await _submit_minimal_creation(actor, "bram", "B1")
+        creation_step_values_before = actor.state.creation_step_values
+        created_characters_before = actor.state.created_characters
+
+        seq = await actor.submit(
+            RecordInterjection(
+                speaker_character_id="nari",
+                browser_id="B2",
+                during_character_id="bram",
+                mentioned_character_ids=("bram",),
+                text="같은 마을 출신이네요",
+            )
+        )
+
+        assert seq >= 0
+        assert actor.state.creation_step_values == creation_step_values_before
+        assert actor.state.created_characters == created_characters_before
+    finally:
+        await actor.stop()
+        store.close()
+
+    events = _read_events(tmp_db_path)
+    assert events[-1].event_type == "creation_interjection"
+    assert events[-1].speaker_character_id == "nari"
+    assert events[-1].during_character_id == "bram"
+    assert events[-1].mentioned_character_ids == ("bram",)
+
+
+async def test_completing_a_step_for_an_already_created_character_is_rejected(tmp_db_path):
+    """D-07 경계 — 차례가 끝난(character_created가 있는) 캐릭터의 항목은
+    고칠 수 없다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await _submit_minimal_creation(actor, "bram", "B1")
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                CompleteCreationStep(
+                    character_id="bram",
+                    browser_id="B1",
+                    step_id="name",
+                    rulebook_id=DUNGEONWORLD_LIKE_ID,
+                    text_value="브람 2세",
+                )
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+
+async def test_completing_the_same_step_twice_supersedes_the_earlier_value(tmp_db_path):
+    """D-07 되돌리기 — 자기 차례 안에서는 같은 항목을 다시 확정할 수
+    있고, 나중 값이 이기며 앞선 사건은 지워지지 않는다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(FixPartySize(player_character_count=3, rulebook_id=DUNGEONWORLD_LIKE_ID))
+        first_seq = await actor.submit(
+            CompleteCreationStep(
+                character_id="bram",
+                browser_id="B1",
+                step_id="name",
+                rulebook_id=DUNGEONWORLD_LIKE_ID,
+                text_value="브람",
+            )
+        )
+        second_seq = await actor.submit(
+            CompleteCreationStep(
+                character_id="bram",
+                browser_id="B1",
+                step_id="name",
+                rulebook_id=DUNGEONWORLD_LIKE_ID,
+                text_value="브람 2세",
+            )
+        )
+    finally:
+        await actor.stop()
+        store.close()
+
+    events = _read_events(tmp_db_path)
+    step_events = [e for e in events if e.event_type == "creation_step_completed"]
+    assert len(step_events) == 2
+    assert step_events[0].seq == first_seq
+    assert step_events[0].superseded_seq is None
+    assert step_events[1].seq == second_seq
+    assert step_events[1].superseded_seq == first_seq
+
+    fold = actor.state.creation_step_values[("bram", "name")]
+    assert fold.text_value == "브람 2세"

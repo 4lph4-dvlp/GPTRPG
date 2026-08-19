@@ -24,6 +24,7 @@ from gptrpg.event_log.schema import (
     CharacterOccupied,
     CheckResolved,
     ClockAdvanced,
+    CreationInterjection,
     CreationStepCompleted,
     ModifierRecord,
     NarrationAppended,
@@ -162,9 +163,32 @@ class CreateCharacter:
 @dataclass(frozen=True)
 class LockPartyRoster:
     """파티 명단을 잠그는 명령(D-08, Phase 12.1) — 잠근 뒤에는 되돌릴 수
-    없다(푸는 명령이 없다)."""
+    없다(푸는 명령이 없다). **명단에서 사람을 빼는 명령은 없다** — 반대한
+    사람을 빼고 시작하는 경로는 없다(D-11 경계, D-08, Phase 12.1-04)."""
 
     character_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RecordInterjection:
+    """남의 차례에 자유롭게 끼어드는 말 하나(D-09, Phase 12.1-04).
+
+    **이 명령은 어떤 캐릭터의 값도 바꾸지 않는다.** CHAR-04가 관계를
+    담을 칸을 `Entity`/`StatEntry`에 두는 것을 금지하고, D-07이 지난
+    차례를 잠그므로(끼어드는 사람의 차례는 지났거나 아직 오지 않았다),
+    끼어든 말이 손댈 수 있는 「지금 고칠 수 있는 값」이 애초에 없다
+    (D-09 결정, 12.1-04-PLAN.md § 조사가 확정한 것). 화자
+    (`speaker_character_id`)와 언급 대상(`mentioned_character_ids`)을
+    사건에 같이 남기는 것은 Phase 14(관계 장부)가 사건 스키마를 다시
+    손대지 않고 이 사건들을 색인할 수 있게 하기 위해서다."""
+
+    speaker_character_id: str
+    browser_id: str
+    during_character_id: str
+    mentioned_character_ids: tuple[str, ...]
+    text: str
+
+
 
 
 @dataclass(frozen=True)
@@ -350,6 +374,7 @@ Command = (
     | CompleteCreationStep
     | CreateCharacter
     | LockPartyRoster
+    | RecordInterjection
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
@@ -376,6 +401,7 @@ _EVENT_CLASSES: dict[str, type] = {
     "resource_changed": ResourceChanged,
     "party_size_fixed": PartySizeFixed,
     "creation_step_completed": CreationStepCompleted,
+    "creation_interjection": CreationInterjection,
     "character_created": CharacterCreated,
     "party_roster_locked": PartyRosterLocked,
 }
@@ -648,6 +674,8 @@ class SessionActor:
             return self._prepare_create_character(command)
         if isinstance(command, LockPartyRoster):
             return self._prepare_lock_roster(command)
+        if isinstance(command, RecordInterjection):
+            return self._prepare_interjection(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -1201,9 +1229,19 @@ class SessionActor:
         보낸 값을 무시하고 주입된 `Roller`로 직접 굴린다(D14) — 에이전트가
         값을 만들 수 있는 경로가 없다. `derive`는 `depends_on` 단계의 확정된
         축 값을 찾아 `기준값 × derive_multiplier + derive_offset`으로 계산한다.
+
+        **D-07 경계(Phase 12.1-04)** — 그 캐릭터에 `character_created`가
+        이미 있으면(차례가 끝났다) 이 명령은 `CommandRejected`다. 다시
+        고치려면 정리 뒤 동의 관문에서 말해야 한다(D-11, 12.1-04 Task 2가
+        `ReopenCreationStep`으로 이 문을 다시 여는 길을 붙인다).
         """
         if self.state.party_roster is not None:
             raise RosterAlreadyLocked("파티 명단이 이미 잠겨 만들기를 더 진행할 수 없다")
+        if command.character_id in self.state.created_characters:
+            raise CommandRejected(
+                "차례가 끝난 캐릭터의 항목은 고칠 수 없다 — 정리 뒤 동의 관문에서"
+                " 말해야 한다"
+            )
         rulebook = get_rulebook(command.rulebook_id)
         step = next(
             (decl for decl in rulebook.creation_steps if decl.step_id == command.step_id),
@@ -1457,6 +1495,51 @@ class SessionActor:
             {
                 "character_ids": list(command.character_ids),
                 "player_character_count": len(command.character_ids),
+            },
+        )
+
+    def _prepare_interjection(self, command: RecordInterjection) -> tuple[str, int | None, dict]:
+        """끼어든 말 하나를 사건으로 남긴다(D-09) — 검증 순서가 중요하다.
+
+        ①본문이 비었으면 거절 ②명단이 잠겼으면 `RosterAlreadyLocked`
+        ③화자가 지금 차례인 사람(`during_character_id`)과 같으면 거절 —
+        자기 차례에는 끼어드는 것이 아니라 말하는 것이다 ④언급 대상이
+        전부 이 세션에 존재하는 `character_id`인지 확인한다 — 없는
+        사람을 가리키는 기록을 남기면 Phase 14가 그 색인을 못 푼다.
+
+        **이 명령은 어떤 캐릭터의 값도 바꾸지 않는다** — `RecordInterjection`
+        도크스트링이 그 근거(CHAR-04가 관계 칸을 금지하고 D-07이 지난
+        차례를 잠근다)를 적는다.
+        """
+        if not command.text.strip():
+            raise CommandRejected("text는 비어 있을 수 없다")
+        if self.state.party_roster is not None:
+            raise RosterAlreadyLocked("파티 명단이 이미 잠겨 끼어들 수 없다")
+        if command.speaker_character_id == command.during_character_id:
+            raise CommandRejected("자기 차례에는 끼어드는 것이 아니라 말하는 것이다")
+
+        known_character_ids = set(self.state.created_characters) | {
+            character_id for character_id, _step_id in self.state.creation_step_values
+        }
+        unknown_mentions = [
+            character_id
+            for character_id in command.mentioned_character_ids
+            if character_id not in known_character_ids
+        ]
+        if unknown_mentions:
+            raise CommandRejected(
+                f"이 세션에 없는 캐릭터를 언급했다: {unknown_mentions!r}"
+            )
+
+        return (
+            "creation_interjection",
+            None,
+            {
+                "speaker_character_id": command.speaker_character_id,
+                "browser_id": command.browser_id,
+                "during_character_id": command.during_character_id,
+                "mentioned_character_ids": list(command.mentioned_character_ids),
+                "text": command.text,
             },
         )
 
