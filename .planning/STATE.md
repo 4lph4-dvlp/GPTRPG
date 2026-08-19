@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.1
 current_phase_name: character-creation
-status: executing
-stopped_at: Completed 12.1-05-PLAN.md
-last_updated: "2026-08-19T02:10:07.323Z"
+status: verifying
+stopped_at: Completed 12.1-06-PLAN.md — Phase 12.1 전체 완료 (6/6)
+last_updated: "2026-08-19T07:44:32.659Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 12.1 execution started
 progress:
-  total_phases: 13
-  completed_phases: 5
+  total_phases: 14
+  completed_phases: 6
   total_plans: 35
-  completed_plans: 34
-  percent: 38
+  completed_plans: 35
+  percent: 43
 ---
 
 # Project State
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 12.1 (character-creation) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-19 — Phase 12.1 execution started
 
@@ -42,7 +42,7 @@ Last activity: 2026-08-19 — Phase 12.1 execution started
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -125,6 +125,7 @@ Progress: [██████████] 97%
 | Phase 12.1 P03 | ~1h | 2 tasks | 6 files |
 | Phase 12.1-character-creation P04 | not tracked precisely (single continuous session) | 3 tasks | 8 files |
 | Phase 12.1 P05 | 약 2시간 | 3 tasks | 22 files |
+| Phase 12.1 P06 | ~5h (사람 확인 대기 포함) | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -286,6 +287,9 @@ Progress: [██████████] 97%
 - [Phase ?]: 12.1-05: characters_data.py 삭제, GameState.created_characters를 캐릭터의 유일한 출처로 통일 — CHAR-02/CHAR-04 닫음
 - [Phase ?]: 12.1-05: 계획 조사가 놓친 routes_actions.py 네 호출부(declare/confirm/confirm_resource_change/proceed)를 _created_character() 공용 헬퍼로 통일
 - [Phase ?]: 12.1-05: 시험이 앱 sqlite 연결을 재사용하지 않도록 app.state.db_path 추가 — 스레드 종속 연결 재사용 버그 예방
+- [Phase ?]: 12.1-06: 접힌 할 일 세 선택지 중 2번(변경하기 숨김)만 채택 — 1번(점유 놓기)은 D-08과 어긋나 기각, 3번(카드 비활성 표시)은 Phase 16 몫으로 이관
+- [Phase ?]: 12.1-06: 쿠키 분실 한계 문구를 사람 확인 피드백으로 구체화 — '표시를 지우면'을 '인터넷 사용 기록을 지울 때'로 교체(f16de59)
+- [Phase ?]: 12.1-06 사람 확인 중 발견(범위 밖): Phase 12.1 전체가 서버 라우트만 완성하고 프런트엔드 화면이 없다 — Phase 12.3(캐릭터 만들기 화면)이 로드맵에 신설됨(f6109be)
 
 ### Pending Todos
 
@@ -343,8 +347,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-19T02:10:07.278Z
-Stopped at: Completed 12.1-05-PLAN.md
+Last session: 2026-08-19T07:44:32.615Z
+Stopped at: Completed 12.1-06-PLAN.md — Phase 12.1 전체 완료 (6/6)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 

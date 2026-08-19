@@ -501,7 +501,7 @@ Phase 11 (담을 그릇 — 자원 축 표현), Phase 12 (`StatEntry` 쓰기 경
   5. 만든 사람이 그 캐릭터를 자동으로 점유한 상태로 시작한다 (Phase 8의 점유 규칙과 같은
      방식 — 게임 사건으로 기록)
 
-**Plans**: 5/6 plans executed
+**Plans**: 6/6 plans executed
 
 Plans:
 **Wave 1**
@@ -520,7 +520,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 12.1-06-PLAN.md — 화면 두 결함(접힌 할 일) + 쿠키 분실 한계 명시
+- [x] 12.1-06-PLAN.md — 화면 두 결함(접힌 할 일) + 쿠키 분실 한계 명시
 
 > **왜 여기 끼워졌나.** Phase 8 논의 중 사용자가 「캐릭터를 생성하는 기능이 안
 > 다뤄지지 않았어?」를 지적해 드러난 로드맵 구멍이다. D22는 잠긴 결정인데도 v1.1·M1~M4
@@ -933,7 +933,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 10. AI 출력 검증과 탈옥 방어 | v1.1 | 7/7 | Complete    | 2026-08-14 |
 | 11. 룰북 표현 어휘 확장 | v1.1 | 7/7 | Complete    | 2026-08-17 |
 | 12. 능력치 · 자원 변화 · 소지품 | v1.1 | 7/7 | Complete    | 2026-08-18 |
-| 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 5/6 | In Progress|  |
+| 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 6/6 | In Progress|  |
 | 12.2. 판정 합계를 서버가 보낸다 (INSERTED) | v1.1 | 0/TBD | Not started | - |
 | 13. 장면 — 오프닝과 대상 | v1.1 | 0/TBD | Not started | - |
 | 13.1. GM이 이야기를 이끈다 — 행동과 필연적 지점을 잇는다 (INSERTED) | v1.1 | 0/TBD | Not started | - |
