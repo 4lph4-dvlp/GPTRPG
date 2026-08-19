@@ -312,3 +312,62 @@ describe("segmentRoleLabel", () => {
     expect(segmentRoleLabel("전혀_모르는_역할")).toBe("전혀_모르는_역할");
   });
 });
+
+describe("rollRoles — 굴림 연출이 눈을 어떤 모양으로 그릴지의 근거", () => {
+  it("d100의 두 자릿수는 값과 무관하게 'tens'/'units'로 나온다", () => {
+    // 브라우저에서 실제로 나온 판정: 눈 8과 6. 값으로 모양을 고르면 8은
+    // 숫자·6은 6면체 그림이 되어 한 판정 안에서 두 가지 그림이 섞였다.
+    // 6이 나왔다고 6면체인 것이 아니다 — 역할이 그것을 말해 준다.
+    const calculation: CheckCalculationView = {
+      seq: 3,
+      rows: [
+        {
+          segments: [
+            { role: "tens", value: 8, source: null, discarded: false },
+            { role: "units", value: 6, source: null, discarded: false },
+            { role: "percentile", value: 86, source: null, discarded: false },
+          ],
+          total: 86,
+        },
+      ],
+      total: 86,
+      target: 55,
+      direction: "roll_under",
+    };
+    const summary = buildCheckSummary(
+      checkEvent({ rolls: [8, 6], total: 86, target: 55, rulebook_id: "openquest" }),
+      calculation,
+    );
+
+    // 눈 하나에 대응하는 역할만 나란히 실린다 — 백분위는 파생값이라 빠진다.
+    expect(summary.rollRoles).toEqual(["tens", "units"]);
+    expect(summary.rollRoles.length).toBe(summary.rolls.length);
+  });
+
+  it("룰북이 선언한 주사위는 'die'로 나온다", () => {
+    const calculation: CheckCalculationView = {
+      seq: 3,
+      rows: [
+        {
+          segments: [
+            { role: "die", value: 4, source: null, discarded: false },
+            { role: "die", value: 3, source: null, discarded: false },
+          ],
+          total: 9,
+        },
+      ],
+      total: 9,
+      target: 10,
+      direction: "roll_over",
+    };
+    const summary = buildCheckSummary(checkEvent(), calculation);
+
+    expect(summary.rollRoles).toEqual(["die", "die"]);
+  });
+
+  it("계산 줄이 없는 옛 기록은 빈 배열이다 — 부르는 쪽이 옛 규칙으로 떨어진다", () => {
+    const summary = buildCheckSummary(checkEvent(), null);
+
+    expect(summary.rollRoles).toEqual([]);
+  });
+});

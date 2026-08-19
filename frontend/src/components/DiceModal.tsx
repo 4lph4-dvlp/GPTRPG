@@ -41,7 +41,6 @@ const TUMBLE_MS = 800;
 const LAND_STEP_MS = 140;
 const SUM_DELAY_MS = 250;
 const STAMP_DELAY_MS = 260;
-const HOLD_MS = 800;
 const LEAVE_MS = 300;
 const TUMBLE_TICK_MS = 70;
 
@@ -51,6 +50,18 @@ function prefersReducedMotion(): boolean {
 
 function randomFace(): number {
   return 1 + Math.floor(Math.random() * DIE_FACES);
+}
+
+/** 눈 하나를 6면체 그림으로 그릴지 숫자로 그릴지 — **값이 아니라 서버가
+ * 보낸 역할이 정한다.** `"die"`는 룰북이 선언한 주사위 한 알이라 눈 점이
+ * 맞고, `"tens"`/`"units"`는 d100의 자릿수라 6면체가 아니다. 역할을 모르면
+ * (계산 줄이 없는 판 10 미만 기록) `undefined`를 돌려 `Die`가 옛 규칙대로
+ * 값으로 고르게 둔다. */
+function shapeFor(role: string | undefined): "pips" | "number" | undefined {
+  if (role === undefined) {
+    return undefined;
+  }
+  return role === "die" ? "pips" : "number";
 }
 
 export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => void }) {
@@ -87,27 +98,40 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
   }, [after]);
 
   /**
-   * 클릭이나 Esc면 즉시 결과만 보여주고 내려간다.
+   * **이 창은 저절로 닫히지 않는다.** 예전에는 결과를 보인 뒤 타이머로
+   * 물러났는데, 눈에서 합계로 가는 길을 읽으려면 시간이 걸려 사람이 다
+   * 읽기 전에 사라졌다. 닫는 것은 이제 사람이 정한다.
+   *
+   * 클릭·Esc는 **단계에 따라 뜻이 다르다** — 아직 구르는 중이면 연출을
+   * 건너뛰어 결과를 즉시 드러내고(창은 그대로 열려 있다), 이미 다
+   * 드러났으면 닫는다.
    *
    * **아무 키나로 받지 않는 이유:** 서사를 기다리는 동안 다음 행동을 미리 치는
-   * 사람이 있다. 아무 키나 건너뛰기로 받으면 그 사람은 주사위를 **한 번도**
-   * 못 본다. 입력 중에 눌릴 일이 없는 키만 받는다.
+   * 사람이 있다. 아무 키나 받으면 그 사람은 주사위를 **한 번도** 못 본다.
+   * 입력 중에 눌릴 일이 없는 키만 받는다.
    */
-  const skip = useCallback(() => {
+  const reveal = useCallback(() => {
     clearTimers();
     setLanded(diceCount);
     setShowSum(true);
     setShowStamp(true);
-    after(220, beginLeaving);
-  }, [after, beginLeaving, clearTimers, diceCount]);
+  }, [clearTimers, diceCount]);
+
+  const revealOrDismiss = useCallback(() => {
+    if (showStamp) {
+      beginLeaving();
+      return;
+    }
+    reveal();
+  }, [beginLeaving, reveal, showStamp]);
 
   const skipOnEscape = useCallback(
     (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        skip();
+        revealOrDismiss();
       }
     },
-    [skip],
+    [revealOrDismiss],
   );
 
   useEffect(() => {
@@ -115,7 +139,6 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
       setLanded(diceCount);
       setShowSum(true);
       setShowStamp(true);
-      after(HOLD_MS, beginLeaving);
       return clearTimers;
     }
 
@@ -129,7 +152,6 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
     const allLandedAt = TUMBLE_MS + LAND_STEP_MS * (diceCount - 1);
     after(allLandedAt + SUM_DELAY_MS, () => setShowSum(true));
     after(allLandedAt + SUM_DELAY_MS + STAMP_DELAY_MS, () => setShowStamp(true));
-    after(allLandedAt + SUM_DELAY_MS + STAMP_DELAY_MS + HOLD_MS, beginLeaving);
 
     return () => {
       window.clearInterval(tumbleTimer);
@@ -139,19 +161,20 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
 
   useEffect(() => {
     window.addEventListener("keydown", skipOnEscape);
-    window.addEventListener("pointerdown", skip);
     return () => {
       window.removeEventListener("keydown", skipOnEscape);
-      window.removeEventListener("pointerdown", skip);
     };
-  }, [skip, skipOnEscape]);
+  }, [skipOnEscape]);
 
   const tone = gradeTone(check.grade);
 
   return (
     <div
       className={leaving ? "dice-overlay dice-overlay--leaving" : "dice-overlay"}
-      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-label={COPY.diceModalTitle}
+      onPointerDown={revealOrDismiss}
     >
       <div className="dice-modal">
         <p className="dice-modal__who">{actorName}</p>
@@ -172,6 +195,7 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
                   value={isLanded ? value : (tumbleFaces[index] ?? value)}
                   phase={isLanded ? "landed" : "rolling"}
                   size={56}
+                  shape={shapeFor(summary.rollRoles[index])}
                 />
                 {isDiscarded ? (
                   <span className="calc-segment__discarded-tag">{COPY.checkDiscarded}</span>
@@ -228,7 +252,21 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
           ) : null}
         </div>
 
-        <p className="dice-modal__hint">클릭하거나 Esc를 누르면 넘어갑니다</p>
+        {showStamp ? (
+          <button
+            type="button"
+            className="dice-modal__confirm"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={beginLeaving}
+            autoFocus
+          >
+            {COPY.diceModalConfirm}
+          </button>
+        ) : null}
+
+        <p className="dice-modal__hint">
+          {showStamp ? COPY.diceModalHintDone : COPY.diceModalHintRolling}
+        </p>
       </div>
     </div>
   );

@@ -1,6 +1,15 @@
 /**
- * 주사위 한 알. 눈이 면 수를 넘으면(d100 룰북 등) 주사위 그림 대신 숫자로
- * 떨어뜨린다 — 6면체가 37을 보여주는 거짓말을 하지 않는다.
+ * 주사위 한 알.
+ *
+ * **어떤 모양으로 그릴지는 부르는 쪽이 정한다(`shape`).** 눈 값으로
+ * 판단하면 안 된다 — d100은 자릿수를 두 번 굴리는데, 값으로 고르면 십의
+ * 자리 8은 숫자로·일의 자리 6은 6면체 그림으로 나와 한 판정 안에서 두
+ * 가지 그림이 섞인다. **6이 나왔다고 6면체인 것이 아니다.** 서버가 각
+ * 눈이 무엇인지(`die`/`tens`/`units`)를 계산 줄에 실어 보내므로, 부르는
+ * 쪽이 그 표시를 보고 정한다.
+ *
+ * `shape`를 안 주면 값으로 고르던 옛 규칙을 그대로 쓴다 — 계산 줄이 없는
+ * 판 10 미만 기록에는 역할 정보가 없어서다.
  */
 
 /** 지금 룰북(dungeonworld_like)이 쓰는 면 수. 사건에 면 수 정보가 없어서
@@ -47,10 +56,13 @@ interface DieProps {
   size?: number;
   /** 구르는 중이면 흔들림 애니메이션, 착지 직후면 튕김 애니메이션. */
   phase?: "rolling" | "landed" | "static";
+  /** `"pips"`면 눈 점이 찍힌 6면체 그림, `"number"`면 숫자. 생략하면
+   * 값으로 고른다(옛 기록용 대비책). */
+  shape?: "pips" | "number";
 }
 
-export function Die({ value, size = 56, phase = "static" }: DieProps) {
-  const layout = PIP_LAYOUT[value];
+export function Die({ value, size = 56, phase = "static", shape }: DieProps) {
+  const layout = shape === "number" ? undefined : PIP_LAYOUT[value];
   if (layout === undefined) {
     return (
       <div className="die-number" aria-label={`눈 ${value}`}>

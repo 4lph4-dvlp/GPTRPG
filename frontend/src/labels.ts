@@ -223,6 +223,11 @@ export const COPY = {
   checkRollFirst: "처음 굴림",
   checkRollAgain: "다시 굴림",
   checkDiscarded: "안 골린 눈",
+  checkNeverResolved: "판정이 이뤄지지 않았어요",
+  diceModalTitle: "주사위 굴림 결과",
+  diceModalConfirm: "확인",
+  diceModalHintRolling: "클릭하거나 Esc를 누르면 결과를 바로 봅니다",
+  diceModalHintDone: "확인을 누르면 닫힙니다 (클릭·Esc도 같습니다)",
   /** RULE-07/D-19, 12-06/12-07 — 자원 변화 확인 카드(`ChatPane.tsx`). */
   resourceChangeHeading: "이 판정으로 자원이 바뀔 예정이에요",
   resourceChangeApply: "그대로 반영",

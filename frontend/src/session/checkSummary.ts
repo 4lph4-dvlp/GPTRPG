@@ -46,6 +46,14 @@ export interface CheckSummary {
    * 연출의 주사위 하나하나가 검산 줄과 같은 이야기를 하게 만드는 다리.
    * 계산 줄이 없으면(옛 기록) 빈 배열이다. */
   rollDiscarded: boolean[];
+  /** `rolls[i]`가 어떤 눈인지를 같은 순서로 알려준다 — `"die"`는 룰북이
+   * 선언한 주사위 한 알이고, `"tens"`/`"units"`는 d100의 자릿수다.
+   *
+   * **굴림 연출이 눈을 어떤 모양으로 그릴지가 이 값에서 나온다.** 값
+   * 자체로 판단하면 안 된다 — d100에서 십의 자리 8은 숫자로, 일의 자리
+   * 6은 6면체 그림으로 나와 한 판정 안에서 두 가지 그림이 섞였다.
+   * 6이 나왔다고 6면체인 것이 아니다. 계산 줄이 없으면 빈 배열이다. */
+  rollRoles: string[];
 }
 
 /** 눈에서 직접 온 조각의 역할 이름만 — 백분위·보정치는 파생값이라 눈
@@ -53,16 +61,20 @@ export interface CheckSummary {
  * `ROLE_DIE`/`ROLE_TENS`/`ROLE_UNITS`). */
 const ROLL_SOURCE_ROLES = new Set(["die", "tens", "units"]);
 
-function rollDiscardedFlags(calculation: CheckCalculationView): boolean[] {
-  const flags: boolean[] = [];
+function rollSourceSegments(
+  calculation: CheckCalculationView,
+): { discarded: boolean[]; roles: string[] } {
+  const discarded: boolean[] = [];
+  const roles: string[] = [];
   for (const row of calculation.rows) {
     for (const segment of row.segments) {
       if (ROLL_SOURCE_ROLES.has(segment.role)) {
-        flags.push(segment.discarded);
+        discarded.push(segment.discarded);
+        roles.push(segment.role);
       }
     }
   }
-  return flags;
+  return { discarded, roles };
 }
 
 /** 줄 꼬리표를 고르는 판단(D-12) — 줄이 하나면 꼬리표 없음, 여럿이면 첫
@@ -100,8 +112,10 @@ export function buildCheckSummary(
       modifiers: check.modifiers,
       grade: check.grade,
       rollDiscarded: [],
+      rollRoles: [],
     };
   }
+  const rollSources = rollSourceSegments(calculation);
   return {
     rows: calculation.rows.map((row, index) => ({
       segments: row.segments,
@@ -115,7 +129,8 @@ export function buildCheckSummary(
     rolls: check.rolls,
     modifiers: check.modifiers,
     grade: check.grade,
-    rollDiscarded: rollDiscardedFlags(calculation),
+    rollDiscarded: rollSources.discarded,
+    rollRoles: rollSources.roles,
   };
 }
 

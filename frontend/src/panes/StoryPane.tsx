@@ -133,11 +133,12 @@ export function StoryPane({
               <p className="t-label">{COPY.emptyBody}</p>
             </div>
           ) : (
-            visible.map((turn) => (
+            visible.map((turn, turnIndex) => (
               <div key={turn.declareSeq}>
                 <TurnCard
                   turn={turn}
                   actorName={nameOf(turn.playerId)}
+                  isLatest={turnIndex === visible.length - 1}
                   justRevealed={justRevealedSeq === turn.check?.seq}
                   failed={failedDeclareSeqs.has(turn.declareSeq)}
                   imageUrl={turn.illustration?.image_path ?? null}

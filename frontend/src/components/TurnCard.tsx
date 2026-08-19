@@ -22,6 +22,10 @@ import type { Turn } from "../session/groupTurns.ts";
 interface TurnCardProps {
   turn: Turn;
   actorName: string;
+  /** 이 턴이 화면에 보이는 턴 중 가장 마지막인지 — 「판정을 기다리는 중」과
+   * 「판정이 끝내 안 났다」를 가르는 유일한 근거다. 뒤에 다른 턴이 생겼는데도
+   * 판정 기록이 없다면 그 턴은 기다리는 중이 아니라 끝난 것이다. */
+  isLatest: boolean;
   /** 방금 주사위 모달이 내려간 턴이면 판정 줄을 잠깐 강조한다. */
   justRevealed: boolean;
   /** 이 턴의 서사 요청이 실패했다고 내 브라우저가 아는 경우. */
@@ -34,10 +38,12 @@ interface TurnCardProps {
 
 function CheckLine({
   turn,
+  isLatest,
   justRevealed,
   calculation,
 }: {
   turn: Turn;
+  isLatest: boolean;
   justRevealed: boolean;
   calculation: CheckCalculationView | null;
 }) {
@@ -51,6 +57,19 @@ function CheckLine({
       // 아니라 처음부터 없는 것이므로 판정 줄을 아예 그리지 않는다 — 계속
       // 기다리는 것처럼 보이는 것은 이 정상 경로를 실패처럼 읽히게 만든다.
       return null;
+    }
+    // 확인은 됐는데 판정 기록이 없다. 이 턴이 아직 맨 뒤면 판정이 오는
+    // 중일 수 있으니 기다린다. 하지만 **뒤에 다른 턴이 이미 생겼다면**
+    // 이 턴에 판정이 올 일은 없다 — 판정 제출이 실패한 것이고, 그
+    // 실패는 사건으로 남지 않는다(`confirm()`은 오류 상태 코드로만
+    // 알린다). 그때도 점을 굴리면 새로고침한 사람에게 영원히 도는
+    // 표시가 남아, 끝난 턴이 진행 중인 것처럼 보인다.
+    if (!isLatest) {
+      return (
+        <div className="check">
+          <span className="check__never-resolved">{COPY.checkNeverResolved}</span>
+        </div>
+      );
     }
     return (
       <div className="check">
@@ -124,7 +143,7 @@ function CheckLine({
   );
 }
 
-export function TurnCard({ turn, actorName, justRevealed, failed, imageUrl, calculation }: TurnCardProps) {
+export function TurnCard({ turn, actorName, isLatest, justRevealed, failed, imageUrl, calculation }: TurnCardProps) {
   const confirmed = turn.confirmed;
   const hasNarration = turn.narration.length > 0;
 
@@ -142,7 +161,12 @@ export function TurnCard({ turn, actorName, justRevealed, failed, imageUrl, calc
 
       <p className="turn__quote">“{turn.rawText}”</p>
 
-      <CheckLine turn={turn} justRevealed={justRevealed} calculation={calculation} />
+      <CheckLine
+        turn={turn}
+        isLatest={isLatest}
+        justRevealed={justRevealed}
+        calculation={calculation}
+      />
 
       {imageUrl != null ? (
         <div className="turn__plate">
