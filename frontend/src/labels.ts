@@ -218,6 +218,11 @@ export const COPY = {
   checkTarget: "목표",
   /** D-05 — 합계가 안 남은 판 10 미만 판정(`TurnCard.tsx`·`CheckBreakdown.tsx`). */
   checkTotalMissing: "합계 기록 없음",
+  /** D-11/D-12/D-13 — 버려진 눈·다시 굴림 표시(`CheckBreakdown.tsx`·
+   * `TurnCard.tsx`·`DiceModal.tsx`). */
+  checkRollFirst: "처음 굴림",
+  checkRollAgain: "다시 굴림",
+  checkDiscarded: "안 골린 눈",
   /** RULE-07/D-19, 12-06/12-07 — 자원 변화 확인 카드(`ChatPane.tsx`). */
   resourceChangeHeading: "이 판정으로 자원이 바뀔 예정이에요",
   resourceChangeApply: "그대로 반영",

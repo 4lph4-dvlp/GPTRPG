@@ -89,15 +89,28 @@ function CheckLine({
       ) : (
         <span className="check__mods">
           {summary.rows.map((row, rowIndex) => (
-            <span key={rowIndex}>
+            <span className="calc-row" key={rowIndex}>
+              {row.rowLabel !== null ? (
+                <span className="calc-row-label">{row.rowLabel}</span>
+              ) : null}
               {row.segments.map((segment, segmentIndex) => (
-                <span key={segmentIndex}>
+                <span
+                  className={segment.discarded ? "calc-segment--discarded" : undefined}
+                  key={segmentIndex}
+                >
                   {segmentIndex > 0 ? " · " : ""}
                   {segmentRoleLabel(segment.role)} {segment.value}
+                  {segment.discarded ? (
+                    <span className="calc-segment__discarded-tag">{COPY.checkDiscarded}</span>
+                  ) : null}
                 </span>
               ))}
-              {" = "}
-              <span className="check__total">{row.total}</span>
+              {row.total !== null ? (
+                <>
+                  {" = "}
+                  <span className="check__total">{row.total}</span>
+                </>
+              ) : null}
             </span>
           ))}
         </span>

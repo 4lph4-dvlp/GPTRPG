@@ -12,6 +12,7 @@
  * `groupTurns.ts`와 같은 성격 — React 훅이 아니라 순수 함수 모듈이다.
  */
 
+import { COPY } from "../labels.ts";
 import type {
   CheckCalculationView,
   CheckResolvedEvent,
@@ -26,6 +27,10 @@ type CheckFacts = Pick<CheckResolvedEvent, "rolls" | "modifiers" | "target" | "g
 export interface CheckSummaryRow {
   segments: CheckCalculationView["rows"][number]["segments"];
   total: number | null;
+  /** 줄이 하나뿐이면 `null`(꼬리표 없음), 여럿이면 첫 줄이 「처음 굴림」·
+   * 나머지가 「다시 굴림」(D-12). 세 화면이 각자 판단하지 않도록 여기서
+   * 한 번만 정한다(D-14) — 문구 자체는 여전히 `labels.ts`가 권위다. */
+  rowLabel: string | null;
 }
 
 export interface CheckSummary {
@@ -37,6 +42,36 @@ export interface CheckSummary {
   rolls: number[];
   modifiers: ModifierRecord[];
   grade: string;
+  /** `rolls[i]`가 버려짐 표시인지를 같은 순서로 알려준다(D-13) — 굴림
+   * 연출의 주사위 하나하나가 검산 줄과 같은 이야기를 하게 만드는 다리.
+   * 계산 줄이 없으면(옛 기록) 빈 배열이다. */
+  rollDiscarded: boolean[];
+}
+
+/** 눈에서 직접 온 조각의 역할 이름만 — 백분위·보정치는 파생값이라 눈
+ * 하나에 대응하지 않는다(`rules_core/check_calculation.py`의
+ * `ROLE_DIE`/`ROLE_TENS`/`ROLE_UNITS`). */
+const ROLL_SOURCE_ROLES = new Set(["die", "tens", "units"]);
+
+function rollDiscardedFlags(calculation: CheckCalculationView): boolean[] {
+  const flags: boolean[] = [];
+  for (const row of calculation.rows) {
+    for (const segment of row.segments) {
+      if (ROLL_SOURCE_ROLES.has(segment.role)) {
+        flags.push(segment.discarded);
+      }
+    }
+  }
+  return flags;
+}
+
+/** 줄 꼬리표를 고르는 판단(D-12) — 줄이 하나면 꼬리표 없음, 여럿이면 첫
+ * 줄이 「처음 굴림」·나머지가 「다시 굴림」. */
+export function rowLabelFor(rowIndex: number, totalRows: number): string | null {
+  if (totalRows <= 1) {
+    return null;
+  }
+  return rowIndex === 0 ? COPY.checkRollFirst : COPY.checkRollAgain;
 }
 
 /** 계산 줄 목록을 `seq`로 색인한다 — 판정 사건과 짝짓는 유일한 열쇠다. */
@@ -64,10 +99,15 @@ export function buildCheckSummary(
       rolls: check.rolls,
       modifiers: check.modifiers,
       grade: check.grade,
+      rollDiscarded: [],
     };
   }
   return {
-    rows: calculation.rows.map((row) => ({ segments: row.segments, total: row.total })),
+    rows: calculation.rows.map((row, index) => ({
+      segments: row.segments,
+      total: row.total,
+      rowLabel: rowLabelFor(index, calculation.rows.length),
+    })),
     total: calculation.total,
     totalMissing: false,
     target: calculation.target,
@@ -75,6 +115,7 @@ export function buildCheckSummary(
     rolls: check.rolls,
     modifiers: check.modifiers,
     grade: check.grade,
+    rollDiscarded: rollDiscardedFlags(calculation),
   };
 }
 

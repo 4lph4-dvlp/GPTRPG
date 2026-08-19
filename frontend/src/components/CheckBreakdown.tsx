@@ -17,7 +17,6 @@
  * 조건문은 없다(D-10 경계, 역할 이름은 꼬리표와 강조 정도로만 쓴다).
  */
 
-import { Fragment } from "react";
 import { COPY, directionLabel, modifierSourceLabel, segmentRoleLabel } from "../labels.ts";
 import type { CheckSummary } from "../session/checkSummary.ts";
 
@@ -53,12 +52,23 @@ export function CheckBreakdown({ summary }: CheckBreakdownProps) {
           </>
         ) : (
           summary.rows.map((row, rowIndex) => (
-            <Fragment key={rowIndex}>
+            <span className="calc-row" key={rowIndex}>
+              {row.rowLabel !== null ? (
+                <span className="calc-row-label">{row.rowLabel}</span>
+              ) : null}
               {row.segments.map((segment, segmentIndex) => (
-                <span className="breakdown__mod" key={segmentIndex}>
+                <span
+                  className={
+                    segment.discarded ? "breakdown__mod calc-segment--discarded" : "breakdown__mod"
+                  }
+                  key={segmentIndex}
+                >
                   <span className="breakdown__mod-sign">
                     {segmentRoleLabel(segment.role)} {segment.value}
                   </span>
+                  {segment.discarded ? (
+                    <span className="calc-segment__discarded-tag">{COPY.checkDiscarded}</span>
+                  ) : null}
                   {segment.source !== null ? (
                     <span className="breakdown__mod-source">
                       {modifierSourceLabel(segment.source)}
@@ -66,9 +76,13 @@ export function CheckBreakdown({ summary }: CheckBreakdownProps) {
                   ) : null}
                 </span>
               ))}
-              <span className="breakdown__eq">=</span>
-              <span className="breakdown__total">{row.total}</span>
-            </Fragment>
+              {row.total !== null ? (
+                <>
+                  <span className="breakdown__eq">=</span>
+                  <span className="breakdown__total">{row.total}</span>
+                </>
+              ) : null}
+            </span>
           ))
         )}
         <span className="breakdown__target">

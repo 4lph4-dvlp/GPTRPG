@@ -800,6 +800,39 @@ details.record > summary::-webkit-details-marker {
   font-variant-numeric: tabular-nums;
 }
 
+/* --- 버려진 눈 · 다시 굴림 줄 나눔(D-11/D-12/D-13) ------------------------- */
+
+.calc-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-sm);
+}
+
+.calc-row + .calc-row {
+  padding-left: var(--space-sm);
+  border-left: 1px solid var(--line);
+}
+
+.calc-row-label {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* 색만으로 뜻을 전하지 않는다 — 흐림(opacity) 옆에 글자 꼬리표가 항상
+   같이 붙는다(`calc-segment__discarded-tag`). */
+.calc-segment--discarded {
+  opacity: 0.45;
+}
+
+.calc-segment__discarded-tag {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-left: 2px;
+}
+
 .stamp--strong {
   color: var(--strong);
   background: rgba(86, 185, 138, 0.1);
@@ -1332,6 +1365,13 @@ details.record > summary::-webkit-details-marker {
   margin: var(--space-lg) 0;
   min-height: 64px;
   align-items: center;
+}
+
+.dice-modal__die {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
 }
 
 .dice-modal__sum {

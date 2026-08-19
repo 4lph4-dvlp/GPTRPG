@@ -4,6 +4,11 @@
  * 네 갈래를 덮는다: 계산 줄 있음 · 없음(D-05) · 처음 보는 역할 이름(D-10
  * 동반 불변식) · `segmentRoleLabel` 되돌림. `groupTurns.test.ts`와 같은
  * 자리·같은 관례.
+ *
+ * **다시 굴림 줄 나눔(D-12)·버려진 눈 흐림(D-13)은 지금 브라우저에서
+ * 도달할 수 없다** — `reroll_2d6`/`push_d100`은 시험에서만 불리고,
+ * `BONUS_DICE`를 만드는 제품 코드가 없다(12.2-03-PLAN.md). `rowLabelFor`·
+ * `rollDiscarded` 관련 시험이 두 표시의 유일한 검증 수단이다.
  */
 
 import { describe, expect, it } from "vitest";
@@ -13,6 +18,7 @@ import {
   buildCheckSummary,
   buildCheckSummaryFromConfirmResponse,
   indexCalculations,
+  rowLabelFor,
 } from "./checkSummary.ts";
 
 function envelope(seq: number) {
@@ -188,6 +194,98 @@ describe("세 화면 자리가 같은 입력에서 같은 요약을 낸다(D-14,
     expect(fromEventSource).toEqual(fromResponseSource);
     expect(fromEventSource.total).toBe(39);
     expect(fromEventSource.rows[0].segments.map((segment) => segment.value)).toEqual([3, 7, 37]);
+  });
+});
+
+describe("rowLabelFor", () => {
+  it("줄이 하나뿐이면 꼬리표가 없다", () => {
+    expect(rowLabelFor(0, 1)).toBeNull();
+  });
+
+  it("줄이 둘이면 첫 줄이 「처음 굴림」·둘째 줄이 「다시 굴림」이다(D-12)", () => {
+    expect(rowLabelFor(0, 2)).toBe("처음 굴림");
+    expect(rowLabelFor(1, 2)).toBe("다시 굴림");
+  });
+});
+
+describe("buildCheckSummary — 다시 굴림 줄 나눔과 버려진 눈(D-11/D-12/D-13)", () => {
+  it("줄이 둘이면 각 row가 rowLabel을 갖고, 첫 줄은 total이 null이다", () => {
+    const calculation: CheckCalculationView = {
+      seq: 3,
+      rows: [
+        { segments: [{ role: "die", value: 4, source: null, discarded: false }], total: null },
+        {
+          segments: [
+            { role: "die", value: 6, source: null, discarded: false },
+            { role: "flat", value: 2, source: "stat:STR", discarded: false },
+          ],
+          total: 8,
+        },
+      ],
+      total: 8,
+      target: 10,
+      direction: "roll_over",
+    };
+    const summary = buildCheckSummary(checkEvent({ rolls: [4, 3, 6, 5] }), calculation);
+
+    expect(summary.rows[0].rowLabel).toBe("처음 굴림");
+    expect(summary.rows[0].total).toBeNull();
+    expect(summary.rows[1].rowLabel).toBe("다시 굴림");
+    expect(summary.rows[1].total).toBe(8);
+  });
+
+  it("줄이 하나면 rowLabel이 null이다(회귀 없음)", () => {
+    const calculation: CheckCalculationView = {
+      seq: 3,
+      rows: [
+        {
+          segments: [
+            { role: "die", value: 4, source: null, discarded: false },
+            { role: "die", value: 3, source: null, discarded: false },
+          ],
+          total: 9,
+        },
+      ],
+      total: 9,
+      target: 10,
+      direction: "roll_over",
+    };
+    const summary = buildCheckSummary(checkEvent(), calculation);
+
+    expect(summary.rows[0].rowLabel).toBeNull();
+  });
+
+  it("버려진 십의 자리가 rollDiscarded에서 같은 자리에 참으로 뜬다(D-13) — 백분위는 안 낀다", () => {
+    const calculation: CheckCalculationView = {
+      seq: 3,
+      rows: [
+        {
+          segments: [
+            { role: "tens", value: 3, source: null, discarded: false },
+            { role: "tens", value: 8, source: null, discarded: true },
+            { role: "units", value: 7, source: null, discarded: false },
+            { role: "percentile", value: 37, source: null, discarded: false },
+          ],
+          total: 37,
+        },
+      ],
+      total: 37,
+      target: 60,
+      direction: "roll_under",
+    };
+    const summary = buildCheckSummary(
+      checkEvent({ rolls: [3, 8, 7], target: 60, rulebook_id: "openquest" }),
+      calculation,
+    );
+
+    // rolls = [3, 8, 7] -> [채택 3, 버려짐 8, 일의 자리 7]
+    expect(summary.rollDiscarded).toEqual([false, true, false]);
+  });
+
+  it("계산 줄이 없으면 rollDiscarded가 빈 배열이다(D-05)", () => {
+    const summary = buildCheckSummary(checkEvent({ total: null, rulebook_id: null }), null);
+
+    expect(summary.rollDiscarded).toEqual([]);
   });
 });
 

@@ -160,13 +160,23 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
         <div className="dice-modal__tray">
           {check.rolls.map((value, index) => {
             const isLanded = index < landed;
+            // 착지가 전부 끝난 뒤(showSum)에만 버려짐 표시가 붙는다 — 연출이
+            // 이야기(검산 줄)와 같은 순간에 같은 사실을 말한다(D-13).
+            const isDiscarded = showSum && summary.rollDiscarded[index] === true;
             return (
-              <Die
+              <span
                 key={index}
-                value={isLanded ? value : (tumbleFaces[index] ?? value)}
-                phase={isLanded ? "landed" : "rolling"}
-                size={56}
-              />
+                className={isDiscarded ? "dice-modal__die calc-segment--discarded" : "dice-modal__die"}
+              >
+                <Die
+                  value={isLanded ? value : (tumbleFaces[index] ?? value)}
+                  phase={isLanded ? "landed" : "rolling"}
+                  size={56}
+                />
+                {isDiscarded ? (
+                  <span className="calc-segment__discarded-tag">{COPY.checkDiscarded}</span>
+                ) : null}
+              </span>
             );
           })}
         </div>
@@ -180,14 +190,27 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
               {!summary.totalMissing ? (
                 <span className="dice-modal__vs">
                   (
-                  {summary.rows
-                    .flatMap((row) => row.segments)
-                    .map((segment, index) => (
-                      <span key={index}>
-                        {index > 0 ? " · " : ""}
-                        {segmentRoleLabel(segment.role)} {segment.value}
-                      </span>
-                    ))}
+                  {summary.rows.map((row, rowIndex) => (
+                    <span className="calc-row" key={rowIndex}>
+                      {row.rowLabel !== null ? (
+                        <span className="calc-row-label">{row.rowLabel}</span>
+                      ) : null}
+                      {row.segments.map((segment, segmentIndex) => (
+                        <span
+                          className={segment.discarded ? "calc-segment--discarded" : undefined}
+                          key={segmentIndex}
+                        >
+                          {segmentIndex > 0 ? " · " : ""}
+                          {segmentRoleLabel(segment.role)} {segment.value}
+                          {segment.discarded ? (
+                            <span className="calc-segment__discarded-tag">
+                              {COPY.checkDiscarded}
+                            </span>
+                          ) : null}
+                        </span>
+                      ))}
+                    </span>
+                  ))}
                   )
                 </span>
               ) : null}
