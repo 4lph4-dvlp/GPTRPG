@@ -185,7 +185,7 @@ async def complete_creation_step(
     """
     identity = read_identity(request, session_id)
     if identity is not None and identity.character_id != body.character_id:
-        print("경고: 신원 검증 실패 — creation/step 거부", file=sys.stderr)
+        print("경고: 신원 검증 실패 — creation/step 거부(쿠키 불일치)", file=sys.stderr)
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
 
     actor = request.app.state.registry.get_or_create(session_id)
@@ -257,7 +257,7 @@ async def complete_creation(
     """
     identity = read_identity(request, session_id)
     if identity is not None and identity.character_id != body.character_id:
-        print("경고: 신원 검증 실패 — creation/complete 거부", file=sys.stderr)
+        print("경고: 신원 검증 실패 — creation/complete 거부(쿠키 불일치)", file=sys.stderr)
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
     browser_id = identity.browser_id if identity is not None else body.browser_id
 
@@ -382,10 +382,13 @@ async def record_interjection(
     identity = read_identity(request, session_id)
     actor = request.app.state.registry.get_or_create(session_id)
     if identity is not None and identity.character_id != body.speaker_character_id:
-        print("경고: 신원 검증 실패 — creation/interject 거부", file=sys.stderr)
+        print("경고: 신원 검증 실패 — creation/interject 거부(쿠키 불일치)", file=sys.stderr)
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
     if identity is None and body.speaker_character_id in actor.state.created_characters:
-        print("경고: 신원 검증 실패 — creation/interject 거부(완성된 캐릭터 사칭)", file=sys.stderr)
+        print(
+            "경고: 신원 검증 실패 — creation/interject 거부(쿠키 없음, 완성된 캐릭터 사칭)",
+            file=sys.stderr,
+        )
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
 
     if len(body.mentioned_character_ids) > PARTY_MEMBER_LIMIT:
@@ -630,7 +633,7 @@ async def creation_follow_up(
     """
     identity = read_identity(request, session_id)
     if identity is not None and identity.character_id != body.character_id:
-        print("경고: 신원 검증 실패 — creation/follow-up 거부", file=sys.stderr)
+        print("경고: 신원 검증 실패 — creation/follow-up 거부(쿠키 불일치)", file=sys.stderr)
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
 
     actor = request.app.state.registry.get_or_create(session_id)
@@ -814,7 +817,8 @@ async def record_creation_consent(
     """
     identity = read_identity(request, session_id)
     if identity is None or identity.character_id != body.character_id:
-        print("경고: 신원 검증 실패 — creation/consent 거부", file=sys.stderr)
+        _reason = "쿠키 없음" if identity is None else "쿠키 불일치"
+        print(f"경고: 신원 검증 실패 — creation/consent 거부({_reason})", file=sys.stderr)
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
 
     actor = request.app.state.registry.get_or_create(session_id)
