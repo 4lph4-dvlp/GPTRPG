@@ -27,20 +27,13 @@ import {
   declareAction,
   proceed,
 } from "../api/client.ts";
-import type { DeclareResponse, ModifierView, MoveCandidate, PendingResourceChangeView } from "../api/types.ts";
+import type { DeclareResponse, MoveCandidate, PendingResourceChangeView } from "../api/types.ts";
 import { CheckBreakdown } from "../components/CheckBreakdown.tsx";
 import { MAX_RAW_TEXT_LEN } from "../config.ts";
 import { COPY, moveLabel, resourceOperationLabel, statLabel } from "../labels.ts";
+import type { CheckSummary } from "../session/checkSummary.ts";
+import { buildCheckSummaryFromConfirmResponse } from "../session/checkSummary.ts";
 import type { Turn } from "../session/groupTurns.ts";
-
-/** `resolve()`가 만든 방금 판정의 검산 재료(D-04) — `CheckBreakdown`에
- * 그대로 넘긴다. `ConfirmResponse.rolls`가 `null`이 아닐 때만(=판정이 실제로
- * 있었을 때만) 만들어진다. */
-interface CheckBreakdownData {
-  rolls: number[];
-  modifiers: ModifierView[];
-  target: number | null;
-}
 
 /** 확인을 기다리는 자원 변화 묶음(D-09/D-10) — `causedBySeq`는 이번 판정의
  * `resolve_seq`다. `confirm-resource-change`가 이 값으로 멱등성 창을 연다. */
@@ -83,7 +76,7 @@ export function ChatPane({
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
   const [proposal, setProposal] = useState<DeclareResponse | null>(null);
   // D-04 — 방금 판정의 검산 표시. 판정이 없는 턴(no_check/unclear)에는 안 켠다.
-  const [breakdown, setBreakdown] = useState<CheckBreakdownData | null>(null);
+  const [breakdown, setBreakdown] = useState<CheckSummary | null>(null);
   // D-09/D-10 — 숫자가 실제로 변할 때만 뜨는 확인 카드. 빈 목록이면 아예 안 켠다.
   const [pendingChange, setPendingChange] = useState<PendingResourceChangeState | null>(null);
   const [resourceBusy, setResourceBusy] = useState(false);
@@ -168,15 +161,19 @@ export function ChatPane({
         setStatus(null);
       }
       // D-04 — 판정이 실제로 있었을 때만(굴릴 필요 없는 행동에는 rolls가
-      // 없다) 검산 표시를 켠다. `total`은 서버 값을 안 쓴다(항상 null,
-      // `ConfirmResponse.total` 참조) — `CheckBreakdown`이 rolls/modifiers로
-      // 직접 다시 더한다.
-      if (response.rolls !== null) {
-        setBreakdown({
-          rolls: response.rolls,
-          modifiers: response.modifiers ?? [],
-          target: response.target,
-        });
+      // 없다) 검산 표시를 켠다. `buildCheckSummaryFromConfirmResponse`
+      // 하나가 「서버가 준 것을 어떻게 읽는가」를 정하고(D-14), 이 함수는
+      // 값을 옮겨 담기만 한다 — 계산은 없다.
+      if (response.rolls !== null && response.grade !== null && response.target !== null) {
+        setBreakdown(
+          buildCheckSummaryFromConfirmResponse({
+            rolls: response.rolls,
+            modifiers: response.modifiers ?? [],
+            target: response.target,
+            grade: response.grade,
+            calculation: response.calculation ?? null,
+          }),
+        );
       }
       // D-09/D-10 — 숫자가 실제로 변할 때만 확인 카드를 켠다. 빈 목록이면
       // 판정마다 확인 창이 뜨는 것을 막는 서버 쪽 절반(`NO_CHANGE_CATEGORY_ID`)의
@@ -369,13 +366,7 @@ export function ChatPane({
           </div>
         ) : null}
 
-        {breakdown !== null ? (
-          <CheckBreakdown
-            rolls={breakdown.rolls}
-            modifiers={breakdown.modifiers}
-            target={breakdown.target}
-          />
-        ) : null}
+        {breakdown !== null ? <CheckBreakdown summary={breakdown} /> : null}
 
         {pendingChange !== null ? (
           <div className="proposal resource-confirm">

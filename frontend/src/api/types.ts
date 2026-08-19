@@ -320,12 +320,20 @@ export interface ConfirmResponse {
    */
   modifiers?: ModifierView[];
   /**
-   * 판정 합계 — `CheckResolved`가 이 값을 저장하지 않아 서버는 항상
-   * `null`을 보낸다(12-01 알려진 갭). 화면은 이 칸을 신뢰하지 않고
-   * `rolls`/`modifiers`에서 직접 다시 더한다(`CheckBreakdown.tsx`) — 그
-   * 계산 자체가 검산 대상이므로 서버 값을 기다리지 않는다.
+   * 판정 합계 — 판 10 이상 판정에서는 서버가 저장된 합계를 그대로
+   * 보내고 화면은 그것을 그대로 쓴다(Phase 12.2). 판 10 미만 판정에서는
+   * `null`이고, 그때 `CheckBreakdown`은 `COPY.checkTotalMissing`을
+   * 보인다(D-05).
    */
   total?: number | null;
+  /** 이 판정을 굴린 룰북 식별자(Phase 12.2, D-03) — `total`과 같은
+   * 하위 호환 규칙. 판정이 없는 응답(`confirmed: false`)이나 판 10 미만
+   * 판정에서는 `null`이다. */
+  rulebook_id?: string | null;
+  /** 눈이 어떻게 합계가 되는지의 조각 목록(D-08/D-09) — `total`과 같은
+   * `null` 규칙을 따른다. `checkSummary.ts::buildCheckSummary`가 이 값을
+   * 읽는 유일한 곳이다(D-14). */
+  calculation?: CheckCalculationView | null;
   /** AI가 고른 결과가 가리키는 자원 변화 — 아직 사건이 안 쌓였다(D-09). */
   pending_resource_changes?: PendingResourceChangeView[];
   discretionary?: DiscretionaryProposalView;

@@ -6,57 +6,75 @@
  * `CheckResolved.modifiers`가 이미 출처 칸을 갖고 있으므로(12-01) **이
  * 컴포넌트가 새로 하는 일은 화면 쪽뿐이다.**
  *
- * 합계는 `ConfirmResponse.total`(서버 값)을 안 쓴다 — `CheckResolved`가 그
- * 값을 저장하지 않아 항상 `null`이다(12-01 알려진 갭, `api/types.ts`
- * `ConfirmResponse.total` 참조). 대신 `TurnCard.tsx`/`DiceModal.tsx`가 이미
- * 하는 것과 같은 계산(눈 합 + 보정치 합)을 여기서도 그대로 한다 — 화면이
- * 하는 산수 자체가 검산 대상이므로, 빈 칸을 데이터인 척 보이지 않는다.
+ * 합계는 이제 `session/checkSummary.ts::buildCheckSummary`가 만든
+ * `CheckSummary`를 그대로 그린다(D-14) — 서버가 계산 줄과 방향을 보내고
+ * 이 컴포넌트는 산수를 하지 않는다. 계산 줄이 없으면(`summary.totalMissing`,
+ * 판 10 미만 기록 — D-05) 합계 자리에 `COPY.checkTotalMissing`을 보이고
+ * 눈·보정치·목표값은 원시 값을 그대로 그린다.
  *
- * 목표값을 넘어야 성공인지 밑돌아야 성공인지는 룰북마다 다르다(2d6 등급식 vs
- * d100 롤언더) — 이 컴포넌트는 그 비교를 말하지 않고 숫자만 보인다. 방향에
- * 대한 해석은 등급 도장(`gradeLabel`/`gradeTone`)이 이미 하고 있다.
+ * 목표값을 넘어야 성공인지 밑돌아야 성공인지는 이제 서버가 보낸
+ * `summary.direction`으로 목표값 옆에 적힌다(D-07) — 룰북 이름으로 분기하는
+ * 조건문은 없다(D-10 경계, 역할 이름은 꼬리표와 강조 정도로만 쓴다).
  */
 
-import { modifierSourceLabel } from "../labels.ts";
-import { COPY } from "../labels.ts";
-import type { ModifierView } from "../api/types.ts";
+import { Fragment } from "react";
+import { COPY, directionLabel, modifierSourceLabel, segmentRoleLabel } from "../labels.ts";
+import type { CheckSummary } from "../session/checkSummary.ts";
 
 interface CheckBreakdownProps {
-  rolls: number[];
-  modifiers: ModifierView[];
-  target: number | null;
+  summary: CheckSummary;
 }
 
-export function CheckBreakdown({ rolls, modifiers, target }: CheckBreakdownProps) {
-  const rollTotal = rolls.reduce((sum, value) => sum + value, 0);
-  const modifierTotal = modifiers.reduce((sum, modifier) => sum + modifier.value, 0);
-  const total = rollTotal + modifierTotal;
-
+export function CheckBreakdown({ summary }: CheckBreakdownProps) {
   return (
     <div className="breakdown">
       <div className="breakdown__row">
-        <span className="breakdown__dice">
-          {rolls.map((value, index) => (
-            <span className="dice-pill" key={index}>
-              {value}
+        {summary.totalMissing ? (
+          <>
+            <span className="breakdown__dice">
+              {summary.rolls.map((value, index) => (
+                <span className="dice-pill" key={index}>
+                  {value}
+                </span>
+              ))}
             </span>
-          ))}
+            {summary.modifiers.map((modifier, index) => (
+              <span className="breakdown__mod" key={index}>
+                <span className="breakdown__mod-sign">
+                  {modifier.value >= 0 ? "+" : "−"} {Math.abs(modifier.value)}
+                </span>
+                <span className="breakdown__mod-source">{modifierSourceLabel(modifier.source)}</span>
+              </span>
+            ))}
+            <span className="breakdown__eq">=</span>
+            <span className="breakdown__total breakdown__total--missing">
+              {COPY.checkTotalMissing}
+            </span>
+          </>
+        ) : (
+          summary.rows.map((row, rowIndex) => (
+            <Fragment key={rowIndex}>
+              {row.segments.map((segment, segmentIndex) => (
+                <span className="breakdown__mod" key={segmentIndex}>
+                  <span className="breakdown__mod-sign">
+                    {segmentRoleLabel(segment.role)} {segment.value}
+                  </span>
+                  {segment.source !== null ? (
+                    <span className="breakdown__mod-source">
+                      {modifierSourceLabel(segment.source)}
+                    </span>
+                  ) : null}
+                </span>
+              ))}
+              <span className="breakdown__eq">=</span>
+              <span className="breakdown__total">{row.total}</span>
+            </Fragment>
+          ))
+        )}
+        <span className="breakdown__target">
+          {COPY.checkTarget} {summary.target}
+          {summary.direction !== null ? ` (${directionLabel(summary.direction)})` : ""}
         </span>
-        {modifiers.map((modifier, index) => (
-          <span className="breakdown__mod" key={index}>
-            <span className="breakdown__mod-sign">
-              {modifier.value >= 0 ? "+" : "−"} {Math.abs(modifier.value)}
-            </span>
-            <span className="breakdown__mod-source">{modifierSourceLabel(modifier.source)}</span>
-          </span>
-        ))}
-        <span className="breakdown__eq">=</span>
-        <span className="breakdown__total">{total}</span>
-        {target !== null ? (
-          <span className="breakdown__target">
-            {COPY.checkTarget} {target}
-          </span>
-        ) : null}
       </div>
     </div>
   );

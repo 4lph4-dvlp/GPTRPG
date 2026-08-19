@@ -9,7 +9,11 @@
 import { describe, expect, it } from "vitest";
 import type { CheckCalculationView, CheckResolvedEvent } from "../api/types.ts";
 import { segmentRoleLabel } from "../labels.ts";
-import { buildCheckSummary, indexCalculations } from "./checkSummary.ts";
+import {
+  buildCheckSummary,
+  buildCheckSummaryFromConfirmResponse,
+  indexCalculations,
+} from "./checkSummary.ts";
 
 function envelope(seq: number) {
   return {
@@ -100,6 +104,53 @@ describe("buildCheckSummary", () => {
       "explosion",
       "die",
     ]);
+  });
+});
+
+describe("buildCheckSummaryFromConfirmResponse", () => {
+  it("응답 출처와 폴링 사건 출처가 같은 입력값에서 같은 결과를 낸다(D-14, 12.2-02)", () => {
+    const calculation: CheckCalculationView = {
+      seq: 3,
+      rows: [
+        {
+          segments: [
+            { role: "die", value: 4, source: null, discarded: false },
+            { role: "die", value: 3, source: null, discarded: false },
+          ],
+          total: 9,
+        },
+      ],
+      total: 9,
+      target: 10,
+      direction: "roll_over",
+    };
+    const fromEvent = buildCheckSummary(checkEvent(), calculation);
+    const fromResponse = buildCheckSummaryFromConfirmResponse({
+      rolls: [4, 3],
+      modifiers: [],
+      target: 10,
+      grade: "weak_hit",
+      calculation,
+    });
+
+    expect(fromResponse).toEqual(fromEvent);
+  });
+
+  it("계산 줄이 null이면 totalMissing이 참이고 원시 눈·보정치·목표값이 그대로 실린다(D-05)", () => {
+    const summary = buildCheckSummaryFromConfirmResponse({
+      rolls: [3, 7],
+      modifiers: [{ type: "flat", value: 2, source: "stat:CHA" }],
+      target: 55,
+      grade: "success",
+      calculation: null,
+    });
+
+    expect(summary.totalMissing).toBe(true);
+    expect(summary.total).toBeNull();
+    expect(summary.rows).toEqual([]);
+    expect(summary.rolls).toEqual([3, 7]);
+    expect(summary.modifiers).toEqual([{ type: "flat", value: 2, source: "stat:CHA" }]);
+    expect(summary.target).toBe(55);
   });
 });
 
