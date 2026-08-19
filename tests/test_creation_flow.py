@@ -394,6 +394,32 @@ def test_creation_step_with_someone_elses_character_id_is_rejected(web_client):
     assert response.status_code == 403
 
 
+def test_complete_creation_by_a_browser_that_never_submitted_a_step_is_rejected(web_client):
+    """하이재킹 항목(12.1-REVIEW.md CR-01 "추가로" 절, 사용자 승인) —
+    `BROWSER_ID`가 필수 항목을 전부 채운 캐릭터를, 그 캐릭터의 항목을
+    한 번도 낸 적 없는 다른 브라우저(`SECOND_BROWSER_ID`)가 아직 완성
+    전(둘 다 쿠키가 없는 상태)에 먼저 `/creation/complete`를 불러
+    가로챌 수 없다. 정당한 참가자(항목을 채운 브라우저 본인)는 아직
+    쿠키가 없어도 그대로 완성할 수 있어야 한다 — 이 시험은 가로채기
+    시도만 확인한다(정상 경로는
+    `test_the_whole_creation_flow_passes_for_two_people_in_order` 등
+    기존 시험이 이미 반복해서 지킨다)."""
+    client = web_client
+    session_id = SESSION_ID + "-complete-hijack"
+    assert _fix_party_size(client, session_id=session_id).status_code == 200
+    _complete_all_required_steps(client, session_id=session_id)
+
+    hijack_response = _complete_creation(
+        client, session_id=session_id, browser_id=SECOND_BROWSER_ID
+    )
+    assert hijack_response.status_code == 409
+    assert client.cookies.get("gptrpg_character") is None
+    assert _events_of_type(client, "character_created", session_id=session_id) == []
+
+    legit_response = _complete_creation(client, session_id=session_id, browser_id=BROWSER_ID)
+    assert legit_response.status_code == 200
+
+
 def test_interject_and_complete_after_roster_locked_are_both_rejected(web_client):
     """명단이 잠긴 뒤 되돌리기·끼어들기 둘 다 `RosterAlreadyLocked`다.
 

@@ -38,6 +38,12 @@ class CreationStepFold:
     같은 키로 두 번째 `creation_step_completed` 사건이 오면 이 레코드는
     통째로 새 값으로 **덮인다** — 앞선 사건은 기록에서 지워지지 않지만
     (append-only), 접은 결과에서는 나중 것만 남는다(D-07 되돌리기).
+
+    `browser_id`는 이 사건을 실제로 제출한 브라우저다(하이재킹 항목,
+    12.1-REVIEW.md CR-01 "추가로" 절). `SessionActor._prepare_create_character`가
+    이 칸으로 「항목을 채운 브라우저가 완성도 낸 브라우저인가」를 대조한다
+    — 완성 전에는 쿠키가 없을 수 있으므로(D22 흐름) 쿠키 대신 사건에서
+    다시 접은 이 값이 유일하게 서버 재시작에도 살아남는 신원 근거다.
     """
 
     seq: int
@@ -46,6 +52,7 @@ class CreationStepFold:
     picked: tuple[str, ...] | None
     axis_values: tuple[tuple[str, int], ...] | None
     rolls: tuple[int, ...] | None
+    browser_id: str
 
 
 @dataclass(frozen=True)
@@ -414,6 +421,7 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
                 else None
             ),
             rolls=tuple(rolls_payload) if rolls_payload is not None else None,
+            browser_id=payload["browser_id"],
         )
         return replace(state, last_seq=seq, creation_step_values=creation_step_values)
     if event_type == "creation_interjection":

@@ -755,6 +755,85 @@ async def _submit_minimal_creation(actor, character_id: str, browser_id: str) ->
     )
 
 
+# ---------------------------------------------------------------------------
+# 캐릭터 하이재킹 방지 — CreateCharacter가 그 캐릭터의 creation_step_completed
+# 사건들이 기록한 browser_id와 다른 browser_id를 거절한다(하이재킹 항목,
+# 12.1-REVIEW.md CR-01 "추가로" 절, 사용자 승인).
+# ---------------------------------------------------------------------------
+
+
+async def test_create_character_rejects_a_browser_that_never_submitted_any_step(
+    tmp_db_path,
+):
+    """B1이 필수 항목을 전부 채운 캐릭터를, 한 항목도 낸 적 없는 다른
+    브라우저(B-attacker)가 먼저 `/creation/complete`를 불러 가로챌 수
+    없다. `_prepare_create_character`는 완성되기 전(아직 쿠키가 없는
+    상태)에도 그 캐릭터의 `creation_step_completed` 사건들이 실제로
+    기록한 browser_id와 `command.browser_id`가 같은지 최종 관문에서
+    대조해야 한다 — 그러지 않으면 캐릭터 완성이 「먼저 도착한 요청이
+    임자」가 되어 버린다(D-05가 세운 「먼저 잡은 사람이 임자」 규율은
+    점유에는 있지만 만들기 완료 자체에는 이 관문이 붙기 전까지 없었다).
+    """
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await actor.submit(
+            FixPartySize(player_character_count=3, rulebook_id=DUNGEONWORLD_LIKE_ID)
+        )
+        for step_id, kwargs in (
+            ("archetype", {"picked": ("몸으로 먼저 막아선다",)}),
+            ("backstory", {"text_value": "우물 마을 순찰대에 뒤늦게 합류한 떠돌이 검객"}),
+            (
+                "ability_array",
+                {
+                    "axis_values": (
+                        ("STR", 2), ("DEX", 1), ("CON", 1), ("INT", 0), ("WIS", 0), ("CHA", -1),
+                    )
+                },
+            ),
+            ("hp", {}),
+            ("name", {"text_value": "브람"}),
+        ):
+            await actor.submit(
+                CompleteCreationStep(
+                    character_id="bram",
+                    browser_id="B1",
+                    step_id=step_id,
+                    rulebook_id=DUNGEONWORLD_LIKE_ID,
+                    **kwargs,
+                )
+            )
+
+        with pytest.raises(CommandRejected):
+            await actor.submit(
+                CreateCharacter(
+                    character_id="bram",
+                    browser_id="B-attacker",
+                    rulebook_id=DUNGEONWORLD_LIKE_ID,
+                    one_line_intro="가로챈 소개",
+                )
+            )
+        assert actor.state.created_characters == {}
+    finally:
+        await actor.stop()
+        store.close()
+
+
+async def test_create_character_succeeds_for_the_browser_that_actually_filled_the_steps(
+    tmp_db_path,
+):
+    """정상 경로 — 항목을 채운 바로 그 브라우저는 아직 쿠키가 없어도
+    자기 캐릭터를 완성할 수 있다(선택-완료가 쿠키를 처음 발급하는
+    문이라는 D22 흐름 그대로). 위 하이재킹 시험과 대칭이다 — 이 시험이
+    깨지면 하이재킹 방지가 정당한 첫 완성까지 막고 있다는 뜻이다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        await _submit_minimal_creation(actor, "bram", "B1")
+        assert "bram" in actor.state.created_characters
+    finally:
+        await actor.stop()
+        store.close()
+
+
 async def test_occupy_succeeds_in_a_new_session_with_only_creation_events_and_no_occupation(
     tmp_db_path,
 ):

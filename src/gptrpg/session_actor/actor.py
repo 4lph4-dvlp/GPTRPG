@@ -1550,6 +1550,39 @@ class SessionActor:
         """확정된 만들기 항목 값들을 `Entity`/`StatEntry`로 조립한다(D-03/
         CHAR-04, Phase 12.1). AI가 이 지점에 닿지 않는다(D14) — 값 조립은
         전부 이미 확정된 사건 값을 그대로 옮기는 코드다.
+
+        **하이재킹 항목(12.1-REVIEW.md CR-01 "추가로" 절, 사용자 승인) —
+        브라우저 연속성 관문.** `/creation/complete`는 정의상 쿠키가 아직
+        없는 상태에서도 성공해야 한다(D22 흐름 — 자기소개를 채운 그
+        브라우저는 완성해야 비로소 쿠키를 받는다, `routes_creation.py`의
+        `complete_creation` 도크스트링). 그래서 이 관문을 "쿠키가 있어야
+        한다"로 세우면 정당한 첫 완성 자체를 막는다. 대신 세우는 것은
+        **연속성**이다 — 이 캐릭터의 `creation_step_completed` 사건들을
+        실제로 제출한 브라우저와 지금 완성을 요청하는 브라우저가 같은가.
+        항목을 채운 적 없는 브라우저가 남이 이미 다 채운 `character_id`를
+        알아내 자기 `browser_id`로 먼저 `/creation/complete`를 불러
+        가로채는 경로(하이재킹)를 이 대조가 막는다 — `OccupyCharacter`가
+        "먼저 잡은 사람이 임자"(D-05)이므로, 만들기 완료 자체에 이 관문이
+        없으면 그 완료가 사실상 점유 경쟁의 승자를 대신 정해 버린다.
+
+        **판정 기준을 "포함"이 아니라 "전부 일치"로 세운 이유:** 이
+        캐릭터의 만들기 단계는 정의상 한 참가자(=한 브라우저)가 자기
+        차례 안에서 채운다(D-03·D-07) — 완성 전 같은 `character_id`에
+        서로 다른 브라우저가 항목을 섞어 낼 정당한 경우가 없다. 그래서
+        `command.browser_id`가 이 캐릭터의 folds 중 **하나라도** 다른
+        브라우저와 짝지어져 있으면(=항목이 이미 섞였으면) 통과시키지
+        않는다 — "일부만 내 것"이라는 절반의 소유권을 인정하지 않는다.
+        이 검사가 닫지 **않는** 구멍은 `/creation/step` 자체의 위조
+        (완성 전 다른 브라우저가 이 캐릭터의 항목 하나를 몰래 제출하는
+        것)다 — 그 방어는 12.1-03/04와 이 항목 둘 다 문서로 이미 밝힌
+        범위 밖이다(`routes_creation.py`의 `complete_creation_step`
+        도크스트링). 이 관문은 그 범위 밖 구멍이 있더라도, 최소한 항목을
+        하나도 낸 적 없는 브라우저가 남의 캐릭터를 통째로 가로채는
+        가장 값싼 공격은 막는다.
+
+        **놓는 경로를 만들지 않는다(D-08).** 이 검사는 완성을 거절할 뿐
+        누구의 점유도 풀지 않는다 — 이미 점유된 캐릭터를 다시 놓게 하는
+        새 경로는 D-08이 금지한 것과 정확히 같은 종류라 만들지 않는다.
         """
         if self.state.party_roster is not None:
             raise RosterAlreadyLocked("파티 명단이 이미 잠겨 새 캐릭터를 만들 수 없다")
@@ -1562,6 +1595,11 @@ class SessionActor:
         }
         if not folds:
             raise CommandRejected("확정된 만들기 단계 값이 하나도 없다")
+
+        if any(fold.browser_id != command.browser_id for fold in folds.values()):
+            raise CommandRejected(
+                "이 캐릭터의 항목을 채운 브라우저와 다른 브라우저는 완성할 수 없다"
+            )
 
         for step in rulebook.creation_steps:
             if step.required and step.step_id not in folds:

@@ -168,9 +168,12 @@ async def complete_creation_step(
     항목을 제출하려 하면 403이다(T-12.1-01). 아직 쿠키가 없는 첫 만들기
     대화 참가자는 이 검사를 그대로 통과한다 — 완성(`/complete`)이 나서야
     쿠키가 구워지므로, 그 전까지는 `body.browser_id`가 이 참가자를 가리키는
-    유일한 값이다. 이 값의 완전한 위조 방지는 12.1-03/04(GM이 진행하는
-    다회 대화, 차례 관리)가 붙인다 — 이 트레이서는 한 줄기를 뚫는 것이
-    목적이라 그 방어를 아직 완성하지 않는다.
+    유일한 값이다. **이 값(제출되는 각 항목의 `browser_id`) 자체의 완전한
+    위조 방지는 여전히 12.1-03/04(GM이 진행하는 다회 대화, 차례 관리)
+    범위다** — 이 트레이서는 한 줄기를 뚫는 것이 목적이라 그 방어를 아직
+    완성하지 않는다. (하이재킹 항목이 닫은 것은 이 값이 아니라 그
+    **완성 시점의 연속성**이다 — 아래 `complete_creation` 도크스트링
+    참조.)
 
     **CR-01 (12.1-REVIEW.md) 검토 결과 — 여기는 고치지 않는다.** 이
     경로가 다루는 `character_id`는 완성되기 전(`created_characters`에
@@ -240,12 +243,17 @@ async def complete_creation(
     **CR-01 (12.1-REVIEW.md) 검토 결과 — 여기는 고치지 않는다.** 이
     경로는 쿠키를 **처음으로 발급하는** 자리다(아래 `response.set_cookie`
     참조) — 첫 완성 요청은 정의상 쿠키가 없는 상태에서 온다. `identity is
-    None`을 거절하면 첫 완성 자체가 막힌다. (완성된 캐릭터를 같은
-    `character_id`로 다시 완성하려는 요청이 여전히 `browser_id`를
-    대조하지 않는 것은 12.1-REVIEW.md CR-01 "추가로" 항목이 이미 짚은
-    별도의 알려진 한계다 — `_prepare_create_character`가 확정된
-    `creation_step_completed`의 `browser_id`와 `command.browser_id`를
-    대조하는 관문은 이번 두 블로커 수정 범위 밖이라 아직 붙지 않았다.)
+    None`을 거절하면 첫 완성 자체가 막힌다.
+
+    **하이재킹 항목(12.1-REVIEW.md CR-01 "추가로" 절, 사용자 승인 뒤
+    별도 패스로 닫힘) — `_prepare_create_character`가 브라우저 연속성을
+    대조한다.** 이 라우트가 쿠키만으로는 완성 전 신원을 대지 못하는
+    빈틈을, `session_actor.actor.SessionActor._prepare_create_character`가
+    닫는다 — 그 캐릭터의 `creation_step_completed` 사건들이 실제로
+    기록한 `browser_id`와 `command.browser_id`가 다르면(=항목을 낸 적
+    없는 브라우저가 완성을 시도하면) `CommandRejected`로 409가 난다.
+    이 라우트는 그 예외를 그대로 흡수해 아래 `except CommandRejected`가
+    409로 옮긴다 — 이 라우트 자신이 추가로 대조할 것은 없다.
     """
     identity = read_identity(request, session_id)
     if identity is not None and identity.character_id != body.character_id:
