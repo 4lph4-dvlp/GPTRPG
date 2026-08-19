@@ -561,12 +561,15 @@ Plans:
 **Goal**: 「주사위 계산은 사람이 검산할 수 있다」가 **어느 룰북에서든** 참이 된다 — 화면이
 눈을 스스로 더하지 않고, 규칙 코어가 이미 계산해 둔 합계를 그대로 받아 보여준다
 **Depends on**: Phase 12 (검산 화면 `CheckBreakdown`이 이 단계에서 만들어졌다)
-**Requirements**: TBD (논의 전 — `/gsd-discuss-phase 12.2`에서 정한다)
-**Plans:** 0 plans
+**Requirements**: 없음 — REQUIREMENTS.md가 이 단계에 REQ-ID를 매핑하지 않는다.
+`12.2-CONTEXT.md`의 결정 D-01~D-15가 사실상의 요구사항이고, 세 계획의 `must_haves`가 전부 인용한다
+**Plans:** 3 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 12.2 to break down)
+- [ ] 12.2-01-PLAN.md — 사건 판 10(합계·룰북 이름) · 서버가 계산 줄을 만들어 폴링 피드에 싣고 이야기 화면이 그린다 (뼈대)
+- [ ] 12.2-02-PLAN.md — 즉시 응답에 계산 줄을 싣고, 검산 창·주사위 연출을 같은 한 곳에 꽂는다
+- [ ] 12.2-03-PLAN.md — 버려진 눈 흐림 · 다시 굴림 줄 나눔 · OpenQuest 브라우저 사람 확인
 
 > **왜 새로 생겼나 (2026-08-18 코드 리뷰 CR-02).** 12-07이 만든 검산 화면
 > (`CheckBreakdown.tsx`)이 **주사위 눈을 전부 더한다.** 던전월드류(2d6)에서는 맞지만,
