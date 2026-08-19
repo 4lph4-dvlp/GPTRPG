@@ -104,6 +104,7 @@ from gptrpg.session_actor.live_roller import LiveRoller
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
+from gptrpg.web.check_views import CheckCalculationView, calculation_view_for
 from gptrpg.web.cookie_auth import read_identity
 from gptrpg.web.media import media_file_path, media_url, scene_relative_path
 from gptrpg.session_actor.projection import rebuild_state_from_events
@@ -618,10 +619,16 @@ class ConfirmResponse(BaseModel):
     옮긴다(D-04 검산 근거). 능력치·난이도 수정치가 여기 실린 채로 화면에
     닿는다(12-01)."""
     total: int | None = None
-    """판정 합계 — `CheckResolved`가 이 값을 따로 저장하지 않으므로(눈+수정치로
-    재계산해야 하는데 d100은 십/일의 자리 채택 규칙이 있어 웹 계층에서
-    다시 계산하면 `rules_core`의 계산을 중복 구현하게 된다) 이번 계획은
-    항상 `None`이다 — 후속 계획이 `CheckResolved`에 칸을 늘리면 채운다."""
+    """판정 합계 — 판 10 이상 판정에서는 `CheckResolved`에 저장된 합계가
+    그대로 실린다. 판 10 미만 판정(옛 기록)에서는 `None`이고, 그때 화면은
+    「합계 기록 없음」을 보인다(D-05)."""
+    rulebook_id: str | None = None
+    """이 판정을 굴린 룰북 식별자 — `CheckResolved.rulebook_id`를 그대로
+    옮긴다. 판 10 미만 판정에서는 `None`이다."""
+    calculation: CheckCalculationView | None = None
+    """눈이 어떻게 합계가 되는지의 조각 목록(D-08/D-09) —
+    `check_views.calculation_view_for` 한 함수로만 만든다. 판 10 미만
+    판정이거나 등록 안 된 룰북이면 `None`이다(D-05)."""
     pending_resource_changes: list[PendingResourceChangeView] = []
     """AI가 룰북의 닫힌 결과 목록에서 고른 항목이 가리키는 자원 변화 —
     **아직 사건이 안 쌓였다**(12-06, D-09). 고른 항목의 변화 목록이 비어
@@ -1098,6 +1105,9 @@ async def confirm(
         # 그대로 500으로 올라간다(다른 원인이므로 다른 상태 코드, 502 분기가
         # 아니다) — 「굴림 실패」와 「서사 실패」의 구분이 여기서 코드 구조로
         # 남는다.
+        # total/rulebook_id/calculation은 정상 분기와 반드시 같은 커밋에서
+        # 같이 바뀐다 — 서사가 실패한 턴만 검산이 다른 값을 보이는 비대칭
+        # 결함을 막는다(D-14, T-12.2-05).
         return ConfirmResponse(
             confirmed=True,
             confirm_seq=confirm_seq,
@@ -1111,6 +1121,9 @@ async def confirm(
                 ModifierView(type=m.type, value=m.value, source=m.source)
                 for m in check_event.modifiers
             ],
+            total=check_event.total,
+            rulebook_id=check_event.rulebook_id,
+            calculation=calculation_view_for(check_event),
             pending_resource_changes=pending_resource_changes,
             discretionary=discretionary,
         )
@@ -1153,6 +1166,9 @@ async def confirm(
             clock_segment=ctx.clock_state.segment_index,
         )
 
+    # total/rulebook_id/calculation은 서사 실패 분기와 반드시 같은
+    # 커밋에서 같이 바뀐다 — 서사가 실패한 턴만 검산이 다른 값을 보이는
+    # 비대칭 결함을 막는다(D-14, T-12.2-05).
     return ConfirmResponse(
         confirmed=True,
         confirm_seq=confirm_seq,
@@ -1165,6 +1181,9 @@ async def confirm(
             ModifierView(type=m.type, value=m.value, source=m.source)
             for m in check_event.modifiers
         ],
+        total=check_event.total,
+        rulebook_id=check_event.rulebook_id,
+        calculation=calculation_view_for(check_event),
         pending_resource_changes=pending_resource_changes,
         discretionary=discretionary,
     )

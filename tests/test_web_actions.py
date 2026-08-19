@@ -629,6 +629,101 @@ def test_narration_failure_returns_roll_result_and_records_master_gm_ai_call(
     assert illustrated == []
 
 
+def test_confirm_response_carries_total_and_calculation(web_client_with_fake_provider) -> None:
+    """즉시 응답의 `total`·`rulebook_id`·`calculation`이 저장된 판정 값과
+    같다(D-14, 12.2-01이 「후속 계획이 채운다」고 적어 둔 칸). 2d6에서는
+    넘어야 성공(`roll_over`)이다(D-07)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        resolved = _events_of_type(client, "check_resolved")
+
+    assert body["total"] == resolved[0]["total"]
+    assert body["rulebook_id"] == resolved[0]["rulebook_id"]
+    assert body["calculation"] is not None
+    assert body["calculation"]["total"] == body["total"]
+    assert body["calculation"]["direction"] == "roll_over"
+
+
+def test_confirm_response_d100_rulebook_direction_is_roll_under(
+    web_client_with_fake_provider,
+) -> None:
+    """d100 룰북(OpenQuest)으로 확인한 판정의 `calculation.direction`이
+    밑돌아야 성공을 뜻하는 값이다(D-07) — 2d6은 넘어야 성공(위 시험)과
+    반대다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "판정", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client, rulebook_id="openquest")
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(
+                declare_seq,
+                move="판정",
+                stat="CHA",
+                suggestion_move="판정",
+                suggestion_stat="CHA",
+                rulebook_id="openquest",
+            ),
+        )
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["calculation"] is not None
+    assert body["calculation"]["direction"] == "roll_under"
+    assert body["calculation"]["total"] == body["total"]
+
+
+def test_confirm_rejected_response_has_null_total_and_calculation(
+    web_client_with_fake_provider,
+) -> None:
+    """판정이 일어나지 않은 응답(`confirmed: false`)에서는 `calculation`이
+    `null`이고 `total`도 `null`이다 — 「계산 줄이 없다」와 「판정이 없다」가
+    섞이지 않는다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(declare_seq, confirmed=False),
+        )
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["total"] is None
+    assert body["calculation"] is None
+
+
+def test_narration_failed_branch_carries_the_same_calculation(
+    web_client_with_fake_provider,
+) -> None:
+    """서사 생성이 실패한 응답에서도 `total`·`rulebook_id`·`calculation`
+    셋이 정상 분기와 똑같이 실린다(D-14) — 두 조립 자리가 갈리면 서사가
+    실패한 턴만 틀린 검산을 본다(T-12.2-05)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = _NarrationRaisingProvider()
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert response.status_code == 200
+        body = response.json()
+        resolved = _events_of_type(client, "check_resolved")
+
+    assert body["narration_failed"] is True
+    assert body["total"] == resolved[0]["total"]
+    assert body["rulebook_id"] == resolved[0]["rulebook_id"]
+    assert body["calculation"] is not None
+    assert body["calculation"]["total"] == body["total"]
+
+
 class _AlwaysBlocksSingleSentenceProvider:
     """10-03(D-08) — 매 호출마다 문장부호가 하나도 없는 완결된 생각 블록
     하나만 낸다. `messages`(재생성 지시)는 안 들여다본다 — 첫 호출도
