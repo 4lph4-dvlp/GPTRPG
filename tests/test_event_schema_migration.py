@@ -717,3 +717,61 @@ def test_creation_step_completed_second_submission_wins_and_records_superseded_s
     # 나중 사건의 페이로드 자체가 앞선 사건의 순번을 superseded_seq로
     # 담고 있다(사건 기록은 append-only, 접은 결과에서만 나중 것이 이긴다).
     assert second.superseded_seq == first.seq == 0
+
+
+# ---------------------------------------------------------------------------
+# ⑦ 판 9 -> 판 10 하위 호환 + 리듀서 무변경 확인 (Phase 12.2 Task 3, D-04)
+#
+# 08-CONTEXT.md D-06의 「판 올리기는 리듀서 분기와 같은 커밋」 규율은 새
+# 사건 종류가 늘 때의 것이고, 이번은 기존 종류(`check_resolved`)에 칸
+# 두 개가 늘 뿐이다 — 관건은 `GameState`가 그 두 칸을 접는지인데 접지
+# 않는다. 이 저장소에서 이 규율로 다섯 번 사고가 났으므로(schema.py 판
+# 올리기 도크스트링) 「확인 안 한 무변경」을 남기지 않는다.
+# ---------------------------------------------------------------------------
+
+
+def test_committed_session1_fixture_check_resolved_events_have_no_total_or_rulebook_id():
+    """판 2로 쓰인 커밋된 픽스처의 `check_resolved` 38건이 판 10 코드로
+    전부 `parse_event`를 통과하고, `total`·`rulebook_id`가 전부 `None`이다
+    — 판 10 미만 기록은 두 새 칸이 없어도 그대로 읽힌다는 것을 판정 사건에
+    대해서만 다시 못박는다."""
+    events = _load_committed_session1_events()
+    check_events = [event for event in events if event.event_type == "check_resolved"]
+    assert len(check_events) == 38
+    assert all(event.total is None for event in check_events)
+    assert all(event.rulebook_id is None for event in check_events)
+
+
+def test_reducer_does_not_read_check_resolved_total_or_rulebook_id():
+    """판 10 `check_resolved` 사건(새 두 칸 포함)과, 새 두 칸만 빠진 같은
+    내용의 판 9 사건을 각각 접으면 `GameState.check_count`/`failure_count`/
+    `last_grade`가 동일하다 — 리듀서는 이 두 칸을 읽지 않는다는 판단을
+    「확인된 판단」으로 만든다."""
+    base_payload = {
+        "seq": 0,
+        "move": "hack_and_slash",
+        "rolls": [3, 4],
+        "modifiers": [],
+        "target": 10,
+        "grade": "miss",
+        "counts_as_failure": True,
+        "person_id": "p1",
+        "character_id": "bram",
+        "caused_by_seq": None,
+    }
+
+    state_v9 = initial_state("v9-session")
+    state_v9 = apply_event(
+        state_v9, "check_resolved", {**base_payload, "schema_version": 9}
+    )
+
+    state_v10 = initial_state("v10-session")
+    state_v10 = apply_event(
+        state_v10,
+        "check_resolved",
+        {**base_payload, "schema_version": 10, "total": 7, "rulebook_id": "dungeonworld_like"},
+    )
+
+    assert state_v9.check_count == state_v10.check_count == 1
+    assert state_v9.failure_count == state_v10.failure_count == 1
+    assert state_v9.last_grade == state_v10.last_grade == "miss"

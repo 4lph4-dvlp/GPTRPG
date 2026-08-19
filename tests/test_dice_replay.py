@@ -5,8 +5,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from gptrpg.event_log.replay_roller import ReplayExhausted, ReplayRoller, rolls_from_events
+from gptrpg.event_log.schema import CheckResolved, ModifierRecord, utc_now_iso
 from gptrpg.rules_core.resolution import Modifier, resolve_2d6
+from gptrpg.rules_core.resolution_d100 import resolve_d100
 from gptrpg.rules_core.resource_change import roll_amount
+from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
+from gptrpg.rulebooks.openquest import OPENQUEST_GRADE_BANDS, OPENQUEST_ID
 from gptrpg.session_actor.live_roller import LiveRoller
 
 
@@ -106,3 +110,80 @@ def test_replaying_same_recorded_rolls_twice_gives_same_keep_highest_result():
 
     assert first_result == second_result
     assert first_result == (6 + 4 + 2, (2, 6, 1, 4))  # 낮은 1을 뺀 높은 셋
+
+
+# ---------------------------------------------------------------------------
+# D-04 — 저장된 합계가 규칙 코어를 다시 흘려 나온 값과 어긋나지 않는다.
+#
+# 나중에 누가 계산을 고쳐도 사건에 남은 합계와 어긋나면 여기서 터진다.
+# 커밋된 판 2 픽스처는 열지 않는다 — 판 2 기록에는 대조할 합계가 없다
+# (RESEARCH Pitfall 3). `.gptrpg/events.db`도 열지 않는다 — gitignore
+# 대상이라 시험이 조용히 건너뛰어지는 함정을 `test_event_schema_migration.py`
+# 도크스트링이 이미 경고했다.
+# ---------------------------------------------------------------------------
+
+
+def test_replay_matches_stored_total_for_2d6():
+    live = LiveRoller()
+    modifiers = [Modifier(type="flat", value=2, source="stat:STR")]
+
+    outcome = resolve_2d6(live, "hack_and_slash", modifiers, target=10)
+    event = CheckResolved(
+        session_id="s1",
+        seq=0,
+        schema_version=10,
+        caused_by_seq=None,
+        recorded_at=utc_now_iso(),
+        event_type="check_resolved",
+        move=outcome.move,
+        rolls=list(outcome.rolls),
+        modifiers=[
+            ModifierRecord(type=m.type, value=m.value, source=m.source) for m in outcome.modifiers
+        ],
+        target=outcome.target,
+        grade=outcome.grade,
+        counts_as_failure=False,
+        person_id="p1",
+        character_id="bram",
+        total=outcome.total,
+        rulebook_id=DUNGEONWORLD_LIKE_ID,
+    )
+
+    replay = ReplayRoller(event.rolls)
+    replayed = resolve_2d6(replay, event.move, modifiers, target=event.target)
+
+    assert replayed.total == event.total
+
+
+def test_replay_matches_stored_total_for_d100():
+    live = LiveRoller()
+    modifiers = [Modifier(type="flat", value=5, source="stat:STR")]
+
+    outcome = resolve_d100(live, "melee", modifiers, skill=50, bands=OPENQUEST_GRADE_BANDS)
+    event = CheckResolved(
+        session_id="s1",
+        seq=0,
+        schema_version=10,
+        caused_by_seq=None,
+        recorded_at=utc_now_iso(),
+        event_type="check_resolved",
+        move=outcome.move,
+        rolls=list(outcome.rolls),
+        modifiers=[
+            ModifierRecord(type=m.type, value=m.value, source=m.source) for m in outcome.modifiers
+        ],
+        target=outcome.target,
+        grade=outcome.grade,
+        counts_as_failure=False,
+        person_id="p1",
+        character_id="bram",
+        total=outcome.total,
+        rulebook_id=OPENQUEST_ID,
+    )
+
+    replay = ReplayRoller(event.rolls)
+    replayed = resolve_d100(
+        replay, event.move, modifiers, skill=50, bands=OPENQUEST_GRADE_BANDS
+    )
+
+    assert replayed.total == event.total
