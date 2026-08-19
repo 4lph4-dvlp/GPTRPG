@@ -1,5 +1,13 @@
-"""캐릭터 만들기 네 경로 — 인원 확정 · 항목 값 확정 · 완성 · 명단 잠금
-(D-03~D-09, Phase 12.1).
+"""캐릭터 만들기 일곱 경로 — 인원 확정 · 항목 값 확정 · 완성 · 명단 잠금
+· 안내 · 지목 · 되묻기(D-03~D-09, Phase 12.1).
+
+**뒤 셋(`announce`/`nominate`/`follow-up`, 12.1-03)이 자기소개 진행 경로다.**
+값 확정(`step`/`complete`/`lock-roster`)과 달리 이 셋은 `creation_gm`
+역할을 부른다 — 하지만 「지금 몇 단계인지 · 누가 아직 안 끝났는지 · 룰북
+최소선이 채워졌는지」는 여전히 이 라우터가 `GameState`에서 직접 계산한다
+(대화의 상태 기계는 코드가 돌린다, 12.1-03-PLAN.md § 결정한 열린 지점 ①).
+AI가 하는 것은 안내 산문 · 닫힌 후보 목록에서 다음 차례 고르기 · 되물을지
+판단뿐이고, 반환값에 값을 정하는 통로가 없다(D14).
 
 이 라우터는 미리 만들어진 캐릭터 목록을 돌려주는 경로를 만들지 않는다
 (CHAR-02) — `web.characters_data`를 import하지 않는다. 정적 넷(브람·나리·
@@ -23,15 +31,33 @@
 `character_occupied`)과 쿠키로 「자동 점유가 실제로 일어났다」를 증명한다.
 """
 
+import asyncio
+import os
 import sys
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
 from gptrpg.agents.context import PARTY_MEMBER_LIMIT
+from gptrpg.agents.creation_gm import (
+    CreationGmContractViolation,
+    announce_requirements,
+    judge_hooks,
+    nominate_speaker,
+)
+from gptrpg.agents.prompt_assembly import fence_player_text
+from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, UnknownProvider
+from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import SequenceConflict
-from gptrpg.rules_core.rulebook import EntityAxisMismatch, InvalidCreationStep, InvalidResourceAxis
-from gptrpg.rulebooks import UnknownRulebook
+from gptrpg.rules_core.reducer import GameState
+from gptrpg.rules_core.rulebook import (
+    EntityAxisMismatch,
+    InvalidCreationStep,
+    InvalidResourceAxis,
+    Rulebook,
+)
+from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.session_actor.actor import (
     AlreadyOccupied,
@@ -45,6 +71,20 @@ from gptrpg.session_actor.actor import (
 )
 from gptrpg.web.cookie_auth import COOKIE_NAME, read_identity, sign_cookie
 from gptrpg.web.routes_actions import MAX_ID_LEN, MAX_RAW_TEXT_LEN
+
+_AGENT_RESOLUTION_ERRORS = (
+    ConfigNotFound,
+    InvalidAgentConfig,
+    UnknownProvider,
+    MissingApiKey,
+    ProviderNotImplemented,
+)
+"""`web/routes_actions.py`의 declare()/confirm()이 이미 쓰는 503 처리 대상과
+같은 예외 집합이다 — 운영자 설정 문제(제공자 미설정·키 없음)는 「GM 호출
+실패」(D-05/ARCH-05 폴백 대상)와 다른 층이므로 여기서 갈라 503으로 낸다.
+`CreationGmContractViolation`(AI 계약 위반)과 `call_with_one_retry`가 흡수하는
+제공자 호출 실패는 이 목록에 없다 — 그 둘은 라우트별로 폴백 값과 함께 200을
+낸다(Task 3 ⑥)."""
 
 router = APIRouter()
 
@@ -266,3 +306,222 @@ async def lock_party_roster(
     except SequenceConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return SeqResponse(seq=seq)
+
+
+# ---------------------------------------------------------------------------
+# 자기소개 진행 — 안내 · 지목 · 되묻기 (D-03/D-05/D-06, 12.1-03)
+# ---------------------------------------------------------------------------
+
+
+def _unfinished_candidates(state: GameState) -> tuple[str, ...]:
+    """진행 중인데 아직 완성되지 않은 사람의 닫힌 목록.
+
+    **대화의 상태 기계는 코드가 돌린다**(12.1-03-PLAN.md § 결정한 열린
+    지점 ①) — 에이전트에게 묻지 않는다. `state.creation_step_values`의
+    키에서 `character_id`를 뽑고 `state.created_characters`에 아직 없는
+    사람만 남긴다. 순서는 그 사람이 만들기 항목을 처음 제출한 순서를
+    보존한다(딕셔너리 삽입 순서 = 사건 순번 오름차순).
+
+    아직 항목을 하나도 제출하지 않은 사람은 이 목록에 못 들어간다 —
+    플랫폼이 아는 유일한 참가자 식별 통로가 `CompleteCreationStep`의
+    `character_id`이기 때문이다(방을 여는 사람이 정한 인원수와 실제
+    참가자 식별자는 다른 정보다).
+    """
+    seen: list[str] = []
+    for character_id, _step_id in state.creation_step_values:
+        if character_id not in state.created_characters and character_id not in seen:
+            seen.append(character_id)
+    return tuple(seen)
+
+
+def _transcript_for(state: GameState, character_ids: tuple[str, ...]) -> tuple[str, ...]:
+    """참가자들이 지금까지 낸 자유 서술 값을 대화록 모양으로 편다.
+
+    `creation_step_values`에서 `text_value`가 있는 항목만 뽑는다 — 숫자
+    배치·주사위 굴림 결과는 서사가 아니므로 대화록에 안 싣는다. 플레이어가
+    쓴 원문이므로 `fence_player_text()`를 지난다(SAFE-03) — 새 방어 로직을
+    발명하지 않는다.
+    """
+    lines: list[str] = []
+    for (character_id, _step_id), fold in state.creation_step_values.items():
+        if character_id not in character_ids:
+            continue
+        if fold.text_value:
+            lines.append(f"{character_id}: {fence_player_text(fold.text_value)}")
+    return tuple(lines)
+
+
+def _required_steps_filled(state: GameState, rulebook: Rulebook, character_id: str) -> bool:
+    """룰북 최소선(`required=True`)이 채워졌는지 코드가 직접 본다(D-05
+    아래층) — GM 재량(위층, `judge_hooks`)과는 다른 층의 판단이다."""
+    for step in rulebook.creation_steps:
+        if step.required and (character_id, step.step_id) not in state.creation_step_values:
+            return False
+    return True
+
+
+def _resolve_creation_gm_provider(request: Request) -> tuple[Provider, str]:
+    """`creation_gm` 역할의 제공자·모델을 고른다 — 기존 호출부(`declare()`
+    등)와 같은 방식이다. 설정에 없으면 `ROLE_FALLBACKS`가 `master_gm`을
+    물려준다. 새 선택 경로를 만들지 않는다."""
+    choices = load_config(request.app.state.agent_config_path)
+    provider: Provider = request.app.state.provider_resolver("creation_gm", choices, os.environ)
+    return provider, choices["creation_gm"].model
+
+
+class AnnounceCreationRequest(BaseModel):
+    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
+
+
+class AnnounceCreationResponse(BaseModel):
+    message: str
+
+
+@router.post("/sessions/{session_id}/creation/announce", response_model=AnnounceCreationResponse)
+async def announce_creation(
+    session_id: str, body: AnnounceCreationRequest, request: Request
+) -> AnnounceCreationResponse:
+    """GM이 룰북이 선언한 필수 항목을 자연스러운 문장으로 안내한다(D-03).
+
+    특정 룰북의 항목 이름은 이 경로 어디에도 하드코딩되어 있지 않다 —
+    `rulebook.creation_steps` 선언에서 그대로 나온다(CHAR-01). GM 호출이
+    실패해도 `announce_requirements`가 내부에서 폴백 문구로 떨어지므로
+    이 경로는 500을 내지 않는다(ARCH-05).
+    """
+    actor = request.app.state.registry.get_or_create(session_id)
+    if actor.state.party_roster is not None:
+        raise HTTPException(status_code=409, detail="파티 명단이 이미 잠겼다")
+
+    try:
+        rulebook = get_rulebook(body.rulebook_id)
+    except UnknownRulebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        provider, model = _resolve_creation_gm_provider(request)
+    except _AGENT_RESOLUTION_ERRORS as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    message = await asyncio.to_thread(announce_requirements, rulebook, provider, model)
+    return AnnounceCreationResponse(message=message)
+
+
+class NominateSpeakerRequest(BaseModel):
+    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
+
+
+class NominateSpeakerResponse(BaseModel):
+    character_id: str
+    say: str
+
+
+@router.post("/sessions/{session_id}/creation/nominate", response_model=NominateSpeakerResponse)
+async def nominate_creation_speaker(
+    session_id: str, body: NominateSpeakerRequest, request: Request
+) -> NominateSpeakerResponse:
+    """GM이 아직 자기소개를 안 끝낸 사람 중에서 다음 차례를 지목한다(D-06).
+
+    아직 안 끝난 사람의 닫힌 목록은 `GameState`에서 이 경로가 직접
+    계산한다 — 에이전트에게 묻지 않는다. 목록이 비면 409(D-06 empty),
+    인원이 아직 확정되지 않았으면 409(차례라는 개념 자체가 인원 확정
+    이후에만 성립한다). AI가 후보 목록 밖을 지목하면
+    `CreationGmContractViolation`이 나고, 이 경로는 그것을 흡수해 후보
+    첫 번째로 폴백하며 500을 내지 않는다(ARCH-05).
+    """
+    actor = request.app.state.registry.get_or_create(session_id)
+    state = actor.state
+    if state.party_roster is not None:
+        raise HTTPException(status_code=409, detail="파티 명단이 이미 잠겼다")
+    if state.party_size_fixed is None:
+        raise HTTPException(status_code=409, detail="인원이 아직 확정되지 않아 차례가 없다")
+
+    candidates = _unfinished_candidates(state)
+    if not candidates:
+        raise HTTPException(status_code=409, detail="아직 자기소개를 안 끝낸 사람이 없다")
+
+    transcript = _transcript_for(state, candidates)
+
+    try:
+        provider, model = _resolve_creation_gm_provider(request)
+    except _AGENT_RESOLUTION_ERRORS as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        nomination = await asyncio.to_thread(
+            nominate_speaker, candidates, transcript, provider, model
+        )
+    except CreationGmContractViolation as exc:
+        print(f"경고: creation_gm 지목이 계약을 어겼다 — {exc}", file=sys.stderr)
+        first = candidates[0]
+        return NominateSpeakerResponse(
+            character_id=first, say=f"{first} 님, 이야기를 들려주시겠어요?"
+        )
+
+    return NominateSpeakerResponse(character_id=nomination.character_id, say=nomination.say)
+
+
+class CreationFollowUpRequest(BaseModel):
+    character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
+
+
+class CreationFollowUpResponse(BaseModel):
+    needs_more: bool
+    question: str | None
+    required_steps_filled: bool
+
+
+@router.post("/sessions/{session_id}/creation/follow-up", response_model=CreationFollowUpResponse)
+async def creation_follow_up(
+    session_id: str, body: CreationFollowUpRequest, request: Request
+) -> CreationFollowUpResponse:
+    """GM이 방금 나온 이야기에 더 물을 것이 있는지 판단한다(D-05 위층).
+
+    **신원 대조가 맨 앞이다**(`confirm()`이 이미 쓰는 순서 규율,
+    TRUST-02/D-04) — 이미 쿠키를 든 브라우저가 다른 캐릭터로 되묻기를
+    제출하려 하면 403(T-12.1-19). 아직 쿠키가 없는 참가자(완성 전)는 이
+    검사를 그대로 통과한다 — `/creation/step`이 이미 쓰는 것과 같은 신원
+    대조 범위다.
+
+    `required_steps_filled`는 GM 재량(위층)과 별개로 코드가 `GameState`
+    에서 직접 계산한 룰북 최소선 충족 여부다(D-05 아래층). GM 호출이
+    계약을 어기면(`CreationGmContractViolation`) 되묻지 않는 것으로
+    폴백하고 500을 내지 않는다(ARCH-05).
+    """
+    identity = read_identity(request, session_id)
+    if identity is not None and identity.character_id != body.character_id:
+        print("경고: 신원 검증 실패 — creation/follow-up 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+
+    actor = request.app.state.registry.get_or_create(session_id)
+    state = actor.state
+    if state.party_roster is not None:
+        raise HTTPException(status_code=409, detail="파티 명단이 이미 잠겼다")
+
+    try:
+        rulebook = get_rulebook(body.rulebook_id)
+    except UnknownRulebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    required_steps_filled = _required_steps_filled(state, rulebook, body.character_id)
+    step_labels = tuple(step.label for step in rulebook.creation_steps)
+    transcript = _transcript_for(state, (body.character_id,))
+
+    try:
+        provider, model = _resolve_creation_gm_provider(request)
+    except _AGENT_RESOLUTION_ERRORS as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    try:
+        follow_up = await asyncio.to_thread(judge_hooks, step_labels, transcript, provider, model)
+    except CreationGmContractViolation as exc:
+        print(f"경고: creation_gm 되묻기가 계약을 어겼다 — {exc}", file=sys.stderr)
+        return CreationFollowUpResponse(
+            needs_more=False, question=None, required_steps_filled=required_steps_filled
+        )
+
+    return CreationFollowUpResponse(
+        needs_more=follow_up.needs_more,
+        question=follow_up.question,
+        required_steps_filled=required_steps_filled,
+    )

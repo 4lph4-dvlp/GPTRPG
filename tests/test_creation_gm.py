@@ -238,3 +238,240 @@ def test_creation_follow_up_prompt_does_not_use_the_wrong_purpose_phrase_as_the_
     permanent_text = system[0]["text"]
     assert "갈고리" in permanent_text
     assert "주사위를 굴려서" not in permanent_text
+
+
+# ---------------------------------------------------------------------------
+# HTTP — announce/nominate/follow-up (Task 3, D-03/D-05/D-06)
+# ---------------------------------------------------------------------------
+
+SESSION_ID = "creation-gm-http-s1"
+CHARACTER_ID = "hero-1"
+BROWSER_ID = "b-hero-1"
+
+
+def _fix_party_size(client, *, count: int = 3, session_id: str = SESSION_ID):
+    return client.post(
+        f"/api/sessions/{session_id}/creation/party-size",
+        json={"player_character_count": count, "rulebook_id": "dungeonworld_like"},
+    )
+
+
+def _submit_name_step(
+    client, *, character_id: str = CHARACTER_ID, browser_id: str = BROWSER_ID,
+    text_value: str = "브람", session_id: str = SESSION_ID,
+):
+    return client.post(
+        f"/api/sessions/{session_id}/creation/step",
+        json={
+            "character_id": character_id,
+            "browser_id": browser_id,
+            "step_id": "name",
+            "rulebook_id": "dungeonworld_like",
+            "text_value": text_value,
+        },
+    )
+
+
+def _announce(client, *, session_id: str = SESSION_ID):
+    return client.post(
+        f"/api/sessions/{session_id}/creation/announce",
+        json={"rulebook_id": "dungeonworld_like"},
+    )
+
+
+def _nominate(client, *, session_id: str = SESSION_ID):
+    return client.post(
+        f"/api/sessions/{session_id}/creation/nominate",
+        json={"rulebook_id": "dungeonworld_like"},
+    )
+
+
+def _follow_up(client, *, character_id: str = CHARACTER_ID, session_id: str = SESSION_ID):
+    return client.post(
+        f"/api/sessions/{session_id}/creation/follow-up",
+        json={"character_id": character_id, "rulebook_id": "dungeonworld_like"},
+    )
+
+
+def _complete_all_required_steps(
+    client, *, character_id: str = CHARACTER_ID, browser_id: str = BROWSER_ID,
+    session_id: str = SESSION_ID,
+):
+    """던전월드류 대본 1~5단계(archetype/backstory/ability_array/hp/name)를
+    전부 채운다 — `/creation/complete`가 요구하는 필수 항목 최소선이다
+    (`tests/test_creation_tracer.py`와 같은 흐름)."""
+    for step_id, payload in (
+        ("archetype", {"picked": ["몸으로 먼저 막아선다"]}),
+        ("backstory", {"text_value": "우물 마을 순찰대에 뒤늦게 합류한 떠돌이 검객"}),
+        (
+            "ability_array",
+            {
+                "axis_values": [
+                    {"axis_name": "STR", "value": 2},
+                    {"axis_name": "DEX", "value": 1},
+                    {"axis_name": "CON", "value": 1},
+                    {"axis_name": "INT", "value": 0},
+                    {"axis_name": "WIS", "value": 0},
+                    {"axis_name": "CHA", "value": -1},
+                ]
+            },
+        ),
+        ("hp", {}),
+    ):
+        response = client.post(
+            f"/api/sessions/{session_id}/creation/step",
+            json={
+                "character_id": character_id,
+                "browser_id": browser_id,
+                "step_id": step_id,
+                "rulebook_id": "dungeonworld_like",
+                **payload,
+            },
+        )
+        assert response.status_code == 200, response.text
+    assert _submit_name_step(
+        client, character_id=character_id, browser_id=browser_id, session_id=session_id
+    ).status_code == 200
+
+
+def test_announce_creation_returns_rulebook_step_labels(web_client_with_fake_provider):
+    from conftest import FakeProvider
+
+    provider = FakeProvider(complete_value="캐릭터 이름과 지난 이야기, 능력치가 필요합니다.")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-announce"
+        response = _announce(client, session_id=session_id)
+        assert response.status_code == 200
+        assert response.json()["message"]
+
+
+def test_nominate_returns_409_when_nobody_has_started_creation(web_client_with_fake_provider):
+    from conftest import FakeProvider
+
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-nominate-empty"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        response = _nominate(client, session_id=session_id)
+        assert response.status_code == 409
+
+
+def test_nominate_returns_409_when_party_size_not_fixed_yet(web_client_with_fake_provider):
+    from conftest import FakeProvider
+
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-nominate-no-size"
+        response = _nominate(client, session_id=session_id)
+        assert response.status_code == 409
+
+
+def test_nominate_picks_a_participant_who_has_started_but_not_finished(web_client_with_fake_provider):
+    provider = _CreationGmStub(
+        complete_value=json.dumps(
+            [{"character_id": CHARACTER_ID, "say": "브람 님, 이야기를 들려주시겠어요?"}]
+        )
+    )
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-nominate-pick"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+
+        response = _nominate(client, session_id=session_id)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["character_id"] == CHARACTER_ID
+        assert body["say"]
+
+
+def test_follow_up_reports_required_steps_filled_from_code_not_from_the_model(
+    web_client_with_fake_provider,
+):
+    """룰북 `required=True` 항목 충족 여부는 GM 재량과 별개로 코드가
+    계산한다(D-05 아래층) — GM이 `needs_more=False`를 내도 이 값은 그와
+    무관하게 미충족이면 `False`다."""
+    provider = _CreationGmStub(
+        complete_value=json.dumps([{"needs_more": False, "question": None}])
+    )
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-followup-partial"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+
+        response = _follow_up(client, session_id=session_id)
+        assert response.status_code == 200
+        body = response.json()
+        # 던전월드류는 name 말고도 archetype/backstory/ability_array/hp가
+        # required=True다 — name 하나만 채운 상태이므로 아직 미충족이다.
+        assert body["required_steps_filled"] is False
+
+
+def test_follow_up_rejects_mismatched_character_id_with_403(web_client_with_fake_provider):
+    """다른 사람의 차례에 남의 character_id로 되묻기를 제출할 수 없다
+    (T-12.1-19, `confirm()`이 이미 쓰는 신원 대조 순서)."""
+    provider = _CreationGmStub(complete_value=json.dumps([{"needs_more": False, "question": None}]))
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-followup-403"
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+        _complete_all_required_steps(
+            client, character_id="hero-1", browser_id=BROWSER_ID, session_id=session_id
+        )
+
+        # hero-1을 완성해 쿠키를 굽는다(자동 점유가 아직 잠금 전에도 쿠키를 굽는다).
+        complete_response = client.post(
+            f"/api/sessions/{session_id}/creation/complete",
+            json={
+                "character_id": "hero-1",
+                "browser_id": BROWSER_ID,
+                "rulebook_id": "dungeonworld_like",
+                "one_line_intro": "브람은 조용한 마을을 떠나온 모험가다.",
+            },
+        )
+        assert complete_response.status_code == 200
+        assert client.cookies.get("gptrpg_character") is not None
+
+        # 이제 hero-1 쿠키를 든 채로 hero-2의 되묻기를 제출한다 — 403이어야 한다.
+        response = _follow_up(client, character_id="hero-2", session_id=session_id)
+        assert response.status_code == 403
+
+
+def test_all_three_routes_return_200_when_the_provider_fails_twice(web_client_with_fake_provider):
+    """제공자가 실패해도 세 경로 전부 500이 아니라 폴백 값으로 200을
+    돌려준다(ARCH-05) — `announce_requirements`/`nominate_speaker`/
+    `judge_hooks`가 내부에서 이미 흡수한 실패다."""
+    provider = _CreationGmStub(fail_times=99)
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-provider-fails"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+
+        assert _announce(client, session_id=session_id).status_code == 200
+        assert _nominate(client, session_id=session_id).status_code == 200
+        assert _follow_up(client, session_id=session_id).status_code == 200
+
+
+def test_all_three_routes_return_409_after_roster_is_locked(web_client_with_fake_provider):
+    provider = _CreationGmStub(complete_value=json.dumps([{"needs_more": False, "question": None}]))
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-locked"
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+        _complete_all_required_steps(client, session_id=session_id)
+        complete_response = client.post(
+            f"/api/sessions/{session_id}/creation/complete",
+            json={
+                "character_id": CHARACTER_ID,
+                "browser_id": BROWSER_ID,
+                "rulebook_id": "dungeonworld_like",
+                "one_line_intro": "브람은 조용한 마을을 떠나온 모험가다.",
+            },
+        )
+        assert complete_response.status_code == 200
+        lock_response = client.post(
+            f"/api/sessions/{session_id}/creation/lock-roster",
+            json={"character_ids": [CHARACTER_ID]},
+        )
+        assert lock_response.status_code == 200
+
+        assert _announce(client, session_id=session_id).status_code == 409
+        assert _nominate(client, session_id=session_id).status_code == 409
+        assert _follow_up(client, session_id=session_id).status_code == 409
