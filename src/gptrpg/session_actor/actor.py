@@ -688,9 +688,42 @@ class SessionActor:
             )
         )
 
+    def _unfinished_creation_candidates(self) -> tuple[str, ...]:
+        """항목을 하나라도 냈지만 아직 완성되지 않은 사람의 닫힌 목록
+        (CR-02, 12.1-REVIEW.md).
+
+        `web/routes_creation.py`의 `_unfinished_candidates`와 정확히 같은
+        계산이다 — 그 도우미를 여기서 import할 수 없으므로(`.importlinter`
+        contract:2, `gptrpg.web`은 `gptrpg.session_actor`보다 위층이다)
+        액터가 이미 갖고 있는 같은 두 값(`state.creation_step_values`의
+        키·`state.created_characters`)으로 같은 계산을 이 층에서도 한다.
+        「동의 집계」와 「명단 잠금」 둘 다 이 값이 비어 있어야만 진행할 수
+        있다(아래 `_all_created_characters_consented`/`_prepare_lock_roster`
+        참조) — 라우터만 이 검사를 하면 `LockPartyRoster`를 직접 부르는
+        경로(라우터 우회 포함)가 막히지 않는다.
+        """
+        seen: list[str] = []
+        for character_id, _step_id in self.state.creation_step_values:
+            if character_id not in self.state.created_characters and character_id not in seen:
+                seen.append(character_id)
+        return tuple(seen)
+
     def _all_created_characters_consented(self) -> bool:
         """완성된 캐릭터 전원이 동의했는가(D-10) — 빈 세션(아직 아무도
-        안 만들었다)은 「전원 동의」로 세지 않는다."""
+        안 만들었다)은 「전원 동의」로 세지 않는다.
+
+        **CR-02 (12.1-REVIEW.md):** 아직 한창 만드는 중인 사람이 있으면
+        (`_unfinished_creation_candidates()`가 비어 있지 않으면) 완성된
+        전원이 동의했더라도 「전원 동의」로 세지 않는다 — 안 그러면 그
+        사람이 끝나기도 전에 명단이 잠기고, D-08은 잠금을 되돌리는 사건을
+        두지 않으므로 영구히 배제된다. 이 사람의 동의 자체는 그대로
+        기록되어 남는다(`_process_consent`가 이 함수 호출 전에 이미
+        `self._creation_consents`에 담는다) — 나중에 한창 만들던 사람이
+        완성하고 동의하면 그 시점에 다시 이 함수가 불리며(그 사람도
+        `RecordConsent`를 보내야 한다) 전원 동의로 자연히 넘어간다.
+        """
+        if self._unfinished_creation_candidates():
+            return False
         return bool(self.state.created_characters) and all(
             self._creation_consents.get(character_id, False)
             for character_id in self.state.created_characters
@@ -1603,6 +1636,14 @@ class SessionActor:
         호출은 정의상 전원 동의가 갓 채워진 뒤에 일어난다) — 이 명령을
         **직접** 부르는 경로(라우터 우회 포함)를 막는 것이 이 검사의
         목적이다.
+
+        **CR-02 (12.1-REVIEW.md) — 아직 한창 만드는 중인 사람이 있으면
+        잠글 수 없다.** `_process_consent`가 `_all_created_characters_consented()`를
+        거쳐 이 명령을 재귀 호출할 때는 이제 그 함수 안에서 이미
+        `_unfinished_creation_candidates()`를 확인한다(위 함수 참조) —
+        하지만 이 검사를 여기 **다시** 두는 이유는 바로 위 문단과 같다:
+        이 명령을 라우터 우회 등으로 **직접** 부르는 경로는 그 재귀 호출
+        경로를 거치지 않으므로, 이 함수 자신도 독립적으로 막아야 한다.
         """
         if self.state.party_roster is not None:
             raise RosterAlreadyLocked("파티 명단이 이미 잠겼다")
@@ -1623,6 +1664,12 @@ class SessionActor:
             raise CommandRejected(
                 "동의 표시 없이 파티 명단을 잠글 수 없다 — 완성된 전원이 동의해야"
                 " 한다(D-10)"
+            )
+        unfinished = self._unfinished_creation_candidates()
+        if unfinished:
+            raise CommandRejected(
+                "아직 한창 만드는 중인 사람이 있어 파티 명단을 잠글 수 없다"
+                f"(CR-02): {unfinished!r}"
             )
         return (
             "party_roster_locked",

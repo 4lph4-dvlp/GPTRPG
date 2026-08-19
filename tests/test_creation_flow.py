@@ -615,6 +615,74 @@ def test_consent_with_someone_elses_character_id_is_rejected(web_client_with_fak
         assert response.status_code == 403
 
 
+def test_consent_does_not_lock_the_roster_while_another_participant_is_still_mid_creation(
+    web_client_with_fake_provider,
+):
+    """CR-02 (12.1-REVIEW.md) 재현 — 완성된 사람 전원이 동의해도, 아직
+    만드는 중인 사람이 있으면 명단이 잠기면 안 된다.
+
+    `_all_created_characters_consented()`는 고쳐지기 전에는
+    `state.created_characters`만 봤다 — `state.creation_step_values`에는
+    있지만(항목을 하나라도 냈지만) `created_characters`에는 아직 없는
+    사람(한창 만드는 중)을 전혀 고려하지 않았다. 그 결과 인원을 3명으로
+    확정한 세션에서 1번이 먼저 완성해 동의하면, 2번이 항목을 이미 몇 개
+    내놓은 채 한창 만드는 중이어도 명단이 1인으로 잠겨 2번이 영구히
+    배제됐다(D-08 "놓는 사건이 없다"의 반대 방향 피해 — 아직 들어오지도
+    못한 사람이 잠긴다).
+
+    1번의 동의는 (CR-01과 무관하게) 진짜 서명 쿠키로 보낸다 — 이 시험이
+    잡으려는 것은 CR-02(동의 집계 논리)이지 CR-01(신원 검사)이 아니다.
+    """
+    provider = _WrapUpStub(fail_times=99)
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-consent-waits-for-mid-creation"
+        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+
+        # 1번(hero-1)이 먼저 완성한다.
+        _complete_all_required_steps(
+            client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
+        )
+        assert (
+            _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
+            == 200
+        )
+        hero1_cookie = client.cookies.get("gptrpg_character")
+
+        # 2번(hero-2)은 항목을 하나만 내고 아직 한창 만드는 중이다 —
+        # 완성 전이라 쿠키가 없다(정당한 상태, `/creation/step` 문서
+        # 참조 — 이 시험은 그 경로를 바꾸지 않는다).
+        client.cookies.clear()
+        assert (
+            _complete_step(
+                client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
+                browser_id=SECOND_BROWSER_ID, step_id="archetype", text_value=None,
+                picked=["몸으로 먼저 막아선다"],
+            ).status_code
+            == 200
+        )
+
+        # 1번이 자기 신원으로(진짜 쿠키를 다시 붙여) 동의한다 — 이 시점에
+        # 명단이 잠기면 안 된다. 2번이 아직 한창 만드는 중이기 때문이다.
+        client.cookies.set("gptrpg_character", hero1_cookie)
+        consent_response = _consent(
+            client, session_id=session_id, character_id=CHARACTER_ID,
+            browser_id=BROWSER_ID, agree=True,
+        )
+        assert consent_response.status_code == 200
+        assert consent_response.json()["locked"] is False
+        assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
+        # 2번이 여전히 나머지 항목을 채울 수 있어야 한다 — 명단이
+        # 잠겼다면 이 호출이 RosterAlreadyLocked(409)로 막혔을 것이다.
+        client.cookies.clear()
+        continue_response = _complete_step(
+            client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID, step_id="backstory",
+            text_value="사실 밤그림자를 쫓는 추적자였다",
+        )
+        assert continue_response.status_code == 200
+
+
 def test_disagreeing_reopens_only_that_step_and_invalidates_prior_consent(
     web_client_with_fake_provider,
 ):
