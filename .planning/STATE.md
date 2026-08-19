@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 12.2
-current_phase_name: check-total
-status: verifying
+current_phase: 12.3
+current_phase_name: 캐릭터 만들기 화면
+status: planning
 stopped_at: Completed 12.2-03-PLAN.md (D-15 human-verify gate approved)
-last_updated: "2026-08-19T19:11:17.128Z"
-last_activity: 2026-08-19
-last_activity_desc: Phase 12.1 execution started
+last_updated: "2026-08-19T19:28:29.342Z"
+last_activity: 2026-08-20
+last_activity_desc: Phase 12.2 complete, transitioned to Phase 12.3
 progress:
   total_phases: 14
   completed_phases: 7
@@ -30,11 +30,11 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 12.2 (check-total) — EXECUTING
-Plan: 3 of 3
-Status: Phase complete — ready for verification
+Phase: 12.3 — 캐릭터 만들기 화면
+Plan: Not started
+Status: Ready to plan
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-19 — Phase 12.2 execution started
+Last activity: 2026-08-20 — Phase 12.2 complete, transitioned to Phase 12.3
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -48,7 +48,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 53 (M0 누적)
+- Total plans completed: 56 (M0 누적)
 - Average duration: -
 - Total execution time: 0.0 hours (v1.1 기준 — 아직 실행 없음)
 
@@ -66,6 +66,7 @@ Progress: [██████████] 100%
 | 11 | 7 | - | - |
 | 12 | 7 | - | - |
 | 12.1 | 6 | - | - |
+| 12.2 | 3 | - | - |
 
 **Recent Trend:**
 
