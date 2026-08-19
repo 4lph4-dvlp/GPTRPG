@@ -5,15 +5,15 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.2
 current_phase_name: check-total
 status: executing
-stopped_at: Completed 12.2-01-PLAN.md
-last_updated: "2026-08-19T14:40:17.995Z"
+stopped_at: Completed 12.2-02-PLAN.md
+last_updated: "2026-08-19T14:57:37.708Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 12.1 execution started
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 38
-  completed_plans: 36
+  completed_plans: 37
   percent: 43
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.2 (check-total) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-19 — Phase 12.2 execution started
@@ -42,7 +42,7 @@ Last activity: 2026-08-19 — Phase 12.2 execution started
 > `12-` 디렉터리가 없고 `12.1-character-creation`만 있어서다(문자열 정렬 문제). 로드맵 순서대로
 > **Phase 12**를 다음으로 되돌렸다 — 12를 건너뛰고 12.1을 하면 의존성이 깨진다.
 
-Progress: [██████████] 95%
+Progress: [██████████] 97%
 
 ## Performance Metrics
 
@@ -128,6 +128,7 @@ Progress: [██████████] 95%
 | Phase 12.1 P05 | 약 2시간 | 3 tasks | 22 files |
 | Phase 12.1 P06 | ~5h (사람 확인 대기 포함) | 2 tasks | 5 files |
 | Phase 12.2 P01 | not tracked (checkpoint-resumed) | 3 tasks | 24 files |
+| Phase 12.2 P02 | not tracked precisely | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -296,6 +297,8 @@ Progress: [██████████] 95%
 - [Phase ?]: 12.2-01: 계산 줄은 PollResponse의 병렬 목록(check_calculations)으로 싣는다 — groupTurns.ts는 안 고친다
 - [Phase ?]: 12.2-01: 계산 조각의 역할 이름은 자유 문자열(promote, Grade = str 전례) — 닫힌 목록을 만들지 않는다(D-10)
 - [Phase ?]: 12.2-01 [deviation, Rule 3]: 판 올리기로 깨진 기존 CheckResolved() 생성부 6개 파일(conftest.py 등)에 total/rulebook_id 추가
+- [Phase ?]: 12.2-02: buildCheckSummary 매개변수를 CheckFacts(Pick<rolls|modifiers|target|grade>)로 좁혀 ConfirmResponse·CheckResolvedEvent 양쪽이 새 타입 변환 없이 같은 함수를 공유하게 함
+- [Phase ?]: 12.2-02: DiceModal 괄호 표시를 summary.rows flatMap으로 교체 — 다시 굴림(D-12) 줄 나눔이 실제로 연결되면 이 자리를 재검토(알려진 한계)
 
 ### Pending Todos
 
@@ -353,8 +356,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-19T14:40:17.949Z
-Stopped at: Completed 12.2-01-PLAN.md
+Last session: 2026-08-19T14:57:37.665Z
+Stopped at: Completed 12.2-02-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
