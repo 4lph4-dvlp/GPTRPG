@@ -506,6 +506,89 @@ export interface AnnounceCreationResponse {
   seq: number;
 }
 
+/** 만들기 항목 하나가 값을 채우는 방식(D-01, D-03/D-04) —
+ * `rules_core/rulebook.py::CreationStepKind`와 같은 일곱 값. `kind`로
+ * 분기할 때 tsc가 빠진 갈래를 잡도록 유니온 리터럴로 적는다. */
+export type CreationStepKind =
+  | "pick_one"
+  | "pick_many"
+  | "allocate_points"
+  | "place_fixed_values"
+  | "roll_to_fill"
+  | "free_text"
+  | "derive";
+
+/** `GET .../creation/steps`가 내려주는 항목 선언 하나(D-05) —
+ * `routes_creation.py::CreationStepView`. 룰북 **선언**만 담는다 — 진행
+ * 상태(누가 무엇을 채웠는지)는 이 타입에 없다(그 값은 `GameStateView.
+ * creation_step_values`, D-04). */
+export interface CreationStepView {
+  step_id: string;
+  kind: CreationStepKind;
+  label: string;
+  required: boolean;
+  provides_display_name: boolean;
+  axis_names: string[];
+  options: string[] | null;
+  pick_count: number | null;
+  fixed_values: number[] | null;
+  point_budget: number | null;
+  per_target_max: number | null;
+  dice_expr: string | null;
+  derive_base_axis: string | null;
+  derive_multiplier: number | null;
+  derive_offset: number | null;
+  depends_on: string[];
+  default_from: string | null;
+}
+
+/** `routes_creation.py::SeqResponse` — 사건 하나를 기록한 만들기 경로가
+ * 공통으로 돌려주는 순번 하나. */
+export interface SeqResponse {
+  seq: number;
+}
+
+/** `POST .../creation/complete`의 응답 — `routes_creation.py::CreationCompleteResponse`. */
+export interface CreationCompleteResponse {
+  character_id: string;
+  character_seq: number;
+  occupy_seq: number;
+}
+
+/** `POST .../creation/nominate`의 응답(D-02/D-12) —
+ * `routes_creation.py::NominateSpeakerResponse`. */
+export interface NominateSpeakerResponse {
+  character_id: string;
+  say: string;
+  seq: number;
+}
+
+/** `POST .../creation/follow-up`의 응답(D-02 ④) —
+ * `routes_creation.py::CreationFollowUpResponse`. `seq`는 되물을 것이
+ * 있을 때만(`needs_more === true`) 채워진다 — GM이 아무 말도 안 했으면
+ * 사건이 없으므로 짝지어질 순번도 없다. */
+export interface CreationFollowUpResponse {
+  needs_more: boolean;
+  question: string | null;
+  required_steps_filled: boolean;
+  seq: number | null;
+}
+
+/** 캐릭터 하나에 대한 GM의 한 줄 소개(CHAR-03/D-10) —
+ * `routes_creation.py::CharacterIntroBody`. */
+export interface CharacterIntroBody {
+  character_id: string;
+  intro: string;
+}
+
+/** `POST .../creation/wrap-up`의 응답(D-02/D-12) —
+ * `routes_creation.py::WrapUpCreationResponse`. */
+export interface WrapUpCreationResponse {
+  say: string;
+  intros: CharacterIntroBody[];
+  seq: number;
+}
+
 export interface ProceedResponse {
   proceeded: boolean;
   narration_chunk_count: number;

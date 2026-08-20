@@ -36,7 +36,7 @@ import asyncio
 import os
 import sys
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
@@ -56,6 +56,8 @@ from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import SequenceConflict
 from gptrpg.rules_core.reducer import GameState
 from gptrpg.rules_core.rulebook import (
+    CreationStepDecl,
+    CreationStepKind,
     EntityAxisMismatch,
     InvalidCreationStep,
     InvalidResourceAxis,
@@ -100,6 +102,88 @@ router = APIRouter()
 COOKIE_MAX_AGE_S = 60 * 60 * 24 * 14
 """`routes_characters.COOKIE_MAX_AGE_S`와 같은 값 — 이 경로도 같은 쿠키를
 굽는다(같은 만료 규약을 두 곳에 따로 정하지 않는다)."""
+
+
+# ---------------------------------------------------------------------------
+# 룰북 만들기 항목 선언 조회 (D-05) — 진행 상태를 섞지 않는 순수 GET
+# ---------------------------------------------------------------------------
+
+
+class CreationStepView(BaseModel):
+    """`CreationStepDecl`을 얇게 감싼 응답 모델 — 선언의 모든 칸을 그대로
+    옮긴다(D-05). 칸을 골라 내리지 않는다 — 화면이 어떤 `kind`의 입력칸을
+    그리려면 그 `kind`가 쓰는 칸이 전부 필요하다."""
+
+    step_id: str
+    kind: CreationStepKind
+    label: str
+    required: bool
+    provides_display_name: bool
+    axis_names: tuple[str, ...]
+    options: tuple[str, ...] | None
+    pick_count: int | None
+    fixed_values: tuple[int, ...] | None
+    point_budget: int | None
+    per_target_max: int | None
+    dice_expr: str | None
+    derive_base_axis: str | None
+    derive_multiplier: int | None
+    derive_offset: int | None
+    depends_on: tuple[str, ...]
+    default_from: str | None
+
+
+def _creation_step_view(decl: CreationStepDecl) -> CreationStepView:
+    return CreationStepView(
+        step_id=decl.step_id,
+        kind=decl.kind,
+        label=decl.label,
+        required=decl.required,
+        provides_display_name=decl.provides_display_name,
+        axis_names=decl.axis_names,
+        options=decl.options,
+        pick_count=decl.pick_count,
+        fixed_values=decl.fixed_values,
+        point_budget=decl.point_budget,
+        per_target_max=decl.per_target_max,
+        dice_expr=decl.dice_expr,
+        derive_base_axis=decl.derive_base_axis,
+        derive_multiplier=decl.derive_multiplier,
+        derive_offset=decl.derive_offset,
+        depends_on=decl.depends_on,
+        default_from=decl.default_from,
+    )
+
+
+@router.get("/sessions/{session_id}/creation/steps", response_model=list[CreationStepView])
+async def get_creation_steps(
+    session_id: str,
+    rulebook_id: str = Query(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN),
+) -> list[CreationStepView]:
+    """룰북이 선언한 만들기 항목 목록을 그대로 내려준다(D-05).
+
+    **이 목록은 세션 중에 안 바뀐다** — 1.5초마다 도는 폴링(`GET /events`,
+    D-04)에 실으면 안 바뀌는 것을 네 명에게 계속 나르고, AI를 거치는 안내
+    응답(`/creation/announce`)에 실으면 AI가 안 돌 때(503) 입력칸을 그릴
+    근거조차 없어진다. 그래서 전용 GET 하나로 뗀다.
+
+    `session_id`는 이 경로가 실제로 쓰지 않는다 — 이 경로가 세션 스코프
+    라우터(`creation_router`) 아래 있어 URL 모양이 나머지 열 경로와
+    같기 때문이다. `get_rulebook`이 순수 조회이고 `GameState`를 읽지
+    않으므로 세션이 존재하든 말든 응답은 같다.
+
+    **진행 상태를 섞지 않는다(D-05 경계)** — 이 응답에는 어느 캐릭터가
+    무엇을 채웠는지가 들어가지 않는다. 그 값은 폴링(D-04, `GameStateView.
+    creation_step_values`)에 있다.
+
+    `rulebook_id` 기본값은 다른 만들기 경로와 같은 `DUNGEONWORLD_LIKE_ID`.
+    모르는 `rulebook_id`면 400 + 그 예외 문자열을 `detail`로.
+    """
+    try:
+        rulebook = get_rulebook(rulebook_id)
+    except UnknownRulebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [_creation_step_view(step) for step in rulebook.creation_steps]
 
 
 class FixPartySizeRequest(BaseModel):

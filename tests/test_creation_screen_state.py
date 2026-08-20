@@ -486,3 +486,77 @@ def test_wrap_up_called_twice_in_the_same_state_does_not_call_the_provider_again
         assert first.json() == second.json()
         events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
         assert len([e for e in events if e["kind"] == "wrap_up"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — 룰북 만들기 항목 선언을 내려주는 전용 경로(D-05).
+# ---------------------------------------------------------------------------
+
+
+def _fetch_creation_steps(client, *, rulebook_id: str, session_id: str = SESSION_ID):
+    return client.get(
+        f"/api/sessions/{session_id}/creation/steps",
+        params={"rulebook_id": rulebook_id},
+    )
+
+
+def test_creation_steps_for_dungeonworld_matches_declaration_order(web_client):
+    from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_CREATION_STEPS
+
+    response = _fetch_creation_steps(web_client, rulebook_id="dungeonworld_like")
+    assert response.status_code == 200
+    step_ids = [step["step_id"] for step in response.json()]
+    assert step_ids == [decl.step_id for decl in DUNGEONWORLD_CREATION_STEPS]
+
+
+def test_creation_steps_for_cairn_carries_dice_expr(web_client):
+    response = _fetch_creation_steps(web_client, rulebook_id="cairn")
+    assert response.status_code == 200
+    steps_by_id = {step["step_id"]: step for step in response.json()}
+    assert steps_by_id["abilities"]["dice_expr"] == "3d6"
+    assert steps_by_id["hit_protection"]["dice_expr"] == "1d6"
+
+
+def test_creation_steps_for_openquest_carries_point_budget(web_client):
+    response = _fetch_creation_steps(web_client, rulebook_id="openquest")
+    assert response.status_code == 200
+    steps_by_id = {step["step_id"]: step for step in response.json()}
+    resistances = steps_by_id["skills_resistances"]
+    assert resistances["point_budget"] == 50
+    assert resistances["per_target_max"] == 30
+
+
+def test_creation_steps_with_unknown_rulebook_returns_400_with_detail(web_client):
+    response = _fetch_creation_steps(web_client, rulebook_id="does-not-exist")
+    assert response.status_code == 400
+    assert response.json()["detail"]
+
+
+def test_creation_steps_response_never_carries_per_character_progress(web_client):
+    """D-05 경계 — 이 응답 어디에도 캐릭터별 진행 값(`creation_step_values`
+    유래 값)이 없다. 응답은 목록(선언)이지 진행 상태(딕셔너리 키가
+    character_id인 값)가 아니다."""
+    response = _fetch_creation_steps(web_client, rulebook_id="dungeonworld_like")
+    assert response.status_code == 200
+    steps = response.json()
+    assert isinstance(steps, list)
+    for step in steps:
+        assert set(step.keys()) == {
+            "step_id",
+            "kind",
+            "label",
+            "required",
+            "provides_display_name",
+            "axis_names",
+            "options",
+            "pick_count",
+            "fixed_values",
+            "point_budget",
+            "per_target_max",
+            "dice_expr",
+            "derive_base_axis",
+            "derive_multiplier",
+            "derive_offset",
+            "depends_on",
+            "default_from",
+        }
