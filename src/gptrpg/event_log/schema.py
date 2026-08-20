@@ -29,9 +29,9 @@ EVENT_SCHEMA_VERSION = 11
 않는다(D-12).
 
 `CreationConsentRecorded`(동의 여부 — `agree=True`인 동의와
-`agree=False` + 항목 다시 열기를 한 종류로 담는다, D-03). 지금 액터
-메모리에 흩어진 `_creation_consents`와 `_reopened_creation_steps` 둘
-다 이 한 사건에서 접힌다.
+`agree=False` + 항목 다시 열기를 한 종류로 담는다, D-03). 이 사건이
+생기기 전에는 액터 메모리에 흩어져 있던 동의 집계 표와 다시 열린 항목
+표 둘 다 이 한 사건에서 접힌다(12.3-03이 그 두 표를 지웠다).
 
 `CreationHostClaimed`(이 세션의 방장 — 가장 먼저 들어온 사람이거나
 앞선 방장의 승계, D-11). 지금까지 서버에 「방장」 개념 자체가 없었다.
@@ -657,10 +657,10 @@ class CreationConsentRecorded(EventEnvelope):
     """캐릭터 하나의 만들기 동의 여부(D-03, 판 11).
 
     동의(`agree=True`)와 「아니요 + 항목 다시 열기」(`agree=False`)를
-    한 종류로 담는다 — 지금 액터 메모리에 흩어져 있는
-    `_creation_consents`와 `_reopened_creation_steps` 둘 다 이 한
-    사건에서 접힌다. 하나만 사건으로 옮기면 재시작 뒤 두 값이 서로
-    어긋난다.
+    한 종류로 담는다 — 이 사건이 생기기 전에는 액터 메모리에 흩어져
+    있던 동의 집계 표와 다시 열린 항목 표 둘 다 이 한 사건에서 접힌다
+    (12.3-03이 그 두 표를 지웠다). 하나만 사건으로 옮기면 재시작 뒤 두
+    값이 서로 어긋난다.
 
     `agree=False`일 때만 `reopened_step_id`가 채워진다 — 다시 여는
     항목 하나를 가리킨다. `agree=True`이면 `None`이다.

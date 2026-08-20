@@ -197,14 +197,17 @@ class GameState:
     복원된다."""
     creation_consents: dict[str, bool] = field(default_factory=dict)
     """character_id -> 동의 여부(판 11+, Phase 12.3, D-03). `creation_consent_recorded`
-    사건에서만 채워진다. 지금 액터 메모리 `_creation_consents`가 하던
-    일을 사건에서 다시 접은 값으로 옮긴 것이라 서버 재시작에도 살아남고,
-    화면이 「누가 아직 안 눌렀는지」를 이름까지 보여줄 수 있다."""
+    사건에서만 채워진다. 이 사건이 생기기 전에는 액터 메모리의 동의
+    집계 표가 이 값을 들고 있었다(12.3-03이 그 표를 지웠다) — 사건에서
+    다시 접은 값으로 옮긴 것이라 서버 재시작에도 살아남고, 화면이 「누가
+    아직 안 눌렀는지」를 이름까지 보여줄 수 있다."""
     reopened_creation_steps: frozenset[tuple[str, str]] = field(default_factory=frozenset)
     """다시 열린 `(character_id, step_id)` 집합(판 11+, Phase 12.3,
     D-11 부분 재진행). `creation_consent_recorded` 사건이 `agree=False`로
-    올 때만 채워진다. 지금 액터 메모리 `_reopened_creation_steps`가 하던
-    일을 사건에서 다시 접은 값으로 옮긴 것이다."""
+    올 때 채워지고, 같은 키로 `creation_step_completed`가 다시 오면
+    지워진다(한 번 다시 채우면 다시 닫힌다). 이 사건이 생기기 전에는
+    액터 메모리의 다시 열린 항목 표가 이 값을 들고 있었다(12.3-03이 그
+    표를 지웠다) — 사건에서 다시 접은 값으로 옮긴 것이다."""
     creation_host_browser_id: str | None = None
     """이 세션의 방장(판 11+, Phase 12.3, D-11). `creation_host_claimed`
     사건에서만 채워진다. `None`은 「아직 아무도 방장을 안 잡았다」다."""
@@ -475,7 +478,18 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
             rolls=tuple(rolls_payload) if rolls_payload is not None else None,
             browser_id=payload["browser_id"],
         )
-        return replace(state, last_seq=seq, creation_step_values=creation_step_values)
+        # D-11 (판 11, Phase 12.3) — 이 항목이 다시 열려 있었다면 재확정으로
+        # 다시 닫는다: 한 번 다시 채우면 다시 닫힌다. 이 효과는 원래
+        # 액터가 메모리에서(discard) 했지만, 액터 메모리는 서버 재시작에
+        # 살아남지 않는다 — 접는 자리에서 하면 재시작 뒤에도 「이미 다시
+        # 채운 항목」이 다시 열린 채로 되살아나지 않는다.
+        reopened_creation_steps = state.reopened_creation_steps - {key}
+        return replace(
+            state,
+            last_seq=seq,
+            creation_step_values=creation_step_values,
+            reopened_creation_steps=reopened_creation_steps,
+        )
     if event_type == "creation_interjection":
         # 끼어든 말(판 9, D-09)은 어느 캐릭터의 구조화된 데이터도 바꾸지
         # 않는다 — `scene_illustrated`/`safety_flagged`와 같은 최소 모양
