@@ -497,3 +497,31 @@ def test_claiming_host_makes_creation_host_claimed_true_with_no_identifier(web_c
     # (사건 기록 자체(events 목록)는 신원 감사 목적으로 browser_id를 담는
     # 것이 정상이다 — 이 검사는 GameStateView 쪽만 겨눈다.)
     assert "browser-poll" not in json.dumps(state)
+
+
+def test_a_restart_of_the_liveness_table_does_not_let_a_stranger_ambush_the_host(web_client):
+    """T-12.3-13 — 재실 표는 프로세스 메모리라 서버가 재시작하면 빈다.
+    `GameState`(사건에서 다시 접은 값)의 방장은 그대로인데 재실 표만
+    비었을 때, 다른 브라우저가 곧바로 부르면 애먼 승계가 아니라
+    「지금 본 것으로만 기록」하고 넘어가야 한다."""
+    client = web_client
+    session_id = SESSION_ID + "-host-liveness-restart"
+
+    assert _claim_host(client, "browser-a", session_id=session_id).status_code == 200
+
+    # 프로세스 재시작 재현 — 재실 표만 통째로 지운다(GameState는 사건에서
+    # 다시 접히므로 방장은 그대로 "browser-a"다).
+    creation_state._browser_last_seen.pop((session_id, "browser-a"), None)
+
+    ambush = _claim_host(client, "browser-b", session_id=session_id)
+    assert ambush.status_code == 200
+    assert ambush.json()["you_are_host"] is False
+    assert ambush.json()["changed"] is False
+    assert len(_events_of_type(client, "creation_host_claimed", session_id=session_id)) == 1
+
+    # 이번 호출이 browser-a를 "지금 본 것"으로 기록했으므로, 곧바로 또
+    # 부른다고 승계되지 않는다 — HOST_IDLE_S가 다시 지나야 한다.
+    second_ambush = _claim_host(client, "browser-b", session_id=session_id)
+    assert second_ambush.status_code == 200
+    assert second_ambush.json()["you_are_host"] is False
+    assert len(_events_of_type(client, "creation_host_claimed", session_id=session_id)) == 1
