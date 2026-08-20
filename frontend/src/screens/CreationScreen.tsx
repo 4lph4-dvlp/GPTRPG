@@ -338,7 +338,13 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
 
         {error !== null ? <p className="t-label">{error}</p> : null}
 
-        {gate === "done" && !stepsLoaded ? (
+        {/* CR-02 (12.3-REVIEW.md): stepsLoaded는 GET /creation/steps 조회가
+            끝났는지일 뿐 안내 여부와 무관하다 — fetchCreationSteps는 AI를
+            안 부르는 단순 조회라 안내를 누르기도 전에 이미 끝나는 것이
+            보통이었다. 이 버튼은 "아직 안내가 없다"(gmLines가 비어 있다)
+            로만 켜진다 — stepsLoaded와 별개로, CreationPane이 이미
+            렌더되고 있어도 안내가 없으면 계속 보인다. */}
+        {gate === "done" && gmLines.length === 0 ? (
           <button type="button" disabled={pending} onClick={() => void announce()}>
             {COPY.creationAnnounce}
           </button>
