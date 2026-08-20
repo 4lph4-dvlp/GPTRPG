@@ -35,6 +35,7 @@ AI가 하는 것은 안내 산문 · 닫힌 후보 목록에서 다음 차례 �
 import asyncio
 import os
 import sys
+import time
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -67,6 +68,7 @@ from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.session_actor.actor import (
     AlreadyOccupied,
+    ClaimCreationHost,
     CommandRejected,
     CompleteCreationStep,
     CreateCharacter,
@@ -186,9 +188,92 @@ async def get_creation_steps(
     return [_creation_step_view(step) for step in rulebook.creation_steps]
 
 
+# ---------------------------------------------------------------------------
+# 방장 잡기·승계 (D-11) — 「살아 있다」를 아는 신호로 폴링을 쓸 수 없다
+# (폴링은 쿠키 없는 참가자를 식별 못 하는 GET이고 browser_id를 안 싣는다).
+# 이 경로 자체가 참가자 브라우저가 주기적으로 자기를 알리는 전용 신호다.
+# 배경에서 혼자 도는 장치는 만들지 않는다(D-12 경계) — 서버는 이 요청이
+# 올 때만 판정한다.
+# ---------------------------------------------------------------------------
+
+
+class ClaimHostRequest(BaseModel):
+    browser_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+
+
+class CreationHostResponse(BaseModel):
+    you_are_host: bool
+    host_claimed: bool
+    changed: bool
+
+
+@router.post("/sessions/{session_id}/creation/host", response_model=CreationHostResponse)
+async def claim_creation_host(
+    session_id: str, body: ClaimHostRequest, request: Request
+) -> CreationHostResponse:
+    """방장을 잡거나(이 세션에 가장 먼저 들어온 사람) 승계한다(방장이
+    조용해지면, D-11).
+
+    **이 호출 자체가 재실 신호다** — 매번 `mark_browser_seen`을 먼저
+    찍는다(순서가 중요하다: 이 요청을 보낸 브라우저 자신은 절대 유휴로
+    보이면 안 된다).
+
+    승계 판정: 지금 방장이 `body.browser_id`와 다르면, 그 방장을
+    `creation_state.browser_last_seen`으로 조회한다. **`None`이면
+    (재시작 직후) 지금 본 것으로만 기록하고 사건을 안 낸다** — 그래야
+    재시작 직후 멀쩡한 방장이 애먼 승계를 당하지 않는다(T-12.3-13).
+    `HOST_IDLE_S`를 넘겼으면 승계를 제출한다.
+
+    **경쟁에서 진 브라우저에게 오류를 보여줄 이유가 없다** — `CommandRejected`
+    /`RosterAlreadyLocked`/`SequenceConflict`를 409로 올리지 않고 삼킨 뒤
+    지금 상태로 200을 돌려준다. 응답의 `you_are_host`가 이미 그 사실을
+    말한다.
+
+    **`creation_host_browser_id` 값 자체를 응답에 싣지 않는다**(T-12.3-05)
+    — 부른 사람에게 「너인가 아닌가」만 답한다.
+    """
+    creation_state.mark_browser_seen(session_id, body.browser_id)
+    actor = request.app.state.registry.get_or_create(session_id)
+    changed = False
+
+    if actor.state.party_roster is None:
+        current = actor.state.creation_host_browser_id
+        try:
+            if current is None:
+                await actor.submit(
+                    ClaimCreationHost(browser_id=body.browser_id, previous_browser_id=None)
+                )
+                changed = True
+            elif current != body.browser_id:
+                last_seen = creation_state.browser_last_seen(session_id, current)
+                if last_seen is None:
+                    creation_state.mark_browser_seen(session_id, current)
+                elif time.monotonic() - last_seen > creation_state.HOST_IDLE_S:
+                    await actor.submit(
+                        ClaimCreationHost(
+                            browser_id=body.browser_id, previous_browser_id=current
+                        )
+                    )
+                    changed = True
+        except (CommandRejected, SequenceConflict):
+            pass
+
+    state = actor.state
+    return CreationHostResponse(
+        you_are_host=state.creation_host_browser_id == body.browser_id,
+        host_claimed=state.creation_host_browser_id is not None,
+        changed=changed,
+    )
+
+
 class FixPartySizeRequest(BaseModel):
     player_character_count: int = Field(ge=1)
     rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
+    browser_id: str = Field(default="", max_length=MAX_ID_LEN)
+    """방장 관문(T-12.3-11, D-11) 대조용 — 방장이 아직 없으면(아무도
+    `/creation/host`를 안 불렀으면) 값과 무관하게 통과한다(기본값을 빈
+    문자열로 둔 이유 — 화면이 없는 호출부(시험·스크립트)를 막지
+    않는다)."""
 
 
 class SeqResponse(BaseModel):
@@ -206,6 +291,10 @@ async def fix_party_size(
     contract:2) 이 상한 검사는 액터가 아니라 이 호출부의 몫이다. 룰북
     범위 대조(액터, `validate_party_size`)와 이 상한은 서로 다른 층에
     있는 두 관문이다 — 어떤 룰북도 이 상한을 넘을 수 없다.
+
+    **방장 관문(T-12.3-11, D-11)** — 방장이 이미 정해졌으면 그 방장만
+    인원을 정할 수 있다(403). 아직 아무도 방장을 안 잡았으면 통과시킨다
+    — 그때는 아직 아무도 특권을 갖지 않았으므로 뺏을 것도 없다.
     """
     if body.player_character_count > PARTY_MEMBER_LIMIT:
         raise HTTPException(
@@ -213,6 +302,9 @@ async def fix_party_size(
             detail=f"인원은 {PARTY_MEMBER_LIMIT}명을 넘을 수 없다(안전 상한)",
         )
     actor = request.app.state.registry.get_or_create(session_id)
+    host = actor.state.creation_host_browser_id
+    if host is not None and host != body.browser_id:
+        raise HTTPException(status_code=403, detail="방장만 인원을 정할 수 있어요")
     try:
         seq = await actor.submit(
             FixPartySize(

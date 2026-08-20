@@ -248,6 +248,26 @@ class ReopenCreationStep:
 
 
 @dataclass(frozen=True)
+class ClaimCreationHost:
+    """방장을 잡거나 승계하는 명령(D-11, 판 11, Phase 12.3).
+
+    **캐릭터 점유 판정과 다른 규칙이다** — 점유는 한 번 잡으면 놓을 수
+    없고(08 D-07) 방장은 조용해지면 넘어간다. 그래서 점유가 쓰는 검증
+    메서드를 부르지도, 흉내 낸 헬퍼를 공유하지도 않는다(D-11 명시 —
+    점유 코드를 방장에 재사용하지 않는다).
+
+    `previous_browser_id`가 `None`이면 첫 선점 시도, 있으면 승계 시도다.
+    액터는 이 값을 지금 상태의 `creation_host_browser_id`와 **비교한
+    뒤에만 교체한다**(비교 후 교체, T-12.3-03) — 브라우저는 자기
+    `browser_id` 하나만 정할 수 있고, 「누구를 이어받는지」는 호출부
+    (`routes_creation.py`)가 지금 상태에서 읽어 이 명령에 실어 보낸다.
+    브라우저가 스스로 「내가 방장이다」를 선언할 수 있는 경로가 없다."""
+
+    browser_id: str
+    previous_browser_id: str | None
+
+
+@dataclass(frozen=True)
 class ResolveCheck:
     """판정 하나를 요청하는 명령.
 
@@ -852,6 +872,8 @@ class SessionActor:
             return self._prepare_consent(command)
         if isinstance(command, ReopenCreationStep):
             return self._prepare_reopen(command)
+        if isinstance(command, ClaimCreationHost):
+            return self._prepare_claim_host(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -1840,6 +1862,47 @@ class SessionActor:
                 "say": command.say,
                 "target_character_id": command.target_character_id,
                 "dedupe_key": command.dedupe_key,
+            },
+        )
+
+    def _prepare_claim_host(self, command: ClaimCreationHost) -> tuple[str, int | None, dict]:
+        """방장을 잡거나 승계한다(D-11, 판 11).
+
+        검증 순서(`ClaimCreationHost` 도크스트링이 점유와 왜 다른지 적는다):
+
+        ① 명단이 잠긴 뒤에는 방장 개념이 쓸모없다.
+        ② `previous_browser_id is None`(첫 선점)인데 이미 방장이 있으면
+           거절 — 두 브라우저가 동시에 첫 선점을 시도해도 하나만
+           통과한다(단일 소비자 큐가 순서를 매긴다).
+        ③ `previous_browser_id`가 있는데(승계 시도) 지금 방장과 다르면
+           거절 — **비교 후 교체다.** 둘이 동시에 같은 방장의 승계를
+           시도하면(같은 `previous_browser_id`) 먼저 처리된 쪽만
+           통과하고, 나중 것은 이 시점에 이미 방장이 바뀌어 있어
+           거절된다 — 방장이 한 번에 한 번만 바뀐다.
+
+        누구를 이어받는지는 이 메서드가 스스로 정하지 않는다 — 호출부
+        (`routes_creation.py`)가 유휴 판정을 하고 `previous_browser_id`에
+        지금 방장을 실어 보낸다. 브라우저는 자기 `browser_id` 하나만
+        고를 수 있다.
+        """
+        if self.state.party_roster is not None:
+            raise RosterAlreadyLocked("파티 명단이 이미 잠겨 방장 개념이 더 이상 쓸모없다")
+        current = self.state.creation_host_browser_id
+        if command.previous_browser_id is None:
+            if current is not None:
+                raise CommandRejected("방장이 이미 있다")
+            reason = "first"
+        else:
+            if current != command.previous_browser_id:
+                raise CommandRejected("방장이 이미 바뀌었다 — 다시 시도해야 한다")
+            reason = "succession"
+        return (
+            "creation_host_claimed",
+            None,
+            {
+                "browser_id": command.browser_id,
+                "reason": reason,
+                "previous_browser_id": command.previous_browser_id,
             },
         )
 

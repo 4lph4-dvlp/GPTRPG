@@ -18,8 +18,59 @@
 폴링 화면 상태와 무관하다.
 """
 
+import time
+
 from gptrpg.rules_core.reducer import GameState
 from gptrpg.rules_core.rulebook import Rulebook
+
+HOST_IDLE_S = 30.0
+"""방장이 유휴로 판정되는 문턱(초, D-11). 화면이 15초마다 자기를 알리는
+재실 신호(`POST /creation/host`)를 보내는 것을 전제로 잡은 값이다 —
+두 배를 두는 이유는 한 번의 폴링 지연이나 네트워크 요동만으로 방장을
+잃지 않으려면 최소 두 번은 놓쳐야 하기 때문이다."""
+
+_browser_last_seen: dict[tuple[str, str], float] = {}
+"""(session_id, browser_id) -> 마지막으로 재실 신호를 받은 시각
+(`time.monotonic()` 기준, 벽시계가 아니다 — 이 저장소가 경과 시간을 잴 때
+이미 쓰는 관례, `agents/invoke.py` 등).
+
+**이 표가 사건이 아니라 프로세스 메모리인 이유:** 「누가 지금 창을 열어
+두고 있나」는 기록할 사실이 아니라 지금 이 순간의 관측값이다 — 사건으로
+남기면 15초마다 참가자 수만큼 사건이 쌓인다. 판단은 여전히 서버 한
+자리에서만 나지만(D-04와 같은 규율), 그 판단의 재료(재실 여부)까지 전부
+사건일 필요는 없다.
+
+**한계 — 단일 프로세스 전제다.** 서버를 재시작하면 이 표가 빈다. 그
+직후 `browser_last_seen()`이 `None`을 돌려주면 호출부(`routes_creation.py`)가
+그것을 「방금 봤다」로 취급해야 한다 — 그래야 재시작 직후 멀쩡한 방장이
+유휴로 오판돼 승계당하지 않는다(T-12.3-13). 배경에서 혼자 도는 정리
+장치는 두지 않는다(D-12 경계) — 이 표는 요청이 올 때만 늘고, 세션이
+끝나도 스스로 줄지 않는다(T-12.3-12, DoS 위험 accept — 이 서버가 링크를
+아는 소수만 쓰는 단일 프로세스 개발 서버라는 전제 위에서만 유효한
+판단이다. 배포를 진지하게 다루는 단계가 오면 상한을 다시 볼 것)."""
+
+
+def mark_browser_seen(session_id: str, browser_id: str) -> None:
+    """브라우저가 지금 살아 있다고 표시한다 — `POST /creation/host` 호출
+    자체가 곧 재실 신호다."""
+    _browser_last_seen[(session_id, browser_id)] = time.monotonic()
+
+
+def browser_last_seen(session_id: str, browser_id: str) -> float | None:
+    """마지막으로 재실 신호를 받은 시각(`time.monotonic()` 기준) — 이
+    프로세스에서 한 번도 못 봤으면(재시작 직후 포함) `None`이다."""
+    return _browser_last_seen.get((session_id, browser_id))
+
+
+def alive_browsers(session_id: str) -> tuple[str, ...]:
+    """이 세션에서 `HOST_IDLE_S` 안에 재실 신호를 보낸 브라우저들 —
+    처음 본 순서를 보존한다(딕셔너리 삽입 순서)."""
+    now = time.monotonic()
+    return tuple(
+        browser_id
+        for (sid, browser_id), seen_at in _browser_last_seen.items()
+        if sid == session_id and now - seen_at <= HOST_IDLE_S
+    )
 
 
 def unfinished_candidates(state: GameState) -> tuple[str, ...]:

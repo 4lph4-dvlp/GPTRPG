@@ -13,9 +13,12 @@ CR-02·부분 재진행)을 시험한다 — 이 파일은 그 위에 12.3-03이
 스레드 전용 새 연결을 연다).
 """
 
+import time
+
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.reducer import GameState
 from gptrpg.session_actor.projection import rebuild_state_from_events
+from gptrpg.web import creation_state
 
 SESSION_ID = "creation-consent-host-s1"
 CHARACTER_ID = "hero-1"
@@ -147,6 +150,12 @@ def _act_as(client, cookie_value: str) -> None:
     다른 사람 행세를 할 수 없다)."""
     client.cookies.clear()
     client.cookies.set("gptrpg_character", cookie_value)
+
+
+def _claim_host(client, browser_id: str, *, session_id: str = SESSION_ID):
+    return client.post(
+        f"/api/sessions/{session_id}/creation/host", json={"browser_id": browser_id}
+    )
 
 
 def _rebuild_state(client, session_id: str = SESSION_ID) -> GameState:
@@ -332,3 +341,131 @@ def test_consent_without_any_cookie_is_rejected_and_creates_no_events(web_client
     )
     assert response.status_code == 403
     assert not _events_of_type(client, "creation_consent_recorded", session_id=session_id)
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — 방장을 만든다: 가장 먼저 들어온 사람, 조용해지면 승계 (D-11).
+# ---------------------------------------------------------------------------
+
+
+def test_first_host_claim_records_event_and_returns_you_are_host_true(web_client):
+    client = web_client
+    session_id = SESSION_ID + "-host-first"
+
+    response = _claim_host(client, "browser-a", session_id=session_id)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["you_are_host"] is True
+    assert body["host_claimed"] is True
+    assert body["changed"] is True
+
+    events = _events_of_type(client, "creation_host_claimed", session_id=session_id)
+    assert len(events) == 1
+    assert events[0]["browser_id"] == "browser-a"
+    assert events[0]["reason"] == "first"
+    assert events[0]["previous_browser_id"] is None
+
+
+def test_same_browser_claiming_again_records_no_new_event(web_client):
+    client = web_client
+    session_id = SESSION_ID + "-host-same"
+
+    assert _claim_host(client, "browser-a", session_id=session_id).status_code == 200
+    second = _claim_host(client, "browser-a", session_id=session_id)
+    assert second.status_code == 200
+    assert second.json()["you_are_host"] is True
+    assert second.json()["changed"] is False
+
+    events = _events_of_type(client, "creation_host_claimed", session_id=session_id)
+    assert len(events) == 1
+
+
+def test_a_different_browser_claiming_immediately_is_not_host_and_records_no_event(web_client):
+    client = web_client
+    session_id = SESSION_ID + "-host-second-immediate"
+
+    assert _claim_host(client, "browser-a", session_id=session_id).status_code == 200
+    second = _claim_host(client, "browser-b", session_id=session_id)
+    assert second.status_code == 200
+    assert second.json()["you_are_host"] is False
+    assert second.json()["host_claimed"] is True
+    assert second.json()["changed"] is False
+
+    events = _events_of_type(client, "creation_host_claimed", session_id=session_id)
+    assert len(events) == 1  # 여전히 browser-a의 첫 선점 하나뿐
+
+
+def test_idle_host_is_succeeded_by_another_browser_and_cannot_reclaim(web_client):
+    """방장이 유휴로 판정되면 다른 브라우저가 이어받고, 옛 방장은 다시
+    불러도 방장을 도로 뺏지 못한다."""
+    client = web_client
+    session_id = SESSION_ID + "-host-succession"
+
+    assert _claim_host(client, "browser-a", session_id=session_id).status_code == 200
+
+    # 시험에서 재실 표를 직접 조작해 browser-a를 유휴로 만든다.
+    creation_state._browser_last_seen[(session_id, "browser-a")] = (
+        time.monotonic() - creation_state.HOST_IDLE_S - 5
+    )
+
+    succession = _claim_host(client, "browser-b", session_id=session_id)
+    assert succession.status_code == 200
+    assert succession.json()["you_are_host"] is True
+    assert succession.json()["changed"] is True
+
+    events = _events_of_type(client, "creation_host_claimed", session_id=session_id)
+    assert len(events) == 2
+    assert events[1]["reason"] == "succession"
+    assert events[1]["browser_id"] == "browser-b"
+    assert events[1]["previous_browser_id"] == "browser-a"
+
+    # 옛 방장(browser-a)이 다시 불러도 방장을 도로 뺏지 못한다.
+    reclaim = _claim_host(client, "browser-a", session_id=session_id)
+    assert reclaim.status_code == 200
+    assert reclaim.json()["you_are_host"] is False
+    assert reclaim.json()["changed"] is False
+    assert len(_events_of_type(client, "creation_host_claimed", session_id=session_id)) == 2
+
+
+def test_non_host_browser_cannot_fix_party_size_and_records_no_event(web_client):
+    client = web_client
+    session_id = SESSION_ID + "-host-gate-403"
+
+    assert _claim_host(client, "browser-a", session_id=session_id).status_code == 200
+
+    response = _fix_party_size(client, session_id=session_id, browser_id="browser-b")
+    assert response.status_code == 403
+    assert not _events_of_type(client, "party_size_fixed", session_id=session_id)
+
+
+def test_host_browser_can_fix_party_size(web_client):
+    client = web_client
+    session_id = SESSION_ID + "-host-gate-ok"
+
+    assert _claim_host(client, "browser-a", session_id=session_id).status_code == 200
+    response = _fix_party_size(client, session_id=session_id, browser_id="browser-a")
+    assert response.status_code == 200
+
+
+def test_party_size_without_any_host_still_succeeds(web_client):
+    """방장이 없는 세션의 인원 확정은 여전히 통과한다 — 화면이 없는
+    호출부(시험·스크립트)를 막지 않는다."""
+    client = web_client
+    session_id = SESSION_ID + "-host-none-ok"
+
+    response = _fix_party_size(client, session_id=session_id)
+    assert response.status_code == 200
+
+
+def test_host_response_never_leaks_a_browser_id(web_client):
+    """`CreationHostResponse`의 어느 칸에도 `browser_id` 값이 없다
+    (T-12.3-05) — 응답 JSON을 통째로 훑어 실제 값이 어디에도 안 새는지
+    확인한다."""
+    client = web_client
+    session_id = SESSION_ID + "-host-no-leak"
+
+    response = _claim_host(client, "the-secret-browser-id", session_id=session_id)
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body.keys()) == {"you_are_host", "host_claimed", "changed"}
+    assert "the-secret-browser-id" not in response.text
