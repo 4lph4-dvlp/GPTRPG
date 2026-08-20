@@ -44,6 +44,7 @@ import {
   completeCreation,
   completeCreationStep,
   creationFollowUp,
+  nominateCreationSpeaker,
   recordCreationConsent,
   recordInterjection,
   wrapUpCreation,
@@ -497,6 +498,38 @@ export function CreationPane({
       }
     }
   }, [rows, myTurn]);
+
+  // CR-01(12.3-REVIEW.md) — GM이 아직 아무도 지목하지 않았고(D-06) 자기
+  // 소개를 안 끝낸 사람이 남아 있으면 자동으로 다음 차례를 지목해 달라고
+  // 부른다. `nominateCreationSpeaker`를 실제로 부르는 자리가 이 저장소
+  // 어디에도 없었다 — `creation_current_speaker_id`가 영원히 `null`로
+  // 남아 `stepEditingEnabled`가 참이 될 방법이 없었다(CR-01 본문). 여러
+  // 탭이 동시에 이 effect를 타도 서버의 `_gm_dedupe_key`(같은 후보
+  // 집합이면 같은 키)가 중복 지목을 막으므로(D-12) 안전하다 — derive
+  // 자동 제출과 같은 자리, `nominatingRef`는 응답이 오기 전 같은 요청을
+  // 두 번 겹쳐 보내지 않게만 막는다.
+  const nominatingRef = useRef(false);
+  useEffect(() => {
+    if (
+      state.creation_current_speaker_id !== null ||
+      state.creation_unfinished_character_ids.length === 0 ||
+      nominatingRef.current
+    ) {
+      return;
+    }
+    nominatingRef.current = true;
+    void nominateCreationSpeaker(sessionId, rulebookId)
+      .then(() => pollNow())
+      .catch(() => undefined)
+      .finally(() => {
+        nominatingRef.current = false;
+      });
+  }, [
+    sessionId,
+    rulebookId,
+    state.creation_current_speaker_id,
+    state.creation_unfinished_character_ids.length,
+  ]);
 
   async function askGm(): Promise<void> {
     setBusy(true);
