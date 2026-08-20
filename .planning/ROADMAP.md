@@ -613,7 +613,7 @@ Plans:
 자기 캐릭터로 세션에 들어가는 데까지 화면이 따라온다
 **Depends on**: Phase 12.1 (만들기 경로·GM 대화·동의·명단 잠금이 전부 서버에 있다),
 Phase 8 (점유 규칙과 서명 쿠키 신원)
-**Requirements**: TBD (논의 전 — `/gsd-discuss-phase 12.3`에서 정한다)
+**Requirements**: CHAR-06
 **Plans:** 4/5 plans executed
 
 Plans:
