@@ -547,7 +547,12 @@ export function CreationPane({
                     ? COPY.creationDerivedAuto
                     : ""}
               </div>
-              {row.filled && canEdit(row, myTurn) && editingStepId !== row.step.step_id ? (
+              {/* derive 항목은 조작이 없다 — 「고치기」를 눌러도 다시 낼 값을
+                  입력할 방법이 없으므로 편집 버튼 자체를 그리지 않는다.
+                  canEdit(row, myTurn)이 참이라는 사실 자체는 안 바뀐다 — D-09가
+                  「아무 줄이나」를 요구하는 것이지, 편집 UI가 없는 kind까지
+                  버튼을 강제하는 것은 아니다. */}
+              {row.filled && row.step.kind !== "derive" && canEdit(row, myTurn) && editingStepId !== row.step.step_id ? (
                 <button
                   type="button"
                   className="btn btn--ghost"
