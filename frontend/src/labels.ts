@@ -244,4 +244,27 @@ export const COPY = {
   /** 명단이 이미 잠긴 세션에 이 브라우저의 캐릭터가 없을 때(`Notices.tsx`). */
   creationRosterLocked:
     "이 세션의 파티 명단이 이미 잠겼어요. 이 브라우저로는 들어갈 수 있는 캐릭터가 없습니다.",
+  /**
+   * 만들기 대화판(`CreationPane.tsx`, Phase 12.3-04) 문구. `creationGmSilent`는
+   * D-13 ①(AI가 물러나 폴백값으로 200이 온 경우)의 문구다 — `needs_more:
+   * false`로 끝난 되묻기는 서버 응답만으로는 진짜 GM 판단과 폴백을 구분할
+   * 방법이 없어(둘 다 같은 모양으로 온다), 이 자리에서는 안전한 쪽으로
+   * 항상 이 문구를 얹는다(「폴백을 조용히 정상처럼 보여주지 않는다」).
+   */
+  creationGmSilent: "진행자가 잠시 말을 잃었지만 계속합니다",
+  creationSayMore: "더 말하기",
+  creationDoneTalking: "이걸로 끝",
+  creationAskGm: "진행자에게 물어보기",
+  creationEdit: "고치기",
+  creationRoll: "굴리기",
+  creationMyTurn: "내 차례예요",
+  creationOthersTurn: "다른 사람의 차례예요 — 자유롭게 끼어들어 말할 수 있어요",
+  creationInterjectPlaceholder: "끼어들어 말하기…",
+  creationDerivedAuto: "자동 계산",
+  creationStepKindUnsupported: "이 룰북 항목은 아직 화면에서 채울 수 없어요",
+  creationBudgetLeft: "남은 배분",
+  /** 만들기 주사위 굴림 모달 제목(Phase 12.3-04 Task 3, D-07) — 판정용
+   * `diceModalTitle`("주사위 굴림 결과")을 재사용하지 않는다. 여기서는
+   * 성공/실패가 아니라 무엇을 굴렸는지가 중요하다. */
+  creationRollTitle: "만들기 굴림 결과",
 } as const;
