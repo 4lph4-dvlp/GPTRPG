@@ -362,8 +362,10 @@ def test_first_host_claim_records_event_and_returns_you_are_host_true(web_client
 
     events = _events_of_type(client, "creation_host_claimed", session_id=session_id)
     assert len(events) == 1
-    assert events[0]["browser_id"] == "browser-a"
     assert events[0]["reason"] == "first"
+    # `GET /events`가 돌려주는 events 목록은 browser_id를 가린다(T-12.3-05,
+    # CR-03) — 저장소 원본에는 남아 있지만 폴링 응답에는 안 실린다.
+    assert events[0]["browser_id"] == ""
     assert events[0]["previous_browser_id"] is None
 
 
@@ -417,8 +419,10 @@ def test_idle_host_is_succeeded_by_another_browser_and_cannot_reclaim(web_client
     events = _events_of_type(client, "creation_host_claimed", session_id=session_id)
     assert len(events) == 2
     assert events[1]["reason"] == "succession"
-    assert events[1]["browser_id"] == "browser-b"
-    assert events[1]["previous_browser_id"] == "browser-a"
+    # 승계 사건도 첫 선점과 같은 이유로 browser_id/previous_browser_id가
+    # 가려진다(T-12.3-05, CR-03) — 옛 방장의 식별자도 남의 것이다.
+    assert events[1]["browser_id"] == ""
+    assert events[1]["previous_browser_id"] is None
 
     # 옛 방장(browser-a)이 다시 불러도 방장을 도로 뺏지 못한다.
     reclaim = _claim_host(client, "browser-a", session_id=session_id)
@@ -472,6 +476,65 @@ def test_host_response_never_leaks_a_browser_id(web_client):
     assert "the-secret-browser-id" not in response.text
 
 
+def test_events_array_never_leaks_a_browser_id_from_creation_host_claimed(web_client):
+    """12.3-REVIEW.md CR-03 — `GET /events`의 `events` 배열 전체를 훑어
+    `creation_host_claimed`의 `browser_id`/`previous_browser_id`가 안
+    새는지 확인한다. `test_host_response_never_leaks_a_browser_id`는 POST
+    응답만, `test_claiming_host_makes_creation_host_claimed_true_with_no_identifier`
+    는 `state` 칸만 겨눴다 — 이 시험이 CR-03이 실제로 겨눈 자리(events
+    목록)다."""
+    client = web_client
+    session_id = SESSION_ID + "-events-leak"
+
+    assert _claim_host(client, "the-secret-host-id", session_id=session_id).status_code == 200
+    # 승계까지 일으켜 previous_browser_id도 채운다.
+    creation_state._browser_last_seen[(session_id, "the-secret-host-id")] = (
+        time.monotonic() - creation_state.HOST_IDLE_S - 5
+    )
+    assert _claim_host(
+        client, "the-second-secret-id", session_id=session_id
+    ).status_code == 200
+
+    response = client.get(f"/api/sessions/{session_id}/events", params={"from_seq": 0})
+    assert response.status_code == 200
+    assert "the-secret-host-id" not in response.text
+    assert "the-second-secret-id" not in response.text
+
+    events = _events_of_type(client, "creation_host_claimed", session_id=session_id)
+    assert len(events) == 2
+    for event in events:
+        assert event["browser_id"] == ""
+        assert event["previous_browser_id"] is None
+
+
+def test_a_browser_cannot_read_the_host_id_from_polling_and_replay_it_to_fix_party_size(
+    web_client,
+):
+    """12.3-REVIEW.md CR-03 — 실제 공격 경로가 닫혔는지 끝까지 확인한다.
+    `browser-b`는 방장이 아니다. 이전에는 `GET /events`의 `events` 배열에서
+    방장의 `browser_id`를 평문으로 읽어 `/creation/party-size`에 그대로
+    실으면 방장 전용 조작(인원 확정)을 통과했다 — 이 시험은 그 값이 이제
+    응답 어디에도 없으므로 재현조차 불가능함을 보인다: 폴링 응답에서
+    읽을 수 있는 값은 빈 문자열뿐이고, 그 값으로 시도하면 403이다."""
+    client = web_client
+    session_id = SESSION_ID + "-impersonation"
+
+    assert _claim_host(client, "browser-a", session_id=session_id).status_code == 200
+
+    leaked = client.get(f"/api/sessions/{session_id}/events", params={"from_seq": 0})
+    assert leaked.status_code == 200
+    host_claimed = [
+        event for event in leaked.json()["events"] if event["event_type"] == "creation_host_claimed"
+    ]
+    assert len(host_claimed) == 1
+    stolen_browser_id = host_claimed[0]["browser_id"]
+    assert stolen_browser_id == ""  # 훔칠 값 자체가 없다
+
+    replay = _fix_party_size(client, session_id=session_id, browser_id=stolen_browser_id)
+    assert replay.status_code == 403
+    assert not _events_of_type(client, "party_size_fixed", session_id=session_id)
+
+
 # ---------------------------------------------------------------------------
 # Task 3 — 동의·방장 경로가 폴링과 짝지어진다.
 # ---------------------------------------------------------------------------
@@ -491,12 +554,21 @@ def test_claiming_host_makes_creation_host_claimed_true_with_no_identifier(web_c
 
     after = client.get(f"/api/sessions/{session_id}/events", params={"from_seq": 0})
     assert after.status_code == 200
-    state = after.json()["state"]
+    body = after.json()
+    state = body["state"]
     assert state["creation_host_claimed"] is True
     # state 칸에는 여부만 있다 — 식별자는 어느 state 키에도 없다(T-12.3-05).
-    # (사건 기록 자체(events 목록)는 신원 감사 목적으로 browser_id를 담는
-    # 것이 정상이다 — 이 검사는 GameStateView 쪽만 겨눈다.)
     assert "browser-poll" not in json.dumps(state)
+    # **events 목록도 마찬가지다(12.3-REVIEW.md CR-03 수정).** 이전에는
+    # 이 검사 범위를 state 칸으로만 좁혔다(12.3-03-SUMMARY.md의 스코프
+    # 축소 — "사건 기록에는 신원 감사를 위해 browser_id가 정당하게
+    # 남는다"는 전제였다) — 하지만 이 응답의 events 목록은 모든 폴링
+    # 브라우저에게 공개되고, `/creation/party-size`의 방장 관문
+    # (`routes_creation.py::fix_party_size`)이 `body.browser_id`를 그대로
+    # 문자열 비교하므로, events 목록에 남은 browser_id는 곧 방장 전용
+    # 조작을 통과시키는 열쇠였다. 그 전제가 틀렸다 — events 목록도 절대
+    # 새면 안 된다.
+    assert "browser-poll" not in json.dumps(body["events"])
 
 
 def test_a_restart_of_the_liveness_table_does_not_let_a_stranger_ambush_the_host(web_client):

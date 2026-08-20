@@ -26,7 +26,7 @@
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
-from gptrpg.event_log.schema import GameEvent
+from gptrpg.event_log.schema import CreationHostClaimed, GameEvent
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rules_core.reducer import GameState
 from gptrpg.rules_core.rulebook import Rulebook
@@ -213,6 +213,36 @@ def _creation_step_value_views(game_state: GameState) -> list[CreationStepValueV
     ]
 
 
+def _redact_host_claimed(event: GameEvent) -> GameEvent:
+    """`creation_host_claimed`의 `browser_id`/`previous_browser_id`를
+    폴링 `events` 목록에서 가린다(T-12.3-05, 12.3-REVIEW.md CR-03).
+
+    `GameStateView`(`state` 칸)는 이미 여부만 싣도록 지켜졌지만, 같은
+    보호가 `events` 목록에는 없었다 — 이 사건은 `visibility: "public"`
+    기본값을 쓰므로(공개 필터링 없음) 폴링하는 모든 브라우저가 지금
+    방장의 `browser_id`를 평문으로 읽을 수 있었다(`CreationScreen.tsx`가
+    자기 것과 비교하려고 이미 이 값을 읽고 있었다는 사실이 유출을
+    스스로 증명한다). 읽은 값을 `/creation/party-size`의 `body.browser_id`
+    관문(`routes_creation.py::fix_party_size`, 단순 문자열 비교)에 그대로
+    실으면 방장이 아닌 브라우저가 방장 전용 조작을 통과했다 — 이 리듀서는
+    그 유출 경로 자체를 닫는다. `previous_browser_id`도 같은 이유로
+    가린다(옛 방장의 식별자도 남의 것이다).
+
+    **저장소(`EventStore`)에 실제로 적힌 기록은 손대지 않는다** — 이
+    함수는 응답으로 나가는 사본만 가공한다. 서버 쪽 재구성(`apply_event`)
+    은 언제나 저장소의 원본을 읽으므로 리듀서 상태는 이 redaction의
+    영향을 받지 않는다.
+
+    `CreationScreen.tsx`는 이 값을 더 이상 쓰지 않는다(12.3-REVIEW-FIX,
+    CR-02/CR-03 동시 수정) — 「방금 내가 승계받았나」는 `POST
+    /creation/host` 응답(`you_are_host`/`changed`)과 폴링이 이미 내려주는
+    `state.creation_host_claimed`만으로 판단한다.
+    """
+    if isinstance(event, CreationHostClaimed):
+        return event.model_copy(update={"browser_id": "", "previous_browser_id": None})
+    return event
+
+
 class PollResponse(BaseModel):
     events: list[GameEvent]
     state: GameStateView
@@ -247,7 +277,9 @@ async def poll_events(
     store = request.app.state.store
     all_events = store.read_events(session_id)
     game_state = rebuild_state_from_events(session_id, all_events)
-    events = [event for event in all_events if event.seq >= from_seq]
+    # 상태 재구성(위 줄)은 저장소의 원본 사건을 그대로 쓴다 — redaction은
+    # 응답에 실을 목록에만 적용한다(T-12.3-05, CR-03).
+    events = [_redact_host_claimed(event) for event in all_events if event.seq >= from_seq]
     check_calculations = [
         view
         for event in events

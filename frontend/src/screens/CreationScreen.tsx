@@ -194,6 +194,23 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
 
   const partyRoster = feed.state?.party_roster ?? null;
 
+  // 이 요청 시점에 방장이 「이미」 있었는지(폴링이 마지막으로 알려준
+  // 값) — 렌더마다 갱신되는 ref라 beacon() 안에서 항상 최신 값을 읽는다
+  // (effect 의존성에 넣으면 폴링마다 새 참조가 와서 타이머가 매번 다시
+  // 서므로 안 된다, 아래 주석 참조). `creation_host_claimed`는 여부만
+  // 담아 안전하다(T-12.3-05) — 이 자체가 새는 값이 아니다.
+  const hostClaimedBeforeRef = useRef(false);
+  hostClaimedBeforeRef.current = feed.state?.creation_host_claimed ?? false;
+
+  // 방장이 사라져 내가 이어받았을 때만 붙는 짧은 맥락(D-11). **더는
+  // 폴링 events에서 `creation_host_claimed.browser_id`를 읽지 않는다**
+  // (12.3-REVIEW.md CR-03) — 그 칸은 남의 식별자를 실어 나르므로 세션의
+  // 모든 브라우저가 방장의 값을 읽을 수 있었다. 이 신호는 이 브라우저
+  // 자신의 `POST /creation/host` 응답(`changed`+`you_are_host`)과, 그
+  // 직전 폴링이 이미 공개적으로 내려준 `creation_host_claimed`(여부만)
+  // 조합만으로 판단한다 — 아무 것도 새로 새지 않는다.
+  const [hostTookOver, setHostTookOver] = useState(false);
+
   // 방장 재실 신호(D-11, Task 1) — HOST_BEACON_MS(HOST_IDLE_S의 절반)마다
   // claimCreationHost를 부른다. 명단이 잠기면(partyRoster !== null) 멈춘다
   // — 그때는 방장 개념이 쓸모없고 서버도 아무 사건을 안 낸다.
@@ -205,8 +222,16 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
     async function beacon(): Promise<void> {
       try {
         const response = await claimCreationHost(sessionId, myBrowserId);
-        if (alive) {
-          setYouAreHost(response.you_are_host);
+        if (!alive) {
+          return;
+        }
+        setYouAreHost(response.you_are_host);
+        // 「바뀌었고(changed) 지금 나(you_are_host)」인데 그 직전까지도
+        // 방장이 이미 있었다면(hostClaimedBeforeRef) 승계다 — 방장이
+        // 아직 아무도 없던 상태에서 changed===true면 그냥 내가 처음
+        // 잡은 것뿐이라 안내 문구를 보일 이유가 없다.
+        if (response.changed && response.you_are_host && hostClaimedBeforeRef.current) {
+          setHostTookOver(true);
         }
       } catch {
         // 신호 실패는 다음 주기로 넘긴다 — 화면 오류로 보이지 않는다.
@@ -261,15 +286,6 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
   const gmLines = gmLinesFrom(feed.events);
   const head = rollQueue[0];
   const gate = feed.state !== null ? partySizeGate(feed.state, youAreHost) : null;
-  // 방장이 사라져 내가 이어받았을 때만 붙는 짧은 맥락(D-11) — 조작이
-  // 새로 나타나는 것 자체가 안내이므로 그 밖의 경우에는 아무것도 안
-  // 보인다.
-  const hostTookOver = feed.events.some(
-    (event) =>
-      event.event_type === "creation_host_claimed" &&
-      event.browser_id === myBrowserId &&
-      event.reason === "succession",
-  );
 
   return (
     <div className="screen">
