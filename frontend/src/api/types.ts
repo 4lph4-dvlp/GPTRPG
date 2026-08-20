@@ -446,6 +446,15 @@ export interface ConfirmResourceChangeResponse {
   resource_changes: ResourceChangeView[];
 }
 
+/** `POST .../creation/announce`의 응답(Phase 12.3, D-02/D-12) —
+ * `routes_creation.py::AnnounceCreationResponse`. `seq`는 이 안내가
+ * 기록된(또는 이미 기록되어 있던) `creation_gm_spoke` 사건의 순번이다 —
+ * 화면이 폴링이 그 사건을 실어 오기 전에도 조용히 기다릴 수 있다. */
+export interface AnnounceCreationResponse {
+  message: string;
+  seq: number;
+}
+
 export interface ProceedResponse {
   proceeded: boolean;
   narration_chunk_count: number;

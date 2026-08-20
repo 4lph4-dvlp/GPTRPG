@@ -9,6 +9,7 @@
  */
 
 import type {
+  AnnounceCreationResponse,
   CharacterSheet,
   CharacterSummary,
   ConfirmResourceChangeResponse,
@@ -23,7 +24,7 @@ import type {
 export class ApiError extends Error {
   readonly status: number;
   /** 서버가 응답 본문에 담아 보낸 사람이 읽을 이유(`detail`) — 있을 때만
-   * 채워진다. `selectCharacter`의 409가 이 칸을 쓴다(12.1-06, 결함 B). */
+   * 채워진다. `announceCreation`의 409가 이 칸을 쓴다(D-15). */
   readonly detail: string | undefined;
 
   constructor(status: number, message: string, detail?: string) {
@@ -80,21 +81,22 @@ export function fetchMyCharacter(sessionId: string): Promise<MyCharacterResponse
 }
 
 /**
- * 캐릭터 점유를 요청한다. **다른 POST 함수와 달리 공용 `postJson`을 쓰지
- * 않는다** — 서버는 409에서 이미 사람이 읽을 한국어로 이유를 말하는데
- * (`_prepare_occupy`, D-05/D-07), `postJson`은 그 `detail`을 버리고
- * `POST url → status` 같은 기술 문자열만 남긴다. 그 이유가 화면(`CharacterSelect`)에
- * 그대로 전해지도록 `detail`을 읽어 `ApiError.detail`에 담는다. 서버가
- * 이유를 안 주면(`detail` 없음) `ApiError.detail`은 `undefined`로 남고,
- * 화면이 자신의 대체 문구(`COPY.characterSelectError`)를 고른다 — 여기서
- * 새 문구를 만들지 않는다.
+ * GM에게 만들기 안내를 부탁한다(D-02/D-12). **다른 POST 함수와 달리
+ * 공용 `postJson`을 쓰지 않는다** — 사람이 직접 눌러 409(명단이 이미
+ * 잠겼다)를 받을 수 있는 경로이고, 서버가 이미 사람이 읽을 한국어로
+ * 이유를 말하는데(`announce_creation`, D-15) `postJson`은 그 `detail`을
+ * 버리고 `POST url → status` 같은 기술 문자열만 남긴다. 캐릭터 고르기
+ * 화면(Phase 12.3 D-10으로 삭제)이 쓰던 것과 같은 방식을 그대로 복제한다.
  */
-export async function selectCharacter(sessionId: string, characterId: string): Promise<unknown> {
-  const url = `${sessionBase(sessionId)}/select-character`;
+export async function announceCreation(
+  sessionId: string,
+  rulebookId: string,
+): Promise<AnnounceCreationResponse> {
+  const url = `${sessionBase(sessionId)}/creation/announce`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ character_id: characterId }),
+    body: JSON.stringify({ rulebook_id: rulebookId }),
   });
   if (!response.ok) {
     let detail: string | undefined;
@@ -106,7 +108,7 @@ export async function selectCharacter(sessionId: string, characterId: string): P
     }
     throw new ApiError(response.status, `POST ${url} → ${response.status}`, detail);
   }
-  return (await response.json()) as unknown;
+  return (await response.json()) as AnnounceCreationResponse;
 }
 
 export function declareAction(

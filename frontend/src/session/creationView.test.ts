@@ -22,7 +22,11 @@ function envelope(seq: number) {
 
 function gmSpoke(
   seq: number,
-  overrides: Partial<{ kind: string; say: string; target_character_id: string | null }> = {},
+  overrides: Partial<{
+    kind: "announce" | "nominate" | "follow_up" | "wrap_up";
+    say: string;
+    target_character_id: string | null;
+  }> = {},
 ): GameEvent {
   return {
     ...envelope(seq),

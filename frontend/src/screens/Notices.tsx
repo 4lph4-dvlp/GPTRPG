@@ -49,6 +49,27 @@ export function InvalidSession({ sessionId }: { sessionId: string }) {
   );
 }
 
+/**
+ * 명단이 이미 잠겼는데 이 브라우저에 캐릭터가 없는 경우(Phase 12.3,
+ * D-10). `CreationScreen`이 폴링에서 `party_roster_locked` 사건을 보면
+ * 이 안내로 갈아탄다 — 만들기가 유일한 입장 경로이므로, 잠긴 뒤에는
+ * 더 할 수 있는 조작이 없다(Phase 8 D-01의 쿠키 한계와 같은 결).
+ */
+export function RosterLocked() {
+  return (
+    <div className="screen">
+      <div className="screen__inner">
+        <div className="screen__title">
+          <h1 className="t-display">파티 명단이 이미 잠겼어요</h1>
+        </div>
+        <div className="notice">
+          <p className="t-body">{COPY.creationRosterLocked}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Loading() {
   return (
     <div className="screen">

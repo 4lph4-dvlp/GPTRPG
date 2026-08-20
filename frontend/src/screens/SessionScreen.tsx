@@ -47,14 +47,9 @@ const RESOURCE_BADGE_MS = 3000;
 interface SessionScreenProps {
   sessionId: string;
   characterId: string;
-  onChangeCharacter: () => void;
 }
 
-export function SessionScreen({
-  sessionId,
-  characterId,
-  onChangeCharacter,
-}: SessionScreenProps) {
+export function SessionScreen({ sessionId, characterId }: SessionScreenProps) {
   const [queue, setQueue] = useState<QueuedRoll[]>([]);
   const [justRevealedSeq, setJustRevealedSeq] = useState<number | null>(null);
   const [clockPulsing, setClockPulsing] = useState(false);
@@ -252,7 +247,6 @@ export function SessionScreen({
           myCharacterId={characterId}
           clockPulsing={clockPulsing}
           recentChanges={recentChanges}
-          onChangeCharacter={onChangeCharacter}
         />
 
         <StoryPane

@@ -1,23 +1,29 @@
 /**
- * 화면 갈래 — 세션 식별자 확인 → 캐릭터 확인 → 세션 화면.
+ * 화면 갈래 — 세션 식별자 확인 → 캐릭터 확인 → 만들기 또는 세션 화면.
  *
  * 세션 식별자는 `location.search`의 `session`에서만 읽는다. 네 명이 받는 링크는
  * `http://{host}/?session={id}` 하나뿐이다(D-42).
  *
- * 캐릭터가 정해지기 전에는 폴링을 시작하지 않는다 — `SessionScreen`이 아예
- * 마운트되지 않으므로 구조적으로 그렇게 된다.
+ * **만들기가 이 세션의 유일한 입장 경로다(Phase 12.3, D-10).** 자기
+ * 캐릭터가 없으면 항상 `CreationScreen`으로 간다 — 캐릭터 고르기 화면을
+ * 거치지 않는다. 조회 자체가 실패해도(400 제외) `creating`으로 보낸다 —
+ * 만들기가 유일한 입장 경로이므로 막다른 길이 구조적으로 안 생긴다.
+ *
+ * 캐릭터가 정해지기 전에는 판정 폴링을 시작하지 않는다 — `SessionScreen`이
+ * 아예 마운트되지 않으므로 구조적으로 그렇게 된다(`CreationScreen`은 자기
+ * 폴링을 따로 쓴다).
  */
 
 import { useEffect, useState } from "react";
 import { ApiError, fetchMyCharacter } from "./api/client.ts";
-import { CharacterSelect } from "./screens/CharacterSelect.tsx";
 import { InvalidSession, Loading, MissingSession } from "./screens/Notices.tsx";
+import { CreationScreen } from "./screens/CreationScreen.tsx";
 import { SessionScreen } from "./screens/SessionScreen.tsx";
 
 type Gate =
   | { kind: "checking" }
   | { kind: "invalid" }
-  | { kind: "choosing" }
+  | { kind: "creating" }
   | { kind: "ready"; characterId: string };
 
 export function App() {
@@ -38,7 +44,7 @@ export function App() {
         setGate(
           response.selected && response.character_id !== null
             ? { kind: "ready", characterId: response.character_id }
-            : { kind: "choosing" },
+            : { kind: "creating" },
         );
       })
       .catch((error: unknown) => {
@@ -48,9 +54,9 @@ export function App() {
         setGate(
           error instanceof ApiError && error.status === 400
             ? { kind: "invalid" }
-            : // 쿠키 조회가 실패한 것뿐이니 고르는 화면으로 보낸다 — 목록
-              // 조회까지 실패하면 그 화면이 자기 오류 문구를 띄운다.
-              { kind: "choosing" },
+            : // 조회가 실패한 것뿐이니 만들기 화면으로 보낸다 — 그 화면이
+              // 자기 오류 문구를 띄운다.
+              { kind: "creating" },
         );
       });
     return () => {
@@ -67,24 +73,11 @@ export function App() {
       return <Loading />;
     case "invalid":
       return <InvalidSession sessionId={sessionId} />;
-    case "choosing":
-      return (
-        <CharacterSelect
-          sessionId={sessionId}
-          onSelected={(characterId) => setGate({ kind: "ready", characterId })}
-        />
-      );
+    case "creating":
+      return <CreationScreen sessionId={sessionId} />;
     case "ready":
       return (
-        <SessionScreen
-          key={gate.characterId}
-          sessionId={sessionId}
-          characterId={gate.characterId}
-          // 쿠키는 httponly라 브라우저에서 지울 수 없다. 다시 고르면
-          // `POST /select-character`가 같은 쿠키를 덮어쓴다 — 서버를 고치지
-          // 않고 "캐릭터 바꾸기"를 만드는 방법이 이것뿐이다.
-          onChangeCharacter={() => setGate({ kind: "choosing" })}
-        />
+        <SessionScreen key={gate.characterId} sessionId={sessionId} characterId={gate.characterId} />
       );
   }
 }
