@@ -617,11 +617,21 @@ Phase 8 (점유 규칙과 서명 쿠키 신원)
 **Plans:** 5 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 12.3-01-PLAN.md — 트레이서: GM의 말이 사건이 되어 네 탭에 닿는다 (판 11 · 입장 갈래)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 12.3-02-PLAN.md — 서버가 만들기 상태와 룰북 항목 선언을 화면에 내려준다
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 12.3-03-PLAN.md — 동의와 방장을 액터 메모리에서 사건 기록으로 옮긴다
 - [ ] 12.3-04-PLAN.md — 만들기 대화판: 항목 조작 · 끼어들기 · 고치기 · 주사위
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 12.3-05-PLAN.md — 인원 확정 · 동의 관문 · 세션 진입 · CHAR-06
 
 > **왜 새로 생겼나 (2026-08-19, Phase 12.1 사람 확인 중 발견).** Phase 12.1이 캐릭터 만들기를
