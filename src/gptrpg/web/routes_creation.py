@@ -67,6 +67,7 @@ from gptrpg.rules_core.rulebook import (
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.session_actor.actor import (
+    AlreadyGmSpoken,
     AlreadyOccupied,
     ClaimCreationHost,
     CommandRejected,
@@ -731,6 +732,12 @@ async def announce_creation(
         seq = await actor.submit(
             RecordGmSpoke(kind="announce", say=message, target_character_id=None, dedupe_key=key)
         )
+    except AlreadyGmSpoken as exc:
+        # CR-04: 겹친 두 요청이 둘 다 위 `already_said is None`을 보고
+        # 여기까지 왔다 — 액터 큐 안의 단락이 두 번째를 잡았으니 첫 번째가
+        # 이미 기록한 값을 그대로 재사용한다(AI는 여전히 두 번 불렸을 수
+        # 있지만, 기록·최종 상태는 하나로 수렴한다).
+        return AnnounceCreationResponse(message=exc.prior.say, seq=exc.prior.seq)
     except RosterAlreadyLocked as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except CommandRejected as exc:
@@ -811,6 +818,17 @@ async def nominate_creation_speaker(
                 kind="nominate", say=say, target_character_id=character_id, dedupe_key=key
             )
         )
+    except AlreadyGmSpoken as exc:
+        # CR-04: announce와 같은 이유 — 겹친 두 요청의 두 번째를 큐 안의
+        # 단락이 잡았다. `already_said.target_character_id`가 있어야만
+        # 재사용하는 위 조회와 같은 불변식을 지킨다(target_character_id는
+        # nominate가 항상 채우므로 여기서는 항상 있다).
+        prior_target = exc.prior.target_character_id
+        if prior_target is not None:
+            return NominateSpeakerResponse(
+                character_id=prior_target, say=exc.prior.say, seq=exc.prior.seq
+            )
+        raise HTTPException(status_code=409, detail="이미 기록된 GM 말을 재사용할 수 없다") from exc
     except RosterAlreadyLocked as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except CommandRejected as exc:
@@ -933,6 +951,15 @@ async def creation_follow_up(
                 target_character_id=body.character_id,
                 dedupe_key=key,
             )
+        )
+    except AlreadyGmSpoken as exc:
+        # CR-04: announce와 같은 이유. `already_said.say`가 채워져 있으므로
+        # (RecordGmSpoke가 빈 say를 거절한다) needs_more는 항상 True다.
+        return CreationFollowUpResponse(
+            needs_more=True,
+            question=exc.prior.say,
+            required_steps_filled=required_steps_filled,
+            seq=exc.prior.seq,
         )
     except RosterAlreadyLocked as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1070,6 +1097,18 @@ async def wrap_up_creation(
     try:
         seq = await actor.submit(
             RecordGmSpoke(kind="wrap_up", say=result.say, target_character_id=None, dedupe_key=key)
+        )
+    except AlreadyGmSpoken as exc:
+        # CR-04: announce와 같은 이유. `intros`는 위 `already_said` 이른
+        # 반환과 같은 방식으로 `fallback_intros`에서 다시 조립한다 —
+        # 제공자를 다시 부르지 않는다(D-12).
+        return WrapUpCreationResponse(
+            say=exc.prior.say,
+            intros=[
+                CharacterIntroBody(character_id=character_id, intro=intro)
+                for character_id, intro in fallback_intros
+            ],
+            seq=exc.prior.seq,
         )
     except RosterAlreadyLocked as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

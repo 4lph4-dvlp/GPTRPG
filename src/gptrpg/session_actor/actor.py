@@ -42,7 +42,12 @@ from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.dice import Roller
 from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.grading import DEFAULT_TARGET
-from gptrpg.rules_core.reducer import ConfirmedDeclareRecord, GameState, apply_event
+from gptrpg.rules_core.reducer import (
+    ConfirmedDeclareRecord,
+    CreationGmLineFold,
+    GameState,
+    apply_event,
+)
 from gptrpg.rules_core.resolution import (
     Modifier,
     StatNotUsableInChecks,
@@ -199,8 +204,10 @@ class RecordGmSpoke:
     이 `CreationInterjection`에 대응하는 것과 같은 자리다.
 
     `dedupe_key`로 이미 말한 적이 있는지는 호출부(`routes_creation.py`의
-    `_gm_dedupe_key` 조회)가 AI를 부르기 **전에** 먼저 본다(D-12) —
-    이 명령 자체는 새 값을 무조건 기록한다."""
+    `_gm_dedupe_key` 조회)가 AI를 부르기 **전에** 먼저 본다(D-12) — 그
+    조회가 겹친 요청 둘 다를 통과시킬 수 있으므로(단일 소비자 큐 밖의
+    읽기라서, 12.3-REVIEW.md CR-04), `_prepare_gm_spoke`가 큐 **안에서**
+    같은 검사를 다시 해 두 번째를 `AlreadyGmSpoken`으로 막는다."""
 
     kind: str
     say: str
@@ -556,6 +563,20 @@ class AlreadyChanged(CommandRejected):
     def __init__(self, resource_seq: int) -> None:
         super().__init__("이미 기록된 자원 변화다")
         self.resource_seq = resource_seq
+
+
+class AlreadyGmSpoken(CommandRejected):
+    """이미 같은 `dedupe_key`로 기록된 `creation_gm_spoke` 사건이 있다(D-12,
+    판 11, 12.3-REVIEW.md CR-04). `announce`/`nominate`/`follow_up`/
+    `wrap_up` 네 GM 경로가 겹쳐 들어와도(두 탭, 재시도) 큐 안에서 이
+    단락이 두 번째를 막는다 — `.prior`가 이미 기록된 `CreationGmLineFold`를
+    들고 있어 호출부가 그 값을 그대로 재사용한다. `CommandRejected`의
+    하위 클래스라 기존 `except CommandRejected` 경로가 그대로 잡는다 —
+    재사용이 필요한 자리에서만 이 클래스를 먼저 잡는다."""
+
+    def __init__(self, prior: CreationGmLineFold) -> None:
+        super().__init__("이미 같은 dedupe_key로 기록된 GM 말이 있다")
+        self.prior = prior
 
 
 class RosterAlreadyLocked(CommandRejected):
@@ -1844,14 +1865,25 @@ class SessionActor:
     def _prepare_gm_spoke(self, command: RecordGmSpoke) -> tuple[str, int | None, dict]:
         """GM이 한 말 한 줄을 사건으로 남긴다(D-02, 판 11).
 
-        중복 판정(D-12, 「이미 같은 dedupe_key로 말했는가」)은 이 계층이
-        아니라 호출부(`routes_creation.py::_gm_dedupe_key` 조회)가 AI를
-        부르기 **전에** 먼저 본다 — 이 메서드는 새 값을 무조건 사건으로
-        만든다. `RecordInterjection`처럼 명단 잠금 여부는 검사하지 않는다
-        — GM의 안내·지목·되묻기·정리는 명단이 잠기기 **전**에만 호출되는
-        경로이고(라우트가 이미 `party_roster is not None`을 409로 막는다),
-        이 명령 자신이 그 경계를 다시 검사할 이유가 없다.
+        호출부(`routes_creation.py::_gm_dedupe_key` 조회)가 AI를 부르기
+        **전에** 먼저 「이미 같은 dedupe_key로 말했는가」를 본다 — 하지만
+        그 조회는 단일 소비자 큐 밖의 일반 속성 읽기라 두 요청이 겹치면
+        (두 탭, 재시도) 둘 다 조회를 통과해 둘 다 여기까지 온다. **그래서
+        이 메서드가 큐 안에서 같은 검사를 다시 한다** — `_prepare_confirm`
+        의 `AlreadyConfirmed`/`_prepare_resolve_check`의 `AlreadyResolved`/
+        `_prepare_record_resource_change`의 `AlreadyChanged`와 같은 자리
+        (12.3-REVIEW.md CR-04, D-12). 이 단락이 없으면 겹친 두 요청이
+        `creation_gm_spoke`를 두 번 append한다 — 리듀서가 `dedupe_key`로
+        덮어써 `creation_gm_said`엔 하나만 남지만 `events` 테이블엔 둘 다
+        남고, 그보다 먼저 AI 제공자가 실제로 두 번 불린 뒤다(D-12 위반).
+        `RecordInterjection`처럼 명단 잠금 여부는 검사하지 않는다 — GM의
+        안내·지목·되묻기·정리는 명단이 잠기기 **전**에만 호출되는 경로이고
+        (라우트가 이미 `party_roster is not None`을 409로 막는다), 이
+        명령 자신이 그 경계를 다시 검사할 이유가 없다.
         """
+        prior = self.state.creation_gm_said.get(command.dedupe_key)
+        if prior is not None:
+            raise AlreadyGmSpoken(prior)
         if not command.say.strip():
             raise CommandRejected("say는 비어 있을 수 없다")
         return (

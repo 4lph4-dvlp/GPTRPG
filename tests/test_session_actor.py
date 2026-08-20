@@ -33,6 +33,7 @@ from gptrpg.rules_core.rulebook import (
 from gptrpg.session_actor.actor import (
     AdvanceClock,
     AlreadyConfirmed,
+    AlreadyGmSpoken,
     AlreadyOccupied,
     AlreadyResolved,
     AppendNarration,
@@ -46,6 +47,7 @@ from gptrpg.session_actor.actor import (
     ProceedEligible,
     RecordActionClassification,
     RecordAiCall,
+    RecordGmSpoke,
     RecordInterjection,
     ResolveCheck,
     SessionActor,
@@ -1307,6 +1309,52 @@ async def test_concurrent_occupy_different_characters_all_succeed(tmp_db_path):
     events = _read_events(tmp_db_path)
     occupied_events = [event for event in events if event.event_type == "character_occupied"]
     assert len(occupied_events) == 4
+
+
+async def test_concurrent_record_gm_spoke_same_dedupe_key_appends_exactly_one_event(
+    tmp_db_path,
+):
+    """12.3-REVIEW.md CR-04 — 두 겹친 요청이 같은 `dedupe_key`로
+    `RecordGmSpoke`를 동시에 제출해도(라우트 층의 `already_said is None`
+    조회는 단일 소비자 큐 밖의 읽기라 둘 다 통과할 수 있다), 큐 안에서
+    처리되는 순서는 직렬이므로 두 번째는 `_prepare_gm_spoke`의 단락에
+    걸려 `AlreadyGmSpoken`을 받고, `creation_gm_spoke` 사건은 정확히
+    하나만 기록에 남는다 — `_prepare_confirm`/`_prepare_resolve_check`/
+    `_prepare_record_resource_change`가 이미 세운 규율과 같다."""
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        results = await asyncio.gather(
+            actor.submit(
+                RecordGmSpoke(
+                    kind="announce",
+                    say="던전에 오신 것을 환영합니다",
+                    target_character_id=None,
+                    dedupe_key="announce:v1",
+                )
+            ),
+            actor.submit(
+                RecordGmSpoke(
+                    kind="announce",
+                    say="던전에 오신 것을 환영합니다",
+                    target_character_id=None,
+                    dedupe_key="announce:v1",
+                )
+            ),
+            return_exceptions=True,
+        )
+    finally:
+        await actor.stop()
+        store.close()
+
+    successes = [r for r in results if isinstance(r, int)]
+    rejections = [r for r in results if isinstance(r, AlreadyGmSpoken)]
+    assert len(successes) == 1
+    assert len(rejections) == 1
+    assert rejections[0].prior.seq == successes[0]
+
+    events = _read_events(tmp_db_path)
+    gm_spoke_events = [event for event in events if event.event_type == "creation_gm_spoke"]
+    assert len(gm_spoke_events) == 1
 
 
 # ---------------------------------------------------------------------------
