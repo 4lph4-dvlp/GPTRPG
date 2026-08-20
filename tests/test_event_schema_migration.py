@@ -33,6 +33,9 @@ from gptrpg.event_log.schema import (
     EVENT_SCHEMA_VERSION,
     CharacterCreated,
     CheckResolved,
+    CreationConsentRecorded,
+    CreationGmSpoke,
+    CreationHostClaimed,
     CreationInterjection,
     CreationStatEntryRecord,
     CreationStepCompleted,
@@ -657,6 +660,28 @@ _NEW_EVENT_FACTORIES = {
         recorded_at=utc_now_iso(), event_type="party_roster_locked",
         character_ids=("bram",), player_character_count=1,
     ),
+    # 판 9 -> 판 11(Phase 12.3, WR-03 12.3-REVIEW.md 수정) — 캐릭터 만들기
+    # 화면 줄기가 늘린 신설 사건 셋. 이 파일이 스스로 세운 규율(다섯 번째
+    # UnknownEventType 사고를 막는다, schema.py 판 올리기 도크스트링)이
+    # 판 9 다섯 종류에서 멈춰 있었다 — 판 11 셋은 CreationGmSpoke 직접
+    # 왕복·접기 단위 시험이 이 저장소 어디에도 없었다(HTTP 경로를 통한
+    # 간접 확인만 있었다).
+    "creation_gm_spoke": lambda seq: CreationGmSpoke(
+        session_id="s-creation", seq=seq, schema_version=11, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="creation_gm_spoke",
+        kind="announce", say="던전에 오신 것을 환영합니다", target_character_id=None,
+        dedupe_key="announce:v1",
+    ),
+    "creation_consent_recorded": lambda seq: CreationConsentRecorded(
+        session_id="s-creation", seq=seq, schema_version=11, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="creation_consent_recorded",
+        character_id="bram", browser_id="b1", agree=True, reopened_step_id=None,
+    ),
+    "creation_host_claimed": lambda seq: CreationHostClaimed(
+        session_id="s-creation", seq=seq, schema_version=11, caused_by_seq=None,
+        recorded_at=utc_now_iso(), event_type="creation_host_claimed",
+        browser_id="b1", reason="first", previous_browser_id=None,
+    ),
 }
 
 
@@ -664,8 +689,8 @@ _NEW_EVENT_FACTORIES = {
 def test_new_creation_event_round_trips_through_parse_event_without_losing_fields(
     event_type,
 ):
-    """다섯 신설 사건 각각을 직렬화 -> 역직렬화(`parse_event`)해도 칸이
-    하나도 안 바뀐다."""
+    """여덟 신설 사건 각각을 직렬화 -> 역직렬화(`parse_event`)해도 칸이
+    하나도 안 바뀐다(판 9 다섯 + 판 11 셋, WR-03 12.3-REVIEW.md 수정)."""
     original = _NEW_EVENT_FACTORIES[event_type](0)
     round_tripped = parse_event(original.model_dump_json())
     assert round_tripped == original
@@ -673,16 +698,16 @@ def test_new_creation_event_round_trips_through_parse_event_without_losing_field
 
 @pytest.mark.parametrize("event_type", sorted(_NEW_EVENT_FACTORIES))
 def test_new_creation_event_folds_without_unknown_event_type(event_type):
-    """다섯 신설 사건 각각이 `apply_event`에 분기를 갖는다 —
-    `UnknownEventType`이 안 난다. 이 저장소가 이 사고를 이미 네 번 냈다
-    (schema.py 판 올리기 도크스트링) — 다섯 번째를 여기서 막는다."""
+    """여덟 신설 사건(판 9 다섯 + 판 11 셋) 각각이 `apply_event`에 분기를
+    갖는다 — `UnknownEventType`이 안 난다. 이 저장소가 이 사고를 이미 네 번
+    냈다(schema.py 판 올리기 도크스트링) — 다섯 번째를 여기서 막는다."""
     event = _NEW_EVENT_FACTORIES[event_type](0)
     state = apply_event(initial_state("s-creation"), event.event_type, event.model_dump())
     assert state.last_seq == 0
 
 
 def test_unknown_event_type_still_raises_unknown_event_type():
-    """분기 누락 회귀 방어의 반대 방향 — 이 다섯 종류 밖의 진짜 모르는
+    """분기 누락 회귀 방어의 반대 방향 — 이 여덟 종류 밖의 진짜 모르는
     `event_type`은 여전히 `UnknownEventType`으로 멈춘다(조용히 넘어가지
     않는다)."""
     state = initial_state("s-creation")
