@@ -13,6 +13,7 @@ CR-02·부분 재진행)을 시험한다 — 이 파일은 그 위에 12.3-03이
 스레드 전용 새 연결을 연다).
 """
 
+import json
 import time
 
 from gptrpg.event_log.store import EventStore
@@ -469,3 +470,30 @@ def test_host_response_never_leaks_a_browser_id(web_client):
     body = response.json()
     assert set(body.keys()) == {"you_are_host", "host_claimed", "changed"}
     assert "the-secret-browser-id" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — 동의·방장 경로가 폴링과 짝지어진다.
+# ---------------------------------------------------------------------------
+
+
+def test_claiming_host_makes_creation_host_claimed_true_with_no_identifier(web_client):
+    """방장을 잡으면 `state.creation_host_claimed`가 참이 되고, 그
+    응답에는 여전히 방장의 식별자가 없다(T-12.3-05)."""
+    client = web_client
+    session_id = SESSION_ID + "-poll-host-claimed"
+
+    before = client.get(f"/api/sessions/{session_id}/events", params={"from_seq": 0})
+    assert before.status_code == 200
+    assert before.json()["state"]["creation_host_claimed"] is False
+
+    assert _claim_host(client, "browser-poll", session_id=session_id).status_code == 200
+
+    after = client.get(f"/api/sessions/{session_id}/events", params={"from_seq": 0})
+    assert after.status_code == 200
+    state = after.json()["state"]
+    assert state["creation_host_claimed"] is True
+    # state 칸에는 여부만 있다 — 식별자는 어느 state 키에도 없다(T-12.3-05).
+    # (사건 기록 자체(events 목록)는 신원 감사 목적으로 browser_id를 담는
+    # 것이 정상이다 — 이 검사는 GameStateView 쪽만 겨눈다.)
+    assert "browser-poll" not in json.dumps(state)

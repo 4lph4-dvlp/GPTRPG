@@ -14,9 +14,11 @@ import type {
   CharacterSummary,
   ConfirmResourceChangeResponse,
   ConfirmResponse,
+  ConsentResponse,
   CreationAxisValueRecord,
   CreationCompleteResponse,
   CreationFollowUpResponse,
+  CreationHostResponse,
   CreationStepView,
   DeclareResponse,
   MoveCandidate,
@@ -255,6 +257,36 @@ export function wrapUpCreation(
 ): Promise<WrapUpCreationResponse> {
   return postJsonWithDetail<WrapUpCreationResponse>(`${sessionBase(sessionId)}/creation/wrap-up`, {
     rulebook_id: rulebookId,
+  });
+}
+
+export interface RecordCreationConsentBody {
+  character_id: string;
+  browser_id: string;
+  agree: boolean;
+  step_id?: string;
+}
+
+/** 동의 표시와 「아니요」를 통한 부분 재진행을 사건으로 남긴다(D-03/D-11).
+ * 사람이 직접 눌러 400/403/409를 받을 수 있다(D-15) — `postJsonWithDetail`을
+ * 쓴다. */
+export function recordCreationConsent(
+  sessionId: string,
+  body: RecordCreationConsentBody,
+): Promise<ConsentResponse> {
+  return postJsonWithDetail<ConsentResponse>(`${sessionBase(sessionId)}/creation/consent`, body);
+}
+
+/** 방장을 잡거나 승계한다(D-11) — 이 호출 자체가 재실 신호다. 서버가
+ * 경쟁에서 진 호출도 409로 올리지 않고 `you_are_host: false`로 200을
+ * 돌려주므로 이 함수가 실제로 4xx/`ApiError`를 던지는 일은 드물지만,
+ * 다른 만들기 POST와 같은 함수를 써 일관성을 지킨다(D-15). */
+export function claimCreationHost(
+  sessionId: string,
+  browserId: string,
+): Promise<CreationHostResponse> {
+  return postJsonWithDetail<CreationHostResponse>(`${sessionBase(sessionId)}/creation/host`, {
+    browser_id: browserId,
   });
 }
 

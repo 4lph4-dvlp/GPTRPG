@@ -589,6 +589,26 @@ export interface WrapUpCreationResponse {
   seq: number;
 }
 
+/** `POST .../creation/consent`의 응답(D-03/D-11) —
+ * `routes_creation.py::ConsentResponse`. `agree=false`일 때만
+ * `reopened_step_id`가 채워진다. */
+export interface ConsentResponse {
+  locked: boolean;
+  party_roster: string[] | null;
+  reopened_step_id: string | null;
+  message: string | null;
+}
+
+/** `POST .../creation/host`의 응답(D-11) —
+ * `routes_creation.py::CreationHostResponse`. **`creation_host_browser_id`
+ * 값 자체는 절대 담기지 않는다**(T-12.3-05) — 부른 사람에게 「너인가
+ * 아닌가」만 답한다. */
+export interface CreationHostResponse {
+  you_are_host: boolean;
+  host_claimed: boolean;
+  changed: boolean;
+}
+
 export interface ProceedResponse {
   proceeded: boolean;
   narration_chunk_count: number;

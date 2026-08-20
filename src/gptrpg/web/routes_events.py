@@ -96,6 +96,12 @@ class GameStateView(BaseModel):
     (서버)에만 있어야 어긋남이 구조적으로 불가능하다.** 계산은
     `creation_state.py`(서버 두 라우터가 공유)와 `GameState`에서 그대로
     가져온다. 화면은 이 칸들을 읽기만 하고 다시 접지 않는다.
+
+    **방장이 누구인지는 이 응답에 없다(T-12.3-05).** `creation_host_claimed`
+    는 여부(불리언)만 담는다 — 「내가 방장인가」는 부른 사람에게만 답하는
+    전용 경로(`POST /creation/host`)가 답한다. 뒤에 오는 계획이 편의로
+    `creation_host_browser_id`를 여기 싣지 않도록 이유를 남긴다: 방장의
+    식별자가 새면 그 값을 그대로 넣어 승계를 가로챌 수 있다.
     """
 
     session_id: str
