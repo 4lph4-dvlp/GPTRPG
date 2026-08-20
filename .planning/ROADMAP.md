@@ -614,7 +614,7 @@ Plans:
 **Depends on**: Phase 12.1 (만들기 경로·GM 대화·동의·명단 잠금이 전부 서버에 있다),
 Phase 8 (점유 규칙과 서명 쿠키 신원)
 **Requirements**: TBD (논의 전 — `/gsd-discuss-phase 12.3`에서 정한다)
-**Plans:** 3/5 plans executed
+**Plans:** 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -628,7 +628,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 12.3-03-PLAN.md — 동의와 방장을 액터 메모리에서 사건 기록으로 옮긴다
-- [ ] 12.3-04-PLAN.md — 만들기 대화판: 항목 조작 · 끼어들기 · 고치기 · 주사위
+- [x] 12.3-04-PLAN.md — 만들기 대화판: 항목 조작 · 끼어들기 · 고치기 · 주사위
 
 **Wave 4** *(blocked on Wave 3 completion)*
 

@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면
 status: executing
-stopped_at: Completed 12.3-03-PLAN.md
-last_updated: "2026-08-20T15:09:25.773Z"
+stopped_at: Completed 12.3-04-PLAN.md
+last_updated: "2026-08-20T15:35:24.790Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 12.3 execution started
-state_head: b3537b63c5803f2ebcacce7e7f294dfe809fa081
+state_head: 28736ef24fa3aad1099f9b87c09c8df7c38481e3
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 43
-  completed_plans: 41
+  completed_plans: 42
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.3 (캐릭터 만들기 화면) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-20 — Phase 12.3 execution started
@@ -134,6 +134,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P01 | 78min | 3 tasks | 19 files |
 | Phase 12.3 P02 | 24min | 3 tasks | 6 files |
 | Phase 12.3 P03 | 45min | 3 tasks | 9 files |
+| Phase 12.3 P04 | 40min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -313,6 +314,8 @@ Progress: [██████████] 100%
 - [Phase 12.3]: GM의 지목·되묻기·정리를 announce와 같은 사건화 모양으로 통일하고, 만들기 진행 상태 계산을 web/creation_state.py 한 자리로 모아 routes_creation.py·routes_events.py가 공유한다 — 판단이 두 곳에 생기면 언젠가 어긋난다는 Phase 12.2 규율을 그대로 따랐다(D-04)
 - [Phase 12.3]: 동의/재오픈을 액터 메모리에서 creation_consent_recorded 사건으로 옮기고, 방장(ClaimCreationHost)을 신설해 인원 확정 권한을 사건 기록 위에 세웠다(12.3-03)
 - [Phase 12.3]: 방장 재실 표는 사건이 아니라 프로세스 메모리로 뒀다 — 판단은 서버 한 자리에만 있되 그 재료까지 전부 사건일 필요는 없다는 재량 판단(12.3-03 Task 2)
+- [Phase 12.3]: 만들기 대화판이 단일 활성 항목(activeRow) 모델을 쓴다 — 다음 미완료 필수 항목이나 고치기로 연 항목 하나에만 조작 UI를 그린다 — 12.1 D-03의 자기소개처럼을 마법사가 아니면서도 한 번에 하나씩 답하는 대화 리듬으로 해석했다
+- [Phase 12.3]: DiceModal이 판정과 만들기 굴림 두 자리에서 재사용된다 — roll 프롭을 유니온으로 넓히고 눈 개수·타이밍·착지값 코드는 한 줄도 안 바꿨다 — 같은 굴림은 같게 보여야 한다(D-07) — 새 연출을 만들지 않는다
 
 ### Pending Todos
 
@@ -370,8 +373,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-20T15:09:25.481Z
-Stopped at: Completed 12.3-03-PLAN.md
+Last session: 2026-08-20T15:35:24.498Z
+Stopped at: Completed 12.3-04-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
