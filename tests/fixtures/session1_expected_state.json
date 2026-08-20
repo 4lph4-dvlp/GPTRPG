@@ -277,6 +277,10 @@
     }
   },
   "created_characters": {},
+  "creation_consents": {},
+  "creation_gm_said": {},
+  "creation_host_browser_id": null,
+  "creation_rulebook_id": null,
   "creation_step_values": {},
   "declare_no_check": {},
   "declare_owners": {},
@@ -289,6 +293,7 @@
   "party_roster": null,
   "party_size_fixed": null,
   "prompt_tokens": 87701,
+  "reopened_creation_steps": [],
   "resource_change_by_cause": {},
   "session_id": "session1",
   "total_tokens": 112069,

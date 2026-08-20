@@ -2,7 +2,7 @@
  * 서버 응답 모양 — 파이썬 쪽 pydantic 모델과 칸 이름을 한 글자도 다르게 짓지
  * 않는다. 권위는 다음 세 파일이고 이쪽은 화면 전용 사본이다:
  *
- *   src/gptrpg/event_log/schema.py             사건 6종
+ *   src/gptrpg/event_log/schema.py             사건 16종
  *   src/gptrpg/web/routes_events.py            폴링 응답
  *   src/gptrpg/web/routes_characters.py        캐릭터 목록·시트
  *   src/gptrpg/rules_core/check_calculation.py 계산 조각 모양의 권위(Phase 12.2)
@@ -162,6 +162,100 @@ export interface SceneIllustratedEvent extends EventEnvelope {
   latency_ms: number;
 }
 
+/** 만들기 항목 하나가 확정한 자원 축 값 하나(판 9) — `schema.py::CreationAxisValueRecord`. */
+export interface CreationAxisValueRecord {
+  axis_name: string;
+  value: number;
+}
+
+/** `rules_core.entities.StatEntry`의 여덟 칸을 그대로 옮긴 것(판 9) —
+ * `schema.py::CreationStatEntryRecord`. */
+export interface CreationStatEntryRecord {
+  name: string;
+  form: string;
+  current: number | null;
+  max: number | null;
+  depleted_effect_ref: string | null;
+  slot_values: (string | null)[] | null;
+  tags: string[] | null;
+  none_kind: string | null;
+}
+
+export interface PartySizeFixedEvent extends EventEnvelope {
+  event_type: "party_size_fixed";
+  player_character_count: number;
+  rulebook_id: string;
+  rulebook_min: number;
+  rulebook_max: number | null;
+}
+
+export interface CreationStepCompletedEvent extends EventEnvelope {
+  event_type: "creation_step_completed";
+  character_id: string;
+  browser_id: string;
+  step_id: string;
+  kind: string;
+  text_value: string | null;
+  picked: string[] | null;
+  axis_values: CreationAxisValueRecord[] | null;
+  rolls: number[] | null;
+  superseded_seq: number | null;
+}
+
+export interface CreationInterjectionEvent extends EventEnvelope {
+  event_type: "creation_interjection";
+  speaker_character_id: string;
+  browser_id: string;
+  during_character_id: string;
+  mentioned_character_ids: string[];
+  text: string;
+}
+
+export interface CharacterCreatedEvent extends EventEnvelope {
+  event_type: "character_created";
+  character_id: string;
+  browser_id: string;
+  display_name: string;
+  rulebook_id: string;
+  one_line_intro: string;
+  stats: CreationStatEntryRecord[];
+}
+
+export interface PartyRosterLockedEvent extends EventEnvelope {
+  event_type: "party_roster_locked";
+  character_ids: string[];
+  player_character_count: number;
+}
+
+/**
+ * GM(진행자)이 만들기 중에 한 말 한 줄(D-02, 판 11) — 안내·지목·되묻기·정리
+ * 네 갈래를 `kind`로 구분한다(12.3-01 Task 0 `one-event` 결정).
+ */
+export interface CreationGmSpokeEvent extends EventEnvelope {
+  event_type: "creation_gm_spoke";
+  kind: "announce" | "nominate" | "follow_up" | "wrap_up";
+  say: string;
+  target_character_id: string | null;
+  dedupe_key: string;
+}
+
+/** 캐릭터 하나의 만들기 동의 여부(D-03, 판 11). */
+export interface CreationConsentRecordedEvent extends EventEnvelope {
+  event_type: "creation_consent_recorded";
+  character_id: string;
+  browser_id: string;
+  agree: boolean;
+  reopened_step_id: string | null;
+}
+
+/** 이 세션의 방장이 정해졌다(D-11, 판 11). */
+export interface CreationHostClaimedEvent extends EventEnvelope {
+  event_type: "creation_host_claimed";
+  browser_id: string;
+  reason: "first" | "succession";
+  previous_browser_id: string | null;
+}
+
 export type GameEvent =
   | ActionDeclaredEvent
   | ActionConfirmedEvent
@@ -170,7 +264,15 @@ export type GameEvent =
   | ClockAdvancedEvent
   | AiInvokedEvent
   | SceneIllustratedEvent
-  | ResourceChangedEvent;
+  | ResourceChangedEvent
+  | PartySizeFixedEvent
+  | CreationStepCompletedEvent
+  | CreationInterjectionEvent
+  | CharacterCreatedEvent
+  | PartyRosterLockedEvent
+  | CreationGmSpokeEvent
+  | CreationConsentRecordedEvent
+  | CreationHostClaimedEvent;
 
 export interface GameStateView {
   session_id: string;

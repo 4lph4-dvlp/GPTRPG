@@ -337,11 +337,19 @@ def test_event_schema_version_was_nine_before_phase_12_2():
     assert EVENT_SCHEMA_VERSION >= 9
 
 
-def test_event_schema_version_is_ten():
-    """판 10 못박기(Phase 12.2, D-01/D-02/D-03) — 판정 합계·룰북 이름이
-    사건 형식에 닿은 현재 판이다. 누가 무심코 판을 또 올리거나 내리면 이
-    값이 바뀌어 이 시험이 잡는다."""
-    assert EVENT_SCHEMA_VERSION == 10
+def test_event_schema_version_was_ten_before_phase_12_3():
+    """판 10 시절의 사실만 남긴다(Phase 12.2, D-01/D-02/D-03) — 판정
+    합계·룰북 이름이 사건 형식에 닿았을 때의 판이다. 그 이후 12.3-01이
+    만들기 사건 셋(`creation_gm_spoke`·`creation_consent_recorded`·
+    `creation_host_claimed`)으로 판을 11로 올렸다(아래 시험)."""
+    assert EVENT_SCHEMA_VERSION >= 10
+
+
+def test_event_schema_version_is_eleven():
+    """판 11 못박기(Phase 12.3, D-02/D-03/D-11) — 캐릭터 만들기 화면
+    줄기가 GM의 말·동의·방장을 사건 형식에 닿게 한 현재 판이다. 누가
+    무심코 판을 또 올리거나 내리면 이 값이 바뀌어 이 시험이 잡는다."""
+    assert EVENT_SCHEMA_VERSION == 11
 
 
 def _tuple_key_to_str(key: tuple) -> str:
@@ -373,6 +381,11 @@ def _json_safe(value):
         return converted
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
+    if isinstance(value, frozenset):
+        # `reopened_creation_steps`(판 11+, Phase 12.3, D-11)가 도입한
+        # 유일한 frozenset 칸 — 정렬해 결정적인 목록으로 바꾼다(집합은
+        # 순서가 없으므로 정렬하지 않으면 실행마다 diff가 흔들린다).
+        return sorted(_json_safe(item) for item in value)
     return value
 
 

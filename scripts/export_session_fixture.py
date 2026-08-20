@@ -76,6 +76,10 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(item) for item in value]
     if isinstance(value, tuple):
         return [_json_safe(item) for item in value]
+    if isinstance(value, frozenset):
+        # `reopened_creation_steps`(판 11+, Phase 12.3, D-11) — 정렬해
+        # 결정적인 목록으로 바꾼다(집합은 순서가 없다).
+        return sorted(_json_safe(item) for item in value)
     return value
 
 

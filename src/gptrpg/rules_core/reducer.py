@@ -56,6 +56,24 @@ class CreationStepFold:
 
 
 @dataclass(frozen=True)
+class CreationGmLineFold:
+    """GM이 만들기 중에 한 말 한 줄 — 접힌 결과(판 11+, Phase 12.3, D-02).
+    `CreationStepFold`와 같은 자리·같은 형식이다.
+
+    같은 `dedupe_key`로 두 번째 `creation_gm_spoke` 사건이 오면 이
+    레코드는 통째로 새 값으로 덮인다(D-12 「이미 말했나」를 서버가
+    여기서 본다) — 실제로는 서버가 같은 키를 다시 내지 않으므로
+    (`_gm_dedupe_key` 조회가 AI 호출 앞에 온다) 이 자리가 두 번
+    덮이는 일은 정상 흐름에서 일어나지 않는다.
+    """
+
+    seq: int
+    kind: str
+    say: str
+    target_character_id: str | None
+
+
+@dataclass(frozen=True)
 class GameState:
     """사건 기록을 처음부터 훑어 만드는 현재 상태.
 
@@ -171,6 +189,31 @@ class GameState:
     잠겼다」이고, 빈 튜플은 나오지 않는다(잠금 명령이 빈 명단을 거절한다,
     `LockPartyRoster`). 한 번 채워지면 다시 `None`으로 돌아가지 않는다 —
     푸는 사건이 없다(D-08)."""
+    creation_gm_said: dict[str, CreationGmLineFold] = field(default_factory=dict)
+    """dedupe_key -> 그 시점 GM이 한 말(판 11+, Phase 12.3, D-02/D-12).
+    `creation_gm_spoke` 사건에서만 채워진다. 같은 키로 다시 오면 나중
+    것이 이긴다 — D-12의 「이미 말했나」를 서버가 여기서 본다. 액터
+    메모리가 아니라 사건에서 다시 접은 값이라 서버 재시작에도 그대로
+    복원된다."""
+    creation_consents: dict[str, bool] = field(default_factory=dict)
+    """character_id -> 동의 여부(판 11+, Phase 12.3, D-03). `creation_consent_recorded`
+    사건에서만 채워진다. 지금 액터 메모리 `_creation_consents`가 하던
+    일을 사건에서 다시 접은 값으로 옮긴 것이라 서버 재시작에도 살아남고,
+    화면이 「누가 아직 안 눌렀는지」를 이름까지 보여줄 수 있다."""
+    reopened_creation_steps: frozenset[tuple[str, str]] = field(default_factory=frozenset)
+    """다시 열린 `(character_id, step_id)` 집합(판 11+, Phase 12.3,
+    D-11 부분 재진행). `creation_consent_recorded` 사건이 `agree=False`로
+    올 때만 채워진다. 지금 액터 메모리 `_reopened_creation_steps`가 하던
+    일을 사건에서 다시 접은 값으로 옮긴 것이다."""
+    creation_host_browser_id: str | None = None
+    """이 세션의 방장(판 11+, Phase 12.3, D-11). `creation_host_claimed`
+    사건에서만 채워진다. `None`은 「아직 아무도 방장을 안 잡았다」다."""
+    creation_rulebook_id: str | None = None
+    """이 세션이 어느 룰북으로 캐릭터를 만드는가(판 11+, Phase 12.3).
+    새 사건 칸이 아니라 기존 `party_size_fixed` 사건의 `rulebook_id`
+    칸에서 채운다 — 인원 확정과 룰북 선택이 같은 사건에서 함께
+    일어나므로 새 사건을 만들 이유가 없다. `None`은 「아직 인원이 확정
+    안 됐다」다."""
 
 
 def initial_state(session_id: str) -> GameState:
@@ -220,8 +263,9 @@ def _legacy_v1_counts_as_failure(grade: str) -> bool:
 def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameState:
     """사건 하나를 이전 상태에 접어 새 상태를 돌려준다.
 
-    열여섯 종류를 전부 다룬다(판 9, 캐릭터 만들기 다섯 종류 추가). 모르는
-    종류가 오면 UnknownEventType을 던진다 — 조용히 넘어가지 않는다.
+    열아홉 종류를 전부 다룬다(판 9가 캐릭터 만들기 다섯 종류를, 판 11이
+    만들기 화면 줄기 세 종류를 늘렸다). 모르는 종류가 오면
+    UnknownEventType을 던진다 — 조용히 넘어가지 않는다.
     """
     seq = payload["seq"]
     if event_type == "action_declared":
@@ -400,7 +444,15 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
         # 종류가 하나라도 있는 세션이 폴링마다 UnknownEventType을 맞고
         # 영구히 안 열린다(08-CONTEXT.md D-06, 이미 여러 번 난 사고 —
         # `resource_changed`에 이어 이번이 다섯 번째 사례).
-        return replace(state, last_seq=seq, party_size_fixed=payload["player_character_count"])
+        # 판 11+(Phase 12.3)부터는 같은 사건에서 룰북 식별자도 함께
+        # 접는다(creation_rulebook_id) — 새 사건 칸이 아니라 이미 있는
+        # rulebook_id 칸을 두 번째 GameState 칸에 옮겨 적는 것뿐이다.
+        return replace(
+            state,
+            last_seq=seq,
+            party_size_fixed=payload["player_character_count"],
+            creation_rulebook_id=payload["rulebook_id"],
+        )
     if event_type == "creation_step_completed":
         # 만들기 항목 값 확정(판 9, D-03/D-07)은 (character_id, step_id)
         # 키로 **덮어쓴다** — 앞선 사건은 기록에서 지워지지 않고, 접은
@@ -465,6 +517,40 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
         # 이 이후로는 이 칸이 다시 None으로 돌아가지 않는다(푸는 사건이
         # 없다).
         return replace(state, last_seq=seq, party_roster=tuple(payload["character_ids"]))
+    if event_type == "creation_gm_spoke":
+        # GM이 한 말 한 줄(판 11, D-02/D-12)은 dedupe_key로 덮어쓴다 —
+        # creation_step_completed와 같은 「같은 키로 다시 오면 나중
+        # 것이 이긴다」 방식이다.
+        creation_gm_said = dict(state.creation_gm_said)
+        creation_gm_said[payload["dedupe_key"]] = CreationGmLineFold(
+            seq=seq,
+            kind=payload["kind"],
+            say=payload["say"],
+            target_character_id=payload.get("target_character_id"),
+        )
+        return replace(state, last_seq=seq, creation_gm_said=creation_gm_said)
+    if event_type == "creation_consent_recorded":
+        # 동의 기록(판 11, D-03/D-11)은 두 갈래다 — agree=True는 그
+        # 캐릭터의 동의를 켠다. agree=False는 지금 _process_reopen이
+        # 액터 메모리에서 하는 두 동작과 정확히 같다: 모인 동의를
+        # 전부 비우고, 다시 연 항목을 집합에 더한다.
+        if payload["agree"]:
+            creation_consents = dict(state.creation_consents)
+            creation_consents[payload["character_id"]] = True
+            return replace(state, last_seq=seq, creation_consents=creation_consents)
+        reopened_creation_steps = state.reopened_creation_steps | {
+            (payload["character_id"], payload["reopened_step_id"])
+        }
+        return replace(
+            state,
+            last_seq=seq,
+            creation_consents={},
+            reopened_creation_steps=reopened_creation_steps,
+        )
+    if event_type == "creation_host_claimed":
+        # 방장 기록(판 11, D-11)은 한 칸만 덮어쓴다 — 처음 잡든
+        # 승계든 최종 상태는 「지금 방장이 누구인가」 하나뿐이다.
+        return replace(state, last_seq=seq, creation_host_browser_id=payload["browser_id"])
     raise UnknownEventType(event_type)
 
 

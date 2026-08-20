@@ -24,6 +24,9 @@ from gptrpg.event_log.schema import (
     CharacterOccupied,
     CheckResolved,
     ClockAdvanced,
+    CreationConsentRecorded,
+    CreationGmSpoke,
+    CreationHostClaimed,
     CreationInterjection,
     CreationStepCompleted,
     ModifierRecord,
@@ -439,6 +442,9 @@ _EVENT_CLASSES: dict[str, type] = {
     "creation_interjection": CreationInterjection,
     "character_created": CharacterCreated,
     "party_roster_locked": PartyRosterLocked,
+    "creation_gm_spoke": CreationGmSpoke,
+    "creation_consent_recorded": CreationConsentRecorded,
+    "creation_host_claimed": CreationHostClaimed,
 }
 
 

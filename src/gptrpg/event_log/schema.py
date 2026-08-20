@@ -16,8 +16,32 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
-EVENT_SCHEMA_VERSION = 10
-"""판 9 -> 판 10: 판정 합계를 서버가 보낸다(Phase 12.2, D-01/D-02/D-03)가
+EVENT_SCHEMA_VERSION = 11
+"""판 10 -> 판 11: 캐릭터 만들기 화면 줄기(Phase 12.3, D-02/D-03/D-11)가
+사건 형식에 닿았다. 새 사건 종류가 셋 늘었다 — 칸이 아니라 **종류**다.
+
+`CreationGmSpoke`(GM이 만들기 중에 한 말 한 줄 — 안내·지목·되묻기·정리
+네 갈래를 `kind` 칸 하나로 묶는다, 12.3-01 Task 0 `one-event` 결정).
+지금까지 이 넷은 응답으로만 돌아가고 기록에 안 남아 부른 사람 말고는
+아무도 GM의 말을 못 봤다 — 폴링이 이미 기록 전체를 나르므로, 기록에
+남기면 다른 탭도 새로고침도 공짜로 따라온다(D-02). `dedupe_key`가
+「그 시점」을 나타내 서버가 같은 키로 다시 불려도 AI를 다시 부르지
+않는다(D-12).
+
+`CreationConsentRecorded`(동의 여부 — `agree=True`인 동의와
+`agree=False` + 항목 다시 열기를 한 종류로 담는다, D-03). 지금 액터
+메모리에 흩어진 `_creation_consents`와 `_reopened_creation_steps` 둘
+다 이 한 사건에서 접힌다.
+
+`CreationHostClaimed`(이 세션의 방장 — 가장 먼저 들어온 사람이거나
+앞선 방장의 승계, D-11). 지금까지 서버에 「방장」 개념 자체가 없었다.
+
+**`rules_core/reducer.py`의 세 신설 분기는 이 판 올리기와 반드시 같은
+커밋이다**(08-CONTEXT.md D-06, 이미 여러 번 난 사고 — `scene_illustrated`·
+`character_occupied`·`action_classified`·`resource_changed`·판 9의
+다섯 사건에 이어 이번이 여섯 번째 사례).
+
+판 9 -> 판 10: 판정 합계를 서버가 보낸다(Phase 12.2, D-01/D-02/D-03)가
 사건 형식에 닿았다. **새 사건 종류는 늘지 않는다** — 기존 `CheckResolved`에
 칸 두 개가 늘었을 뿐이다.
 
@@ -601,6 +625,70 @@ class PartyRosterLocked(EventEnvelope):
     player_character_count: int
 
 
+class CreationGmSpoke(EventEnvelope):
+    """GM(진행자)이 캐릭터 만들기 중에 한 말 한 줄(D-02, 판 11).
+
+    안내(`announce`)·지목(`nominate`)·되묻기(`follow_up`)·정리(`wrap_up`)
+    네 갈래를 한 종류로 묶는다(12.3-01 Task 0 `one-event` 결정) — 넷이
+    만드는 것이 전부 「GM이 한 말 한 줄」로 같은 모양이기 때문이다.
+    `kind`가 갈래를 구분한다.
+
+    지금까지 이 넷은 응답으로만 돌아가고 기록에 남지 않아, 부른 사람
+    말고는 아무도 GM의 말을 보지 못했다(12.3-CONTEXT.md 「이 논의가
+    밝힌 것 ①」). 이 사건이 그 구멍을 닫는다 — 폴링이 이미 기록
+    전체를 실어 나르므로, 기록에 남기기만 하면 다른 탭도 새로고침도
+    공짜로 따라온다(D-02).
+
+    `dedupe_key`는 「그 시점」을 나타내는 문자열이다(GM 호출의 입력이
+    바뀌면 새 값) — 서버가 같은 키로 다시 불려도 AI를 다시 부르지
+    않고 이 사건에 이미 적힌 `say`를 그대로 돌려준다(D-12). 네 갈래가
+    각자 다른 규칙으로 키를 짓는다 — 그 규칙은 `routes_creation.py`
+    (`_gm_dedupe_key`)에 있다.
+    """
+
+    event_type: Literal["creation_gm_spoke"]
+    kind: Literal["announce", "nominate", "follow_up", "wrap_up"]
+    say: str
+    target_character_id: str | None = None
+    dedupe_key: str
+
+
+class CreationConsentRecorded(EventEnvelope):
+    """캐릭터 하나의 만들기 동의 여부(D-03, 판 11).
+
+    동의(`agree=True`)와 「아니요 + 항목 다시 열기」(`agree=False`)를
+    한 종류로 담는다 — 지금 액터 메모리에 흩어져 있는
+    `_creation_consents`와 `_reopened_creation_steps` 둘 다 이 한
+    사건에서 접힌다. 하나만 사건으로 옮기면 재시작 뒤 두 값이 서로
+    어긋난다.
+
+    `agree=False`일 때만 `reopened_step_id`가 채워진다 — 다시 여는
+    항목 하나를 가리킨다. `agree=True`이면 `None`이다.
+    """
+
+    event_type: Literal["creation_consent_recorded"]
+    character_id: str
+    browser_id: str
+    agree: bool
+    reopened_step_id: str | None = None
+
+
+class CreationHostClaimed(EventEnvelope):
+    """이 세션의 방장이 정해졌다(D-11, 판 11).
+
+    방장은 「가장 먼저 들어온 사람」이고(`reason="first"`), 방장이
+    사라지면 다음 사람에게 넘어간다(`reason="succession"`, 이때
+    `previous_browser_id`가 넘겨준 쪽을 가리킨다). 인원 확정
+    (`FixPartySize`)이 한 번만 가능하므로 그 한 번을 누가 하는지가
+    기록에 남아야 한다.
+    """
+
+    event_type: Literal["creation_host_claimed"]
+    browser_id: str
+    reason: Literal["first", "succession"]
+    previous_browser_id: str | None = None
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -619,6 +707,9 @@ GameEvent = Annotated[
         CreationInterjection,
         CharacterCreated,
         PartyRosterLocked,
+        CreationGmSpoke,
+        CreationConsentRecorded,
+        CreationHostClaimed,
     ],
     Field(discriminator="event_type"),
 ]
@@ -643,9 +734,12 @@ _KNOWN_EVENT_TYPES = frozenset(
         "creation_interjection",
         "character_created",
         "party_roster_locked",
+        "creation_gm_spoke",
+        "creation_consent_recorded",
+        "creation_host_claimed",
     }
 )
-"""`GameEvent` 판별 유니온이 아는 열여섯 사건 종류 — `parse_event`가 이
+"""`GameEvent` 판별 유니온이 아는 열아홉 사건 종류 — `parse_event`가 이
 목록 밖의 `event_type`을 `CorruptEventRecord`로 분류하는 데 쓴다."""
 
 
@@ -655,7 +749,7 @@ class CorruptEventRecord(Exception):
 
     **정확히 이 셋만 잡는다** — ⓐ `schema_version` 칸 자체가 없다 ⓑ
     `schema_version`이 정수가 아니다 ⓒ `event_type`이 `_KNOWN_EVENT_TYPES`
-    열여섯 종류 밖이다. 「값이 작은 옛 판」(`schema_version`이 작은 정수)은
+    열아홉 종류 밖이다. 「값이 작은 옛 판」(`schema_version`이 작은 정수)은
     여기 포함되지 않는다 — `rules_core/reducer.py`의
     `if schema_version >= N` 분기가 이미 정상 처리하는 별개의 경로다. 이
     셋 밖의 다른 pydantic 검증 실패(예: 알려진 사건 종류인데 그 종류
@@ -679,7 +773,7 @@ def parse_event(raw: str) -> GameEvent:
     """JSON 문자열을 사건 객체로 되돌린다. 순수 JSON 파서만 쓴다 — pickle/eval 없음.
 
     형식 표시 칸이 아예 없거나(ⓐ) 정수가 아니거나(ⓑ), 사건 종류가 알려진
-    열여섯 종류 밖이면(ⓒ) pydantic의 일반 `ValidationError`가 그대로 새어
+    열아홉 종류 밖이면(ⓒ) pydantic의 일반 `ValidationError`가 그대로 새어
     나가지 않고 `CorruptEventRecord`로 멈춘다(QUAL-02) — 이 저장소의
     예외 관례(사유·식별자를 속성으로, 자유 문자열은 문구에 안 싣는다)를
     따른다. **「칸은 있는데 값이 옛것」은 구멍이 아니다** — `schema_version`이
