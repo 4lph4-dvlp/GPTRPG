@@ -43,6 +43,7 @@ from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
 from gptrpg.agents.context import PARTY_MEMBER_LIMIT
 from gptrpg.agents.creation_gm import (
     CreationGmContractViolation,
+    CreationGmFollowUp,
     CreationGmWrapUp,
     announce_requirements,
     judge_hooks,
@@ -599,6 +600,7 @@ class NominateSpeakerRequest(BaseModel):
 class NominateSpeakerResponse(BaseModel):
     character_id: str
     say: str
+    seq: int
 
 
 @router.post("/sessions/{session_id}/creation/nominate", response_model=NominateSpeakerResponse)
@@ -613,6 +615,11 @@ async def nominate_creation_speaker(
     이후에만 성립한다). AI가 후보 목록 밖을 지목하면
     `CreationGmContractViolation`이 나고, 이 경로는 그것을 흡수해 후보
     첫 번째로 폴백하며 500을 내지 않는다(ARCH-05).
+
+    **D-02/D-12 — announce와 정확히 같은 모양으로 사건에 남고, 서버가
+    한 번만 낸다.** `_gm_dedupe_key`로 「이미 지목했나」를 AI를 부르기
+    **전에** 본다 — 후보 목록이 바뀌지 않는 한(누군가 완성되지 않는 한)
+    같은 지목을 두 번 안 낸다.
     """
     actor = request.app.state.registry.get_or_create(session_id)
     state = actor.state
@@ -625,6 +632,15 @@ async def nominate_creation_speaker(
     if not candidates:
         raise HTTPException(status_code=409, detail="아직 자기소개를 안 끝낸 사람이 없다")
 
+    key = _gm_dedupe_key("nominate", state)
+    already_said = state.creation_gm_said.get(key)
+    if already_said is not None and already_said.target_character_id is not None:
+        return NominateSpeakerResponse(
+            character_id=already_said.target_character_id,
+            say=already_said.say,
+            seq=already_said.seq,
+        )
+
     transcript = _transcript_for(state, candidates)
 
     try:
@@ -636,14 +652,26 @@ async def nominate_creation_speaker(
         nomination = await asyncio.to_thread(
             nominate_speaker, candidates, transcript, provider, model
         )
+        character_id, say = nomination.character_id, nomination.say
     except CreationGmContractViolation as exc:
         print(f"경고: creation_gm 지목이 계약을 어겼다 — {exc}", file=sys.stderr)
-        first = candidates[0]
-        return NominateSpeakerResponse(
-            character_id=first, say=f"{first} 님, 이야기를 들려주시겠어요?"
-        )
+        character_id = candidates[0]
+        say = f"{character_id} 님, 이야기를 들려주시겠어요?"
 
-    return NominateSpeakerResponse(character_id=nomination.character_id, say=nomination.say)
+    try:
+        seq = await actor.submit(
+            RecordGmSpoke(
+                kind="nominate", say=say, target_character_id=character_id, dedupe_key=key
+            )
+        )
+    except RosterAlreadyLocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CommandRejected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return NominateSpeakerResponse(character_id=character_id, say=say, seq=seq)
 
 
 class CreationFollowUpRequest(BaseModel):
@@ -655,6 +683,9 @@ class CreationFollowUpResponse(BaseModel):
     needs_more: bool
     question: str | None
     required_steps_filled: bool
+    seq: int | None = None
+    """되물을 것이 있을 때만 채워진다(D-02 ④) — GM이 아무 말도 안 했으면
+    사건을 남기지 않으므로 짝지어질 `seq`가 없다."""
 
 
 @router.post("/sessions/{session_id}/creation/follow-up", response_model=CreationFollowUpResponse)
@@ -668,6 +699,14 @@ async def creation_follow_up(
     제출하려 하면 403(T-12.1-19). 아직 쿠키가 없는 참가자(완성 전)는 이
     검사를 그대로 통과한다 — `/creation/step`이 이미 쓰는 것과 같은 신원
     대조 범위다.
+
+    **D-02/D-12 — 되물을 것이 있을 때만 사건에 남는다.** `needs_more=True`면
+    announce/nominate와 같은 모양으로 `creation_gm_spoke` 사건에 남고 서버가
+    한 번만 낸다. `needs_more=False`(GM이 아무 말도 안 함)면 **사건을 남기지
+    않는다** — 대화 줄기에 남길 말이 없고, `RecordGmSpoke`도 빈 `say`를
+    거절한다. 이 경우 중복 방지가 굳이 필요하지 않다 — 값이 바뀌지 않는 한
+    다시 눌러도 같은 판정이 나오므로 비용은 AI를 한 번 더 부르는 것뿐이다
+    (D-14 「갈고리를 놓치지 않는다」는 사람이 「더 말하기」를 고를 때 지켜진다).
 
     `required_steps_filled`는 GM 재량(위층)과 별개로 코드가 `GameState`
     에서 직접 계산한 룰북 최소선 충족 여부다(D-05 아래층). GM 호출이
@@ -701,6 +740,18 @@ async def creation_follow_up(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     required_steps_filled = _required_steps_filled(state, rulebook, body.character_id)
+
+    key = _gm_dedupe_key("follow_up", state, body.character_id)
+    already_said = state.creation_gm_said.get(key)
+    if already_said is not None:
+        needs_more = bool(already_said.say.strip())
+        return CreationFollowUpResponse(
+            needs_more=needs_more,
+            question=already_said.say if needs_more else None,
+            required_steps_filled=required_steps_filled,
+            seq=already_said.seq,
+        )
+
     step_labels = tuple(step.label for step in rulebook.creation_steps)
     transcript = _transcript_for(state, (body.character_id,))
 
@@ -713,14 +764,39 @@ async def creation_follow_up(
         follow_up = await asyncio.to_thread(judge_hooks, step_labels, transcript, provider, model)
     except CreationGmContractViolation as exc:
         print(f"경고: creation_gm 되묻기가 계약을 어겼다 — {exc}", file=sys.stderr)
+        follow_up = CreationGmFollowUp(needs_more=False, question=None)
+
+    if not follow_up.needs_more:
+        # 되물을 것이 없으면 GM이 아무 말도 안 한 것이다(D-02 ④) — 대화
+        # 줄기에 남길 말이 없으므로 사건을 남기지 않는다(RecordGmSpoke는
+        # 빈 say를 거절하기도 한다). 중복 방지도 필요 없다 — 값이 안
+        # 바뀐 동안 다시 눌러도 같은 판정(needs_more=False)이 나오므로
+        # 비용은 AI를 한 번 더 부르는 것뿐이다.
         return CreationFollowUpResponse(
-            needs_more=False, question=None, required_steps_filled=required_steps_filled
+            needs_more=False, question=None, required_steps_filled=required_steps_filled, seq=None
         )
 
+    try:
+        seq = await actor.submit(
+            RecordGmSpoke(
+                kind="follow_up",
+                say=follow_up.question,
+                target_character_id=body.character_id,
+                dedupe_key=key,
+            )
+        )
+    except RosterAlreadyLocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CommandRejected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     return CreationFollowUpResponse(
-        needs_more=follow_up.needs_more,
+        needs_more=True,
         question=follow_up.question,
         required_steps_filled=required_steps_filled,
+        seq=seq,
     )
 
 
@@ -742,6 +818,7 @@ class CharacterIntroBody(BaseModel):
 class WrapUpCreationResponse(BaseModel):
     say: str
     intros: list[CharacterIntroBody]
+    seq: int
 
 
 @router.post("/sessions/{session_id}/creation/wrap-up", response_model=WrapUpCreationResponse)
@@ -764,6 +841,12 @@ async def wrap_up_creation(
     경우에도 「시작한 사람 전원이 끝났는가」만 보면 된다. 아직 아무도
     안 만들었으면(참가자가 하나도 없으면) 정리할 것이 없으므로 이것도
     409다.
+
+    **D-02/D-12 — announce/nominate와 정확히 같은 모양으로 사건에 남고,
+    서버가 한 번만 낸다.** 완성된 캐릭터 집합이 바뀌지 않는 한(동의
+    관문에서 「아니요」로 항목이 다시 채워지지 않는 한) 같은 정리를 두 번
+    안 낸다 — 이미 말했으면 `CreateCharacter` 재제출도 건너뛴다(정리
+    내용이 안 바뀌었으므로 다시 쓸 값도 없다).
     """
     actor = request.app.state.registry.get_or_create(session_id)
     state = actor.state
@@ -784,6 +867,23 @@ async def wrap_up_creation(
         (character_id, _fallback_intro_for(state, rulebook, character_id))
         for character_id in character_ids
     )
+
+    key = _gm_dedupe_key("wrap_up", state)
+    already_said = state.creation_gm_said.get(key)
+    if already_said is not None:
+        # 완성된 집합이 바뀌지 않았으면 정리 내용도 안 바뀌었다 — 각
+        # 캐릭터의 한 줄 소개는 `fallback_intros`와 같은 계산으로 다시
+        # 조립한다(제공자를 다시 부르지 않는다, D-12). `CreateCharacter`
+        # 재제출도 건너뛴다 — 첫 호출에서 이미 같은 값으로 기록됐다.
+        return WrapUpCreationResponse(
+            say=already_said.say,
+            intros=[
+                CharacterIntroBody(character_id=character_id, intro=intro)
+                for character_id, intro in fallback_intros
+            ],
+            seq=already_said.seq,
+        )
+
     transcript = _transcript_for(state, character_ids)
 
     try:
@@ -818,12 +918,24 @@ async def wrap_up_creation(
         except SequenceConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    try:
+        seq = await actor.submit(
+            RecordGmSpoke(kind="wrap_up", say=result.say, target_character_id=None, dedupe_key=key)
+        )
+    except RosterAlreadyLocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CommandRejected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     return WrapUpCreationResponse(
         say=result.say,
         intros=[
             CharacterIntroBody(character_id=character_id, intro=intro)
             for character_id, intro in result.intros
         ],
+        seq=seq,
     )
 
 
