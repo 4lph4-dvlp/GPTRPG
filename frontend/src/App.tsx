@@ -74,7 +74,12 @@ export function App() {
     case "invalid":
       return <InvalidSession sessionId={sessionId} />;
     case "creating":
-      return <CreationScreen sessionId={sessionId} />;
+      return (
+        <CreationScreen
+          sessionId={sessionId}
+          onEntered={(characterId) => setGate({ kind: "ready", characterId })}
+        />
+      );
     case "ready":
       return (
         <SessionScreen key={gate.characterId} sessionId={sessionId} characterId={gate.characterId} />

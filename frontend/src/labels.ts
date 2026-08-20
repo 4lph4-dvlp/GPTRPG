@@ -267,4 +267,21 @@ export const COPY = {
    * `diceModalTitle`("주사위 굴림 결과")을 재사용하지 않는다. 여기서는
    * 성공/실패가 아니라 무엇을 굴렸는지가 중요하다. */
   creationRollTitle: "만들기 굴림 결과",
+  /** 인원 확정 관문(Phase 12.3-05 Task 1, D-11) — 방장에게만 보이는
+   * 조작의 제목·확정 버튼, 그리고 방장이 아닌 사람에게 보이는 대기 문구.
+   * 인원 범위(예: 3~5명) 숫자는 여기 없다 — 판정은 항상 서버가 한다. */
+  creationPartySizeTitle: "이번 판 인원을 정해요",
+  creationPartySizeConfirm: "인원 확정",
+  creationWaitingForHost: "방을 연 사람이 인원을 정하는 중이에요",
+  /** 방장이 조용해져 내가 이어받았을 때 조작 위에 붙는 짧은 맥락 —
+   * 별도 알림 배너가 아니라 조작 바로 위 한 줄이다(D-11). */
+  creationHostTookOver: "방을 연 사람이 자리를 비워 당신이 이어받았어요",
+  /** 동의 관문(Phase 12.3-05 Task 2, D-03/D-11) 문구. */
+  creationAskWrapUp: "진행자에게 정리를 부탁하기",
+  creationConsentTitle: "이대로 시작해도 될까요?",
+  creationConsentYes: "이대로 시작",
+  creationConsentNo: "고칠 게 있어요",
+  creationConsentPending: "아직",
+  creationConsentDone: "동의함",
+  creationPickStepToReopen: "다시 열 항목을 골라 주세요",
 } as const;

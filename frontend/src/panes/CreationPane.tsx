@@ -21,6 +21,15 @@
  *    물어보기」가 뜬다. GM이 되묻기를 포기해도(`needs_more: false`) 사람이
  *    「더 말하기 / 이걸로 끝」을 고른다 — 이 선택은 **말할 기회**를 여는
  *    것이지 값을 정하는 일이 아니다.
+ *  · **정리 요청 · 동의 관문(12.3-05 Task 2, D-03/D-11)** — 전원이
+ *    완성되면(`creation_unfinished_character_ids`가 비었고
+ *    `creation_characters`가 비어 있지 않으면) 「진행자에게 정리를
+ *    부탁하기」가 뜬다. GM의 정리(`kind: "wrap_up"`)가 기록에 나타나면
+ *    동의 관문으로 넘어간다 — `state.creation_characters`를 전부 줄로
+ *    그리고 **이름**과 동의 여부를 보인다(D-03, 숫자만 보이지 않는다).
+ *    「고칠 게 있어요」는 `recordCreationConsent(agree: false)`로 항목
+ *    하나를 다시 열고, 그 순간부터는 `isMyTurn`이 아니어도(차례 지목은
+ *    안 바뀐다) 그 항목만 다시 채울 수 있다.
  *
  * **판단은 서버 한 자리에만(D-04).** 이 파일은 `stepRows`/`isMyTurn`/
  * `canEdit`/`nextUnfilledStep`(`session/creationView.ts`)이 이미 고른
@@ -35,7 +44,9 @@ import {
   completeCreation,
   completeCreationStep,
   creationFollowUp,
+  recordCreationConsent,
   recordInterjection,
+  wrapUpCreation,
 } from "../api/client.ts";
 import type { CompleteCreationStepBody } from "../api/client.ts";
 import type {
@@ -49,11 +60,13 @@ import { COPY, statLabel } from "../labels.ts";
 import { MAX_RAW_TEXT_LEN } from "../config.ts";
 import {
   canEdit,
+  consentGate,
   type CreationStepRow,
   creationErrorMessage,
   gmLinesFrom,
   isMyTurn,
   nextUnfilledStep,
+  pendingConsenters,
   stepRows,
 } from "../session/creationView.ts";
 
@@ -418,17 +431,32 @@ export function CreationPane({
 }: CreationPaneProps) {
   const myTurn = isMyTurn(state, myCharacterId);
   const rows = stepRows(steps, state, myCharacterId);
+  // 내 항목 중 지금 다시 열려 있는 것(D-11) — 동의 관문에서 「고칠 게
+  // 있어요」로 연 것이다. isMyTurn과 무관하다: 동의 관문에 들어선 시점엔
+  // 이미 아무도 「차례」가 아니다(creation_current_speaker_id는 지목이
+  // 끝나면 null로 남는다) — 그래도 이 항목 하나는 다시 채울 수 있어야
+  // D-11이 성립한다.
+  const myReopenedRow = rows.find((row) => row.reopened) ?? null;
+  const stepEditingEnabled = myTurn || myReopenedRow !== null;
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [followUp, setFollowUp] = useState<FollowUpPhase>({ kind: "idle" });
+  const [reopenPickerOpen, setReopenPickerOpen] = useState(false);
+  const [consentMessage, setConsentMessage] = useState<string | null>(null);
   const submittedDeriveRef = useRef<Set<string>>(new Set());
 
   const conversation = conversationLines(events, state.creation_characters);
+  // 「kind: "wrap_up"」인 GM 말이 기록에 있는가 — 존재 여부만 본다(진행
+  // 상태를 다시 계산하지 않는다, D-04). consentGate가 이 값과 state를
+  // 조합해 네 갈래를 고른다.
+  const wrappedUp = gmLinesFrom(events).some((line) => line.kind === "wrap_up");
+  const consentPhase = consentGate(state, wrappedUp);
 
   async function submitStep(stepId: string, payload: StepSubmitPayload): Promise<void> {
     setBusy(true);
     setError(null);
+    setConsentMessage(null);
     try {
       await completeCreationStep(sessionId, {
         character_id: myCharacterId,
@@ -473,6 +501,7 @@ export function CreationPane({
   async function askGm(): Promise<void> {
     setBusy(true);
     setError(null);
+    setConsentMessage(null);
     try {
       const response = await creationFollowUp(sessionId, myCharacterId, rulebookId);
       setFollowUp(
@@ -511,10 +540,51 @@ export function CreationPane({
     setEditingStepId(null);
   }
 
+  /** 「진행자에게 정리를 부탁하기」(Task 2 ①) — 넷이 동시에 눌러도
+   * `wrap_up`의 `_gm_dedupe_key`가 AI를 한 번만 부른다(D-12). 화면이
+   * 따로 잠그지 않는다. */
+  async function askWrapUp(): Promise<void> {
+    setBusy(true);
+    setError(null);
+    setConsentMessage(null);
+    try {
+      await wrapUpCreation(sessionId, rulebookId);
+      pollNow();
+    } catch (wrapUpError) {
+      setError(creationErrorMessage(wrapUpError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** 동의 관문의 두 버튼이 부르는 자리(Task 2 ②) — `agree=false`면
+   * `stepId`가 항상 함께 실린다(서버가 그것 없이는 400으로 거절한다).
+   * 성공하면 서버가 보낸 `message`를 그대로 담아 둔다(D-15) — 화면이
+   * 같은 뜻의 문장을 새로 짓지 않는다. */
+  async function sendConsent(agree: boolean, stepId?: string): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await recordCreationConsent(sessionId, {
+        character_id: myCharacterId,
+        browser_id: browserId,
+        agree,
+        step_id: stepId,
+      });
+      setConsentMessage(response.message);
+      setReopenPickerOpen(false);
+      pollNow();
+    } catch (consentError) {
+      setError(creationErrorMessage(consentError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const activeRow =
     editingStepId !== null
       ? (rows.find((row) => row.step.step_id === editingStepId) ?? null)
-      : nextUnfilledStep(rows);
+      : (myReopenedRow ?? (myTurn ? nextUnfilledStep(rows) : null));
 
   const followUpGateVisible = myTurn && editingStepId === null && nextUnfilledStep(rows) === null;
 
@@ -535,7 +605,7 @@ export function CreationPane({
         )}
       </div>
 
-      {myTurn ? (
+      {stepEditingEnabled ? (
         <div>
           {rows.map((row) => (
             <div className="chat-line" key={row.step.step_id}>
@@ -605,6 +675,76 @@ export function CreationPane({
               ) : null}
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {consentPhase === "needs_wrap_up" ? (
+        <div className="proposal">
+          <button
+            type="button"
+            className="btn btn--primary btn--wide"
+            disabled={busy}
+            onClick={() => void askWrapUp()}
+          >
+            {COPY.creationAskWrapUp}
+          </button>
+        </div>
+      ) : null}
+
+      {consentPhase === "open" ? (
+        <div className="proposal">
+          <p className="t-caps">{COPY.creationConsentTitle}</p>
+          {pendingConsenters(state).length > 0 ? (
+            <p className="t-label">
+              {COPY.creationConsentPending}: {pendingConsenters(state).join(", ")}
+            </p>
+          ) : null}
+          {state.creation_characters.map((character) => (
+            <div className="chat-line" key={character.character_id}>
+              <div className="chat-line__who">{character.display_name}</div>
+              <div className="chat-line__text t-label">
+                {character.consented ? COPY.creationConsentDone : COPY.creationConsentPending}
+              </div>
+              {character.character_id === myCharacterId ? (
+                reopenPickerOpen ? (
+                  <div>
+                    <p className="t-label">{COPY.creationPickStepToReopen}</p>
+                    {rows.map((row) => (
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        key={row.step.step_id}
+                        disabled={busy}
+                        onClick={() => void sendConsent(false, row.step.step_id)}
+                      >
+                        {row.step.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="composer__row">
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      disabled={busy}
+                      onClick={() => void sendConsent(true)}
+                    >
+                      {COPY.creationConsentYes}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      disabled={busy}
+                      onClick={() => setReopenPickerOpen(true)}
+                    >
+                      {COPY.creationConsentNo}
+                    </button>
+                  </div>
+                )
+              ) : null}
+            </div>
+          ))}
+          {consentMessage !== null ? <p className="t-label">{consentMessage}</p> : null}
         </div>
       ) : null}
 

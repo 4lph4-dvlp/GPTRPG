@@ -22,3 +22,8 @@ export const MAX_RAW_TEXT_LEN = 2000;
 /** 서버 `MAX_ID_LEN`(routes_actions.py)과 같은 값 — `browserIdentity.ts`가
  * 만드는 `browser_id`/`character_id`가 이 길이를 넘지 않는다. */
 export const MAX_ID_LEN = 64;
+
+/** 방장 재실 신호 주기(Phase 12.3-05, D-11) — 서버 `HOST_IDLE_S`
+ * (`web/creation_state.py`, 30초)의 절반. 신호 한 번을 놓쳐도 유휴로
+ * 오판되지 않는다. */
+export const HOST_BEACON_MS = 15000;

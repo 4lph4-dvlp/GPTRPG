@@ -11,8 +11,23 @@
  * **항목 조작이 배선된 자리는 `CreationPane`이다(12.3-04, D-06/D-08/
  * D-09).** 룰북 식별자(`state.creation_rulebook_id`)가 채워지기 전에는
  * 인원이 아직 확정되지 않은 것이라 항목 선언(`GET /creation/steps`)을
- * 아예 부르지 않는다(D-05) — 그동안은 GM의 말만 그대로 그린다. 방장이
- * 인원을 정하는 화면(host UI)과 동의 관문은 12.3-05가 옆으로 넓힌다.
+ * 아예 부르지 않는다(D-05) — 그동안은 인원 확정 관문(아래)이 화면을
+ * 차지한다.
+ *
+ * **인원 확정 관문(12.3-05 Task 1, D-11).** 이 화면이 마운트되는 동안
+ * `HOST_BEACON_MS`마다 `claimCreationHost`를 불러 방장 재실 신호를
+ * 보낸다 — 명단이 잠기면(`party_roster`가 채워지면) 멈춘다. 그 응답의
+ * `you_are_host`만으로 「내가 방장인가」를 안다 — 폴링의
+ * `creation_host_claimed`는 「누군가 잡았다」만 말한다. `partySizeGate`
+ * (`session/creationView.ts`)가 이 둘을 조합해 네 갈래를 고른다.
+ *
+ * **동의 관문과 세션 진입(12.3-05 Task 2, D-03/D-11).** 정리·동의는
+ * `CreationPane`이 대화 줄기 안에서 보인다(D-06). `state.party_roster`가
+ * 채워지면 이 화면은 서버를 다시 조회하지 않고 `onEntered(characterId)`로
+ * `App`에 알린다 — `complete_creation`이 이미 쿠키를 구웠다. 명단이
+ * 잠겼는데 내 캐릭터가 없으면(늦게 들어온 브라우저) `RosterLocked`로
+ * 간다.
+ *
  * 배치·색·간격을 설계하지 않는다(Phase 16) — 기존 `screen`/
  * `screen__inner`/`t-label` 클래스만 쓴다.
  *
@@ -24,9 +39,10 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { announceCreation, fetchCreationSteps } from "../api/client.ts";
+import { announceCreation, claimCreationHost, fetchCreationSteps, fixPartySize } from "../api/client.ts";
 import type { CreationStepView, GameEvent } from "../api/types.ts";
 import { DiceModal } from "../components/DiceModal.tsx";
+import { HOST_BEACON_MS } from "../config.ts";
 import { COPY } from "../labels.ts";
 import { CreationPane } from "../panes/CreationPane.tsx";
 import { getBrowserId, getCreationCharacterId } from "../session/browserIdentity.ts";
@@ -35,6 +51,7 @@ import {
   creationErrorMessage,
   creationRollsFrom,
   gmLinesFrom,
+  partySizeGate,
 } from "../session/creationView.ts";
 import { usePolling } from "../session/usePolling.ts";
 import { RosterLocked } from "./Notices.tsx";
@@ -50,17 +67,80 @@ const DEFAULT_RULEBOOK_ID = "dungeonworld_like";
  * 나머지는 모달을 건너뛴다. */
 const MAX_QUEUED_ROLLS = 3;
 
-interface CreationScreenProps {
+/**
+ * 방장에게만 보이는 인원 확정 조작(D-11) — 인원 범위(예: 3~5명) 숫자를
+ * 여기 하드코딩하지 않는다. 사람이 숫자를 고르면 서버가 룰북 범위
+ * (`validate_party_size`)와 절대 상한(`PARTY_MEMBER_LIMIT`)을 검사하고,
+ * 범위 밖이면 409 + `detail`로 거절한 문장을 그대로 보여준다(D-15).
+ */
+function PartySizeControl({
+  sessionId,
+  rulebookId,
+  onDone,
+  onError,
+}: {
   sessionId: string;
+  rulebookId: string;
+  onDone: () => void;
+  onError: (message: string) => void;
+}) {
+  const [count, setCount] = useState(1);
+  const [busy, setBusy] = useState(false);
+
+  async function confirm(): Promise<void> {
+    setBusy(true);
+    try {
+      await fixPartySize(sessionId, count, rulebookId);
+      onDone();
+    } catch (err) {
+      onError(creationErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="proposal">
+      <p className="t-caps">{COPY.creationPartySizeTitle}</p>
+      <input
+        type="number"
+        min={1}
+        value={count}
+        disabled={busy}
+        onChange={(event) => setCount(Number(event.target.value))}
+      />
+      <button
+        type="button"
+        className="btn btn--primary btn--wide"
+        disabled={busy}
+        onClick={() => void confirm()}
+      >
+        {COPY.creationPartySizeConfirm}
+      </button>
+    </div>
+  );
 }
 
-export function CreationScreen({ sessionId }: CreationScreenProps) {
+interface CreationScreenProps {
+  sessionId: string;
+  /** 명단이 잠기고 내 캐릭터가 그 안에 있으면 불린다(D-11 뒤, Task 2) —
+   * `App`이 이 콜백으로 `Gate`를 `{ kind: "ready", characterId }`로
+   * 바꾼다. `complete_creation`이 이미 쿠키를 구웠으므로 새 조회가
+   * 필요 없다. */
+  onEntered: (characterId: string) => void;
+}
+
+export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState<CreationStepView[]>([]);
   const [stepsLoaded, setStepsLoaded] = useState(false);
   const [rollQueue, setRollQueue] = useState<CreationRollQueueItem[]>([]);
+  const [youAreHost, setYouAreHost] = useState(false);
   const shownRef = useRef<Set<number>>(new Set());
+
+  const myBrowserId = getBrowserId(sessionId);
+  const myCharacterId = getCreationCharacterId(sessionId);
 
   const stepsById = useMemo(() => new Map(steps.map((step) => [step.step_id, step])), [steps]);
 
@@ -112,9 +192,57 @@ export function CreationScreen({ sessionId }: CreationScreenProps) {
     [feed.state],
   );
 
-  const rosterLocked = feed.events.some((event) => event.event_type === "party_roster_locked");
-  if (rosterLocked) {
-    return <RosterLocked />;
+  const partyRoster = feed.state?.party_roster ?? null;
+
+  // 방장 재실 신호(D-11, Task 1) — HOST_BEACON_MS(HOST_IDLE_S의 절반)마다
+  // claimCreationHost를 부른다. 명단이 잠기면(partyRoster !== null) 멈춘다
+  // — 그때는 방장 개념이 쓸모없고 서버도 아무 사건을 안 낸다.
+  useEffect(() => {
+    if (partyRoster !== null) {
+      return;
+    }
+    let alive = true;
+    async function beacon(): Promise<void> {
+      try {
+        const response = await claimCreationHost(sessionId, myBrowserId);
+        if (alive) {
+          setYouAreHost(response.you_are_host);
+        }
+      } catch {
+        // 신호 실패는 다음 주기로 넘긴다 — 화면 오류로 보이지 않는다.
+      }
+    }
+    void beacon();
+    const timer = window.setInterval(() => void beacon(), HOST_BEACON_MS);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+    // partyRoster는 null 여부만 본다 — 배열 자체는 폴링마다 새 참조라
+    // 매번 타이머를 다시 세우면 주기가 지켜지지 않는다.
+  }, [sessionId, myBrowserId, partyRoster !== null]);
+
+  // 명단 잠금 -> 세션 진입(D-11 뒤, Task 2). 서버를 다시 조회하지 않는다
+  // — complete_creation이 이미 쿠키를 구웠다.
+  useEffect(() => {
+    if (partyRoster !== null && partyRoster.includes(myCharacterId)) {
+      onEntered(myCharacterId);
+    }
+  }, [partyRoster, myCharacterId, onEntered]);
+
+  if (partyRoster !== null) {
+    if (!partyRoster.includes(myCharacterId)) {
+      return <RosterLocked />;
+    }
+    // onEntered가 위 effect에서 이미 App의 Gate를 바꾸는 중이다 — 그
+    // 렌더가 반영될 때까지 잠깐 이 화면 대신 로딩만 보인다.
+    return (
+      <div className="screen">
+        <div className="screen__inner">
+          <p className="t-label">{COPY.loading}</p>
+        </div>
+      </div>
+    );
   }
 
   async function announce(): Promise<void> {
@@ -132,6 +260,16 @@ export function CreationScreen({ sessionId }: CreationScreenProps) {
 
   const gmLines = gmLinesFrom(feed.events);
   const head = rollQueue[0];
+  const gate = feed.state !== null ? partySizeGate(feed.state, youAreHost) : null;
+  // 방장이 사라져 내가 이어받았을 때만 붙는 짧은 맥락(D-11) — 조작이
+  // 새로 나타나는 것 자체가 안내이므로 그 밖의 경우에는 아무것도 안
+  // 보인다.
+  const hostTookOver = feed.events.some(
+    (event) =>
+      event.event_type === "creation_host_claimed" &&
+      event.browser_id === myBrowserId &&
+      event.reason === "succession",
+  );
 
   return (
     <div className="screen">
@@ -143,32 +281,48 @@ export function CreationScreen({ sessionId }: CreationScreenProps) {
 
         {feed.status === "disconnected" ? <p className="t-label">{COPY.disconnected}</p> : null}
 
-        {feed.state !== null && rulebookId !== null && stepsLoaded ? (
-          <CreationPane
-            sessionId={sessionId}
-            browserId={getBrowserId(sessionId)}
-            myCharacterId={getCreationCharacterId(sessionId)}
-            rulebookId={rulebookId}
-            state={feed.state}
-            events={feed.events}
-            steps={steps}
-            pollNow={feed.pollNow}
-          />
-        ) : gmLines.length === 0 ? (
-          <p className="t-label">{COPY.loading}</p>
-        ) : (
+        {gate === "fix" ? (
           <div>
-            {gmLines.map((line) => (
-              <p key={line.seq} className="t-body">
-                {line.say}
-              </p>
-            ))}
+            {hostTookOver ? <p className="t-label">{COPY.creationHostTookOver}</p> : null}
+            <PartySizeControl
+              sessionId={sessionId}
+              rulebookId={DEFAULT_RULEBOOK_ID}
+              onDone={feed.pollNow}
+              onError={setError}
+            />
           </div>
+        ) : gate === "waiting_for_host" ? (
+          <p className="t-label">{COPY.creationWaitingForHost}</p>
+        ) : gate === "done" ? (
+          feed.state !== null && rulebookId !== null && stepsLoaded ? (
+            <CreationPane
+              sessionId={sessionId}
+              browserId={myBrowserId}
+              myCharacterId={myCharacterId}
+              rulebookId={rulebookId}
+              state={feed.state}
+              events={feed.events}
+              steps={steps}
+              pollNow={feed.pollNow}
+            />
+          ) : gmLines.length === 0 ? (
+            <p className="t-label">{COPY.loading}</p>
+          ) : (
+            <div>
+              {gmLines.map((line) => (
+                <p key={line.seq} className="t-body">
+                  {line.say}
+                </p>
+              ))}
+            </div>
+          )
+        ) : (
+          <p className="t-label">{COPY.loading}</p>
         )}
 
         {error !== null ? <p className="t-label">{error}</p> : null}
 
-        {feed.state === null || rulebookId === null || !stepsLoaded ? (
+        {gate === "done" && !stepsLoaded ? (
           <button type="button" disabled={pending} onClick={() => void announce()}>
             {COPY.creationAnnounce}
           </button>

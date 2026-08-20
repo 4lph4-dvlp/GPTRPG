@@ -151,6 +151,63 @@ export function nextUnfilledStep(rows: CreationStepRow[]): CreationStepRow | nul
   return rows.find((row) => row.step.required && !row.filled) ?? null;
 }
 
+/** `partySizeGate`가 돌려주는 네 갈래(D-11, 12.3-05 Task 1) — 「fix」는
+ * 내가 방장이라 인원을 정하는 조작을 보일 차례, 「waiting_for_host」는
+ * 방장이 이미 있고 내가 아닐 때, 「waiting_for_claim」은 아직 아무도 방장을
+ * 안 잡았을 때, 「done」은 인원이 이미 확정돼 이 관문 자체가 더는 볼 일이
+ * 없을 때다. */
+export type PartySizeGate = "fix" | "waiting_for_host" | "waiting_for_claim" | "done";
+
+/**
+ * 인원 확정 관문의 네 갈래를 고른다(D-11) — `state.party_size_fixed`와
+ * `state.creation_host_claimed`, 그리고 이 호출이 부른 사람의
+ * `you_are_host`(폴링이 아니라 `POST /creation/host` 응답에서만 나온다,
+ * 이 함수가 그 값을 스스로 추측하지 않는다)만 읽고 고른다.
+ */
+export function partySizeGate(state: GameStateView, youAreHost: boolean): PartySizeGate {
+  if (state.party_size_fixed !== null) {
+    return "done";
+  }
+  if (youAreHost) {
+    return "fix";
+  }
+  return state.creation_host_claimed ? "waiting_for_host" : "waiting_for_claim";
+}
+
+/** `consentGate`가 돌려주는 네 갈래(D-03/D-11, 12.3-05 Task 2). 「not_ready」는
+ * 아직 만드는 사람이 있거나 완성된 캐릭터가 하나도 없을 때, 「needs_wrap_up」은
+ * 전원 완성됐지만 GM의 정리(`kind: "wrap_up"`)가 아직 기록에 없을 때,
+ * 「open」은 정리가 끝나 동의 관문이 열렸을 때, 「locked」는 명단이 이미
+ * 잠겼을 때다. */
+export type ConsentGate = "not_ready" | "needs_wrap_up" | "open" | "locked";
+
+/**
+ * 동의 관문의 네 갈래를 고른다. `wrappedUp`은 「`kind: "wrap_up"`인
+ * `creation_gm_spoke` 사건이 기록에 있는가」하나뿐이다(`gmLinesFrom(events)`
+ * 에서 존재 여부만 확인한 값을 호출부가 넘긴다) — 진행 상태를 다시
+ * 계산하지 않는다(D-04). 나머지 판단은 전부 `state`가 이미 갖고 있는
+ * 값(누가 아직 안 끝났나·완성된 캐릭터가 있나·명단이 잠겼나)을 읽는
+ * 것으로 끝난다.
+ */
+export function consentGate(state: GameStateView, wrappedUp: boolean): ConsentGate {
+  if (state.party_roster !== null) {
+    return "locked";
+  }
+  if (state.creation_characters.length === 0 || state.creation_unfinished_character_ids.length > 0) {
+    return "not_ready";
+  }
+  return wrappedUp ? "open" : "needs_wrap_up";
+}
+
+/** 아직 동의를 안 누른 캐릭터의 `display_name` 목록이다(D-03) —
+ * `character_id`가 아니라 사람이 알아볼 이름을 돌려준다. 순서는
+ * `state.creation_characters` 순서를 그대로 따른다. */
+export function pendingConsenters(state: GameStateView): string[] {
+  return state.creation_characters
+    .filter((character) => !character.consented)
+    .map((character) => character.display_name);
+}
+
 /** `creationRollsFrom`이 만드는 큐 항목 하나 — 주사위로 채운 만들기
  * 항목 하나와 그 항목의 표시 라벨. */
 export interface CreationRollQueueItem {

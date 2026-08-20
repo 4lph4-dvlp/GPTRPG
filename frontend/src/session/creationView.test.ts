@@ -15,6 +15,7 @@ import type {
 } from "../api/types.ts";
 import {
   canEdit,
+  consentGate,
   type CreationStepRow,
   creationErrorMessage,
   creationRollsFrom,
@@ -22,6 +23,8 @@ import {
   isMyTurn,
   myStepValues,
   nextUnfilledStep,
+  partySizeGate,
+  pendingConsenters,
   stepRows,
 } from "./creationView.ts";
 
@@ -345,5 +348,89 @@ describe("creationRollsFrom", () => {
   it("같은 seq가 두 번 와도 하나만 나온다", () => {
     const events: GameEvent[] = [creationStepCompleted(6), creationStepCompleted(6)];
     expect(creationRollsFrom(events, new Map())).toHaveLength(1);
+  });
+});
+
+describe("partySizeGate", () => {
+  it("party_size_fixed가 있으면 done이다 — 방장 여부와 무관하다", () => {
+    const state = baseState({ party_size_fixed: 4 });
+    expect(partySizeGate(state, true)).toBe("done");
+    expect(partySizeGate(state, false)).toBe("done");
+  });
+
+  it("아직 인원이 없고 내가 방장이면 fix다", () => {
+    const state = baseState({ party_size_fixed: null, creation_host_claimed: true });
+    expect(partySizeGate(state, true)).toBe("fix");
+  });
+
+  it("아직 인원이 없고 방장이 이미 있는데 내가 아니면 waiting_for_host다", () => {
+    const state = baseState({ party_size_fixed: null, creation_host_claimed: true });
+    expect(partySizeGate(state, false)).toBe("waiting_for_host");
+  });
+
+  it("아직 인원도 방장도 없으면 waiting_for_claim이다", () => {
+    const state = baseState({ party_size_fixed: null, creation_host_claimed: false });
+    expect(partySizeGate(state, false)).toBe("waiting_for_claim");
+  });
+});
+
+describe("consentGate", () => {
+  it("party_roster가 있으면 locked다 — wrappedUp과 무관하다", () => {
+    const state = baseState({ party_roster: ["hero-1"] });
+    expect(consentGate(state, true)).toBe("locked");
+    expect(consentGate(state, false)).toBe("locked");
+  });
+
+  it("완성된 캐릭터가 없으면 not_ready다", () => {
+    const state = baseState({ party_roster: null, creation_characters: [], creation_unfinished_character_ids: [] });
+    expect(consentGate(state, true)).toBe("not_ready");
+  });
+
+  it("아직 안 끝난 사람이 있으면 not_ready다", () => {
+    const state = baseState({
+      party_roster: null,
+      creation_characters: [{ character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true }],
+      creation_unfinished_character_ids: ["hero-2"],
+    });
+    expect(consentGate(state, true)).toBe("not_ready");
+  });
+
+  it("전원 완성됐지만 GM 정리가 아직 없으면 needs_wrap_up이다", () => {
+    const state = baseState({
+      party_roster: null,
+      creation_characters: [{ character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true }],
+      creation_unfinished_character_ids: [],
+    });
+    expect(consentGate(state, false)).toBe("needs_wrap_up");
+  });
+
+  it("전원 완성되고 GM 정리도 있으면 open이다", () => {
+    const state = baseState({
+      party_roster: null,
+      creation_characters: [{ character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true }],
+      creation_unfinished_character_ids: [],
+    });
+    expect(consentGate(state, true)).toBe("open");
+  });
+});
+
+describe("pendingConsenters", () => {
+  it("consented가 거짓인 캐릭터의 display_name만 돌려준다 — character_id가 아니다", () => {
+    const state = baseState({
+      creation_characters: [
+        { character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true },
+        { character_id: "hero-2", display_name: "나리", consented: true, required_steps_filled: true },
+      ],
+    });
+    expect(pendingConsenters(state)).toEqual(["브람"]);
+  });
+
+  it("전원 동의했으면 빈 배열이다", () => {
+    const state = baseState({
+      creation_characters: [
+        { character_id: "hero-1", display_name: "브람", consented: true, required_steps_filled: true },
+      ],
+    });
+    expect(pendingConsenters(state)).toEqual([]);
   });
 });
