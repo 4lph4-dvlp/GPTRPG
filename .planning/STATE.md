@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면
 status: executing
-stopped_at: Phase 12.3 context gathered
-last_updated: "2026-08-20T12:00:31.858Z"
+stopped_at: Completed 12.3-01-PLAN.md
+last_updated: "2026-08-20T14:21:53.543Z"
 last_activity: 2026-08-20
-last_activity_desc: Phase 12.2 complete, transitioned to Phase 12.3
-state_head: 137c53d53f4911de74e1183d20ca8586ad2443c1
+last_activity_desc: Phase 12.3 execution started
+state_head: 646263a7605a50273e78227713a37eef1bc2ba3c
 progress:
   total_phases: 14
-  completed_phases: 7
+  completed_phases: 6
   total_plans: 43
-  completed_plans: 38
+  completed_plans: 39
 ---
 
 # Project State
@@ -24,17 +24,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 12.2 — check-total
+**Current focus:** Phase 12.3 — 캐릭터 만들기 화면
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 12.3 (캐릭터 만들기 화면) — READY TO EXECUTE
-Plan: Not started
+Phase: 12.3 (캐릭터 만들기 화면) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-20 — Phase 12.2 complete, transitioned to Phase 12.3
+Last activity: 2026-08-20 — Phase 12.3 execution started
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -131,6 +131,7 @@ Progress: [██████████] 100%
 | Phase 12.2 P01 | not tracked (checkpoint-resumed) | 3 tasks | 24 files |
 | Phase 12.2 P02 | not tracked precisely | 3 tasks | 10 files |
 | Phase 12.2 P03 | ~4h | 3 tasks | 8 files |
+| Phase 12.3 P01 | 78min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -304,6 +305,9 @@ Progress: [██████████] 100%
 - [Phase ?]: 12.2-03: 채택 판정은 값이 아니라 자리(순서)로 정한다 — 동값 두 개일 때 값 비교로 채택을 고르면 채택 조각이 둘 이상 될 수 있어 항상 앞 자리를 채택으로 본다
 - [Phase ?]: 12.2-03 [deviation, D-15 관문에서 발견, 계획 밖]: 액션 라우트가 rulebook_id를 요청 기본값(DUNGEONWORLD_LIKE_ID)에서 가져오던 사전 존재 결함을 character.rulebook_id 읽기로 교체(6e7c2e5) — OpenQuest 캐릭터가 던전월드류 무브를 받아 판정이 400으로 끊기던 문제, D-15 확인을 완전히 막고 있었다
 - [Phase ?]: 12.2-03 [deviation, D-15 관문에서 발견, 일부만 계획 안]: 주사위 모양이 값이 아니라 서버 role(die/tens/units)을 따르도록 고침(0a0c9fe, D-13 갭) — 모달 자동 닫힘 제거·죽은 턴 스피너 수정은 계획 밖. 확인 버튼 pointer-events 복구(5c28766)도 계획 밖
+- [Phase 12.3]: Task 0 사람 결정: GM의 말을 CreationGmSpoke 하나(one-event)로 묶는다 — kind 리터럴로 네 갈래 구분, dedupe_key 하나로 D-12 중복 방지를 전부 덮는다
+- [Phase 12.3]: Command 클래스는 RecordGmSpoke로 짓는다 — 계획 문서의 CreationGmSpoke 문구는 schema.py Event 클래스와 이름이 겹쳐 파이썬에서 재사용할 수 없다(FixPartySize/PartySizeFixed 규약을 따름)
+- [Phase 12.3]: CharacterSelect 화면을 지운다(D-10) — 만들기 완성이 자동 점유까지 끝내므로 쿠키 없는 브라우저가 명단 잠금 뒤 고를 목록이 애초에 없다
 
 ### Pending Todos
 
@@ -361,10 +365,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-20T09:39:34.267Z
-Stopped at: Phase 12.3 context gathered
+Last session: 2026-08-20T14:21:53.254Z
+Stopped at: Completed 12.3-01-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
-Resume file: .planning/phases/12.3-creation-screen/12.3-CONTEXT.md
+Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
 `resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
