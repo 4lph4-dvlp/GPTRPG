@@ -18,3 +18,7 @@ export const SHOW_IMAGE_PLACEHOLDER = false;
 
 /** 서버 `MAX_RAW_TEXT_LEN`(routes_actions.py)과 같은 값. */
 export const MAX_RAW_TEXT_LEN = 2000;
+
+/** 서버 `MAX_ID_LEN`(routes_actions.py)과 같은 값 — `browserIdentity.ts`가
+ * 만드는 `browser_id`/`character_id`가 이 길이를 넘지 않는다. */
+export const MAX_ID_LEN = 64;
