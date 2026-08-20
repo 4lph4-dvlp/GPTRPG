@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 2
+open_count: 3
 waived_count: 1
 fixed_count: 4
-total_count: 7
-last_updated: 2026-08-20T14:20:42.149Z
+total_count: 8
+last_updated: 2026-08-20T16:30:31.983Z
 ---
 
 # Broken Windows Ledger
@@ -22,6 +22,7 @@ last_updated: 2026-08-20T14:20:42.149Z
 | 5 | 03 | unrun-verify | src/gptrpg/agents/action_classifier.py |  | _try_parse_json_array()의 <think>/코드펜스 벗기기 대체 경로가 실제 모델 응답에서 실제로 발동한 사례는 라이브로 확인되지 않았다 — 03-04 Task 3 재검증에서 D-35 번호 목록이 정상 작동했지만, 원문이 애초에 순수 JSON이었는지(원래 빠른 경로만 탔는지) 대체 파싱 경로가 실제로 실행됐는지는 구분되지 않는다 | fixed |  | 2026-08-02T10:36:05.933Z | 2026-08-02T16:17:19.863Z |
 | 6 | 11 | todo | src/gptrpg/agents/prompt_assembly.py |  | _format_scene_entities도 _format_character_state와 같은 stat.form 여섯 형태 버그를 갖고 있다(numeric 전제, f"{stat.name} {stat.current}") — 11-07 Task 3 범위 밖(scene_entities는 다른 함수), non-numeric 형태를 쓰는 장면 등장 개체가 생기면 진행자 프롬프트에 None이 샐 수 있다 | open |  | 2026-08-16T15:31:29.652Z |  |
 | 7 | 12.3 | stub | frontend/src/screens/CreationScreen.tsx |  | DEFAULT_RULEBOOK_ID hardcoded to dungeonworld_like — no rulebook-selection UI exists yet | open |  | 2026-08-20T14:20:42.149Z |  |
+| 8 | 12.3 | unrun-verify | .planning/REQUIREMENTS.md |  | CHAR-06 사람 확인(Task 4, 14개 항목)이 아직 수행되지 않았다 — 두 브라우저로 처음부터 끝까지 만들기를 진행한 결과가 필요하다. 개발 서버(uvicorn :8000)와 프론트엔드(vite :5173)가 세션 qa-12-3-05로 준비되어 있다. | open |  | 2026-08-20T16:30:31.983Z |  |
 
 ````json
 [
@@ -107,6 +108,18 @@ last_updated: 2026-08-20T14:20:42.149Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-20T14:20:42.149Z",
+    "resolved_at": null
+  },
+  {
+    "id": 8,
+    "kind": "unrun-verify",
+    "phase": "12.3",
+    "file": ".planning/REQUIREMENTS.md",
+    "line": null,
+    "description": "CHAR-06 사람 확인(Task 4, 14개 항목)이 아직 수행되지 않았다 — 두 브라우저로 처음부터 끝까지 만들기를 진행한 결과가 필요하다. 개발 서버(uvicorn :8000)와 프론트엔드(vite :5173)가 세션 qa-12-3-05로 준비되어 있다.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-20T16:30:31.983Z",
     "resolved_at": null
   }
 ]
