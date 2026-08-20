@@ -461,6 +461,7 @@ Command = (
     | RecordGmSpoke
     | RecordConsent
     | ReopenCreationStep
+    | ClaimCreationHost
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
