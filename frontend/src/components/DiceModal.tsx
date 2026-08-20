@@ -20,11 +20,33 @@
  * (`CheckBreakdown`)이 같은 숫자를 말한다. 연출 자체(굴리는 눈·타이밍·
  * 착지값)는 안 건드린다 — `check.rolls`가 여전히 굴릴 주사위 개수와
  * 착지값의 유일한 출처다.
+ *
+ * **두 번째 쓰임 — 만들기의 `roll_to_fill` 항목(Phase 12.3-04 Task 3,
+ * D-07).** 같은 굴림은 같게 보여야 한다는 것이 이 컴포넌트를 재사용하는
+ * 이유다. 만들기 주사위도 `check_resolved`와 똑같이 서버(주입된 `Roller`)가
+ * 이미 굴린 값을 `creation_step_completed` 사건의 `rolls`에 남긴 것이고,
+ * 브라우저는 그걸 되짚어 보여줄 뿐이다 — **눈의 개수·타이밍·착지값 코드는
+ * 한 줄도 안 바뀐다**, `check.rolls` 대신 `creationStep.rolls`를 읽을
+ * 뿐이다. 다만 만들기 굴림에는 성공/실패가 없다 — 등급 도장·목표값·
+ * `buildCheckSummary` 호출을 만들지 않고, 대신 `axis_values`를 「축 이름
+ * — 값」 줄로 보여준다. 판정 요약을 억지로 만들지 않는다.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { CheckCalculationView, CheckResolvedEvent } from "../api/types.ts";
-import { COPY, directionLabel, gradeLabel, gradeTone, moveLabel, segmentRoleLabel } from "../labels.ts";
+import type {
+  CheckCalculationView,
+  CheckResolvedEvent,
+  CreationStepCompletedEvent,
+} from "../api/types.ts";
+import {
+  COPY,
+  directionLabel,
+  gradeLabel,
+  gradeTone,
+  moveLabel,
+  segmentRoleLabel,
+  statLabel,
+} from "../labels.ts";
 import { buildCheckSummary } from "../session/checkSummary.ts";
 import { DIE_FACES, Die } from "./Die.tsx";
 
@@ -34,6 +56,16 @@ export interface PendingRoll {
    * `COPY.checkTotalMissing`을 보인다(D-05). `usePolling`이 `seq`로 짝지어
    * 넘긴 값을 `SessionScreen`이 그대로 옮긴다 — 새 짝짓기를 안 만든다. */
   calculation: CheckCalculationView | null;
+  actorName: string;
+}
+
+/** 만들기의 `roll_to_fill` 항목 하나(D-07, Phase 12.3-04 Task 3) —
+ * `PendingRoll`과 같은 자리에서 쓰이는 두 번째 입력 모양. */
+export interface PendingCreationRoll {
+  creationStep: CreationStepCompletedEvent;
+  /** `GET /creation/steps`에서 받아 둔 선언의 `label` — 못 찾으면
+   * `step_id`를 그대로 쓴다(호출부 책임, `creationRollsFrom` 참조). */
+  label: string;
   actorName: string;
 }
 
@@ -64,18 +96,28 @@ function shapeFor(role: string | undefined): "pips" | "number" | undefined {
   return role === "die" ? "pips" : "number";
 }
 
-export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => void }) {
-  const { check, calculation, actorName } = roll;
-  const diceCount = check.rolls.length;
-  const summary = buildCheckSummary(check, calculation);
+export function DiceModal({
+  roll,
+  onDone,
+}: {
+  roll: PendingRoll | PendingCreationRoll;
+  onDone: () => void;
+}) {
+  const isCreationRoll = "creationStep" in roll;
+  const { actorName } = roll;
+  // 굴리는 눈의 개수·착지값의 유일한 출처 — 갈래별로 다른 사건 칸을 읽을
+  // 뿐, 아래 애니메이션 코드는 이 배열 하나만 본다.
+  const rolls = isCreationRoll ? (roll.creationStep.rolls ?? []) : roll.check.rolls;
+  const diceCount = rolls.length;
+  // 만들기 굴림에는 계산 줄이 없다(성공/실패가 없다) — summary가 null이면
+  // 아래 렌더가 등급 도장·목표값을 그리지 않는다.
+  const summary = isCreationRoll ? null : buildCheckSummary(roll.check, roll.calculation);
 
   const [landed, setLanded] = useState(0);
   const [showSum, setShowSum] = useState(false);
   const [showStamp, setShowStamp] = useState(false);
   const [leaving, setLeaving] = useState(false);
-  const [tumbleFaces, setTumbleFaces] = useState<number[]>(() =>
-    check.rolls.map(() => randomFace()),
-  );
+  const [tumbleFaces, setTumbleFaces] = useState<number[]>(() => rolls.map(() => randomFace()));
 
   const timersRef = useRef<number[]>([]);
   const doneRef = useRef(onDone);
@@ -186,25 +228,26 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
     };
   }, [skipOnEscape]);
 
-  const tone = gradeTone(check.grade);
+  const tone = isCreationRoll ? null : gradeTone(roll.check.grade);
 
   return (
     <div
       className={leaving ? "dice-overlay dice-overlay--leaving" : "dice-overlay"}
       role="dialog"
       aria-modal="true"
-      aria-label={COPY.diceModalTitle}
+      aria-label={isCreationRoll ? COPY.creationRollTitle : COPY.diceModalTitle}
     >
       <div className="dice-modal">
         <p className="dice-modal__who">{actorName}</p>
-        <p className="dice-modal__move">{moveLabel(check.move)}</p>
+        <p className="dice-modal__move">{isCreationRoll ? roll.label : moveLabel(roll.check.move)}</p>
 
         <div className="dice-modal__tray">
-          {check.rolls.map((value, index) => {
+          {rolls.map((value, index) => {
             const isLanded = index < landed;
             // 착지가 전부 끝난 뒤(showSum)에만 버려짐 표시가 붙는다 — 연출이
-            // 이야기(검산 줄)와 같은 순간에 같은 사실을 말한다(D-13).
-            const isDiscarded = showSum && summary.rollDiscarded[index] === true;
+            // 이야기(검산 줄)와 같은 순간에 같은 사실을 말한다(D-13). 만들기
+            // 굴림에는 다시 굴림·버려짐 개념이 없다(summary가 null).
+            const isDiscarded = showSum && summary?.rollDiscarded[index] === true;
             return (
               <span
                 key={index}
@@ -214,7 +257,7 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
                   value={isLanded ? value : (tumbleFaces[index] ?? value)}
                   phase={isLanded ? "landed" : "rolling"}
                   size={56}
-                  shape={shapeFor(summary.rollRoles[index])}
+                  shape={shapeFor(summary?.rollRoles[index])}
                 />
                 {isDiscarded ? (
                   <span className="calc-segment__discarded-tag">{COPY.checkDiscarded}</span>
@@ -225,7 +268,16 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
         </div>
 
         <div className="dice-modal__sum">
-          {showSum ? (
+          {showSum && isCreationRoll ? (
+            <span className="dice-modal__vs">
+              {(roll.creationStep.axis_values ?? []).map(({ axis_name, value }) => (
+                <span className="calc-row" key={axis_name}>
+                  {statLabel(axis_name)} {value}
+                </span>
+              ))}
+            </span>
+          ) : null}
+          {showSum && !isCreationRoll && summary !== null ? (
             <>
               <span className="dice-modal__total">
                 {summary.totalMissing ? COPY.checkTotalMissing : summary.total}
@@ -266,8 +318,9 @@ export function DiceModal({ roll, onDone }: { roll: PendingRoll; onDone: () => v
         </div>
 
         <div className="dice-modal__stamp">
-          {showStamp ? (
-            <span className={`stamp stamp--${tone}`}>{gradeLabel(check.grade)}</span>
+          {/* 만들기 굴림에는 성공/실패가 없다 — 등급 도장을 그리지 않는다. */}
+          {showStamp && !isCreationRoll ? (
+            <span className={`stamp stamp--${tone}`}>{gradeLabel(roll.check.grade)}</span>
           ) : null}
         </div>
 

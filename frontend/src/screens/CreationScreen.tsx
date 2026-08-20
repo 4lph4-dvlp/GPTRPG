@@ -15,15 +15,27 @@
  * 인원을 정하는 화면(host UI)과 동의 관문은 12.3-05가 옆으로 넓힌다.
  * 배치·색·간격을 설계하지 않는다(Phase 16) — 기존 `screen`/
  * `screen__inner`/`t-label` 클래스만 쓴다.
+ *
+ * **주사위 큐(D-07, 12.3-04 Task 3).** 만들기의 주사위는 `check_resolved`가
+ * 아니라 `creation_step_completed` 사건의 `rolls` 칸에 남는다 —
+ * `SessionScreen.tsx`의 기존 큐가 자동으로 잡지 않으므로, 여기서 같은
+ * 패턴(`shownRef`/`MAX_QUEUED_ROLLS`)을 그대로 복제한다. `SessionScreen.tsx`
+ * 자체는 이 계획에서 건드리지 않는다.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { announceCreation, fetchCreationSteps } from "../api/client.ts";
-import type { CreationStepView } from "../api/types.ts";
+import type { CreationStepView, GameEvent } from "../api/types.ts";
+import { DiceModal } from "../components/DiceModal.tsx";
 import { COPY } from "../labels.ts";
 import { CreationPane } from "../panes/CreationPane.tsx";
 import { getBrowserId, getCreationCharacterId } from "../session/browserIdentity.ts";
-import { creationErrorMessage, gmLinesFrom } from "../session/creationView.ts";
+import {
+  type CreationRollQueueItem,
+  creationErrorMessage,
+  creationRollsFrom,
+  gmLinesFrom,
+} from "../session/creationView.ts";
 import { usePolling } from "../session/usePolling.ts";
 import { RosterLocked } from "./Notices.tsx";
 
@@ -34,16 +46,41 @@ import { RosterLocked } from "./Notices.tsx";
  */
 const DEFAULT_RULEBOOK_ID = "dungeonworld_like";
 
+/** `SessionScreen.tsx`의 주사위 큐와 같은 상한 — 세 건 넘게 밀리면
+ * 나머지는 모달을 건너뛴다. */
+const MAX_QUEUED_ROLLS = 3;
+
 interface CreationScreenProps {
   sessionId: string;
 }
 
 export function CreationScreen({ sessionId }: CreationScreenProps) {
-  const feed = usePolling(sessionId);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState<CreationStepView[]>([]);
   const [stepsLoaded, setStepsLoaded] = useState(false);
+  const [rollQueue, setRollQueue] = useState<CreationRollQueueItem[]>([]);
+  const shownRef = useRef<Set<number>>(new Set());
+
+  const stepsById = useMemo(() => new Map(steps.map((step) => [step.step_id, step])), [steps]);
+
+  const onLiveEvents = useCallback(
+    (events: GameEvent[]) => {
+      const rolls = creationRollsFrom(events, stepsById).filter(
+        (item) => !shownRef.current.has(item.creationStep.seq),
+      );
+      if (rolls.length === 0) {
+        return;
+      }
+      for (const item of rolls) {
+        shownRef.current.add(item.creationStep.seq);
+      }
+      setRollQueue((previous) => [...previous, ...rolls].slice(0, MAX_QUEUED_ROLLS));
+    },
+    [stepsById],
+  );
+
+  const feed = usePolling(sessionId, onLiveEvents);
 
   // 세션 중에 안 바뀌는 값이라 rulebookId 하나에 대해 한 번만 부른다(D-05).
   // 인원이 아직 확정되지 않았으면(creation_rulebook_id가 null) 아예 안 부른다.
@@ -66,6 +103,15 @@ export function CreationScreen({ sessionId }: CreationScreenProps) {
     };
   }, [sessionId, rulebookId]);
 
+  // 굴림 모달에 보일 이름 — `head.creationStep.character_id`를 찾는다.
+  // `feed.state`가 갱신될 때마다 새로 계산되므로 큐잉 시점(onLiveEvents)이
+  // 아니라 그리는 시점에 이 지도를 쓴다(순환 참조를 피한다 — usePolling에
+  // 넘길 콜백은 feed 자체가 생기기 전에 만들어져야 한다).
+  const nameById = useMemo(
+    () => new Map((feed.state?.creation_characters ?? []).map((c) => [c.character_id, c.display_name])),
+    [feed.state],
+  );
+
   const rosterLocked = feed.events.some((event) => event.event_type === "party_roster_locked");
   if (rosterLocked) {
     return <RosterLocked />;
@@ -85,6 +131,7 @@ export function CreationScreen({ sessionId }: CreationScreenProps) {
   }
 
   const gmLines = gmLinesFrom(feed.events);
+  const head = rollQueue[0];
 
   return (
     <div className="screen">
@@ -127,6 +174,18 @@ export function CreationScreen({ sessionId }: CreationScreenProps) {
           </button>
         ) : null}
       </div>
+
+      {head !== undefined ? (
+        <DiceModal
+          key={head.creationStep.seq}
+          roll={{
+            creationStep: head.creationStep,
+            label: head.label,
+            actorName: nameById.get(head.creationStep.character_id) ?? head.creationStep.character_id,
+          }}
+          onDone={() => setRollQueue((previous) => previous.slice(1))}
+        />
+      ) : null}
     </div>
   );
 }

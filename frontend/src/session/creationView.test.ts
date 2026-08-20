@@ -6,11 +6,18 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/client.ts";
 import { COPY } from "../labels.ts";
-import type { CreationStepValueView, CreationStepView, GameEvent, GameStateView } from "../api/types.ts";
+import type {
+  CreationStepCompletedEvent,
+  CreationStepValueView,
+  CreationStepView,
+  GameEvent,
+  GameStateView,
+} from "../api/types.ts";
 import {
   canEdit,
   type CreationStepRow,
   creationErrorMessage,
+  creationRollsFrom,
   gmLinesFrom,
   isMyTurn,
   myStepValues,
@@ -280,5 +287,63 @@ describe("nextUnfilledStep", () => {
       { step: stepDecl({ step_id: "name" }), filled: true, reopened: false, value: stepValue() },
     ];
     expect(nextUnfilledStep(rows)).toBeNull();
+  });
+});
+
+function creationStepCompleted(
+  seq: number,
+  overrides: Partial<CreationStepCompletedEvent> = {},
+): CreationStepCompletedEvent {
+  return {
+    ...envelope(seq),
+    event_type: "creation_step_completed",
+    character_id: "hero-1",
+    browser_id: "browser-1",
+    step_id: "stats",
+    kind: "roll_to_fill",
+    text_value: null,
+    picked: null,
+    axis_values: [{ axis_name: "STR", value: 12 }],
+    rolls: [4, 5, 3],
+    superseded_seq: null,
+    ...overrides,
+  };
+}
+
+describe("creationRollsFrom", () => {
+  it("rolls가 null이거나 빈 creation_step_completed는 큐에 안 들어간다 — 자유 서술·선택은 굴림이 아니다", () => {
+    const events: GameEvent[] = [
+      creationStepCompleted(0, { rolls: null }),
+      creationStepCompleted(1, { rolls: [] }),
+    ];
+    expect(creationRollsFrom(events, new Map())).toEqual([]);
+  });
+
+  it("rolls가 있는 사건은 label과 함께 나온다 — step_id로 stepsById에서 찾는다", () => {
+    const stepsById = new Map([
+      ["stats", stepDecl({ step_id: "stats", kind: "roll_to_fill", label: "능력치 굴리기" })],
+    ]);
+    const items = creationRollsFrom([creationStepCompleted(2)], stepsById);
+    expect(items).toHaveLength(1);
+    expect(items[0].label).toBe("능력치 굴리기");
+    expect(items[0].creationStep.rolls).toEqual([4, 5, 3]);
+  });
+
+  it("stepsById에 없으면 step_id를 그대로 쓴다", () => {
+    const items = creationRollsFrom([creationStepCompleted(3, { step_id: "unknown" })], new Map());
+    expect(items[0].label).toBe("unknown");
+  });
+
+  it("다른 종류 사건이 섞여도 무시한다", () => {
+    const events: GameEvent[] = [
+      creationStepCompleted(4),
+      { ...envelope(5), event_type: "creation_interjection", speaker_character_id: "hero-2", browser_id: "b2", during_character_id: "hero-1", mentioned_character_ids: [], text: "끼어드는 말" },
+    ];
+    expect(creationRollsFrom(events, new Map())).toHaveLength(1);
+  });
+
+  it("같은 seq가 두 번 와도 하나만 나온다", () => {
+    const events: GameEvent[] = [creationStepCompleted(6), creationStepCompleted(6)];
+    expect(creationRollsFrom(events, new Map())).toHaveLength(1);
   });
 });

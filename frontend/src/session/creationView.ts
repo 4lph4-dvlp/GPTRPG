@@ -15,6 +15,7 @@
 import { ApiError } from "../api/client.ts";
 import { COPY } from "../labels.ts";
 import type {
+  CreationStepCompletedEvent,
   CreationStepValueView,
   CreationStepView,
   GameEvent,
@@ -148,4 +149,39 @@ export function canEdit(_row: CreationStepRow, myTurn: boolean): boolean {
 /** `required`이면서 아직 안 채워진 첫 줄 — 전부 채워졌으면 `null`이다. */
 export function nextUnfilledStep(rows: CreationStepRow[]): CreationStepRow | null {
   return rows.find((row) => row.step.required && !row.filled) ?? null;
+}
+
+/** `creationRollsFrom`이 만드는 큐 항목 하나 — 주사위로 채운 만들기
+ * 항목 하나와 그 항목의 표시 라벨. */
+export interface CreationRollQueueItem {
+  creationStep: CreationStepCompletedEvent;
+  label: string;
+}
+
+/**
+ * `creation_step_completed` 사건 중 **눈이 실제로 있는 것만** 골라 큐
+ * 항목으로 편다(D-07) — 자유 서술·선택처럼 굴림이 없는 항목은 큐에
+ * 넣지 않는다. `label`은 `stepsById`(`GET /creation/steps`로 받아 둔
+ * 선언)에서 `step_id`로 찾고, 못 찾으면 `step_id`를 그대로 쓴다. 같은
+ * `seq`가 두 번 와도(겹쳐 도착한 폴링 응답) 하나만 남는다 —
+ * `gmLinesFrom`과 같은 규칙이다.
+ */
+export function creationRollsFrom(
+  events: GameEvent[],
+  stepsById: Map<string, CreationStepView>,
+): CreationRollQueueItem[] {
+  const bySeq = new Map<number, CreationRollQueueItem>();
+  for (const event of events) {
+    if (event.event_type !== "creation_step_completed") {
+      continue;
+    }
+    if (event.rolls === null || event.rolls.length === 0) {
+      continue;
+    }
+    bySeq.set(event.seq, {
+      creationStep: event,
+      label: stepsById.get(event.step_id)?.label ?? event.step_id,
+    });
+  }
+  return [...bySeq.values()].sort((a, b) => a.creationStep.seq - b.creationStep.seq);
 }
