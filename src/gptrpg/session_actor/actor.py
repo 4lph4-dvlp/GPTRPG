@@ -193,6 +193,22 @@ class RecordInterjection:
 
 
 @dataclass(frozen=True)
+class RecordGmSpoke:
+    """GM이 만들기 중에 한 말 한 줄을 사건으로 남기는 명령(D-02/D-12,
+    Phase 12.3). 사건 `creation_gm_spoke`에 그대로 옮겨진다 — `RecordInterjection`
+    이 `CreationInterjection`에 대응하는 것과 같은 자리다.
+
+    `dedupe_key`로 이미 말한 적이 있는지는 호출부(`routes_creation.py`의
+    `_gm_dedupe_key` 조회)가 AI를 부르기 **전에** 먼저 본다(D-12) —
+    이 명령 자체는 새 값을 무조건 기록한다."""
+
+    kind: str
+    say: str
+    target_character_id: str | None
+    dedupe_key: str
+
+
+@dataclass(frozen=True)
 class RecordConsent:
     """동의 표시 하나(D-10, Phase 12.1-04) — **사건을 만들지 않는다.**
 
@@ -411,6 +427,7 @@ Command = (
     | CreateCharacter
     | LockPartyRoster
     | RecordInterjection
+    | RecordGmSpoke
     | RecordConsent
     | ReopenCreationStep
 )
@@ -821,6 +838,8 @@ class SessionActor:
             return self._prepare_lock_roster(command)
         if isinstance(command, RecordInterjection):
             return self._prepare_interjection(command)
+        if isinstance(command, RecordGmSpoke):
+            return self._prepare_gm_spoke(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -1783,6 +1802,30 @@ class SessionActor:
                 "during_character_id": command.during_character_id,
                 "mentioned_character_ids": list(command.mentioned_character_ids),
                 "text": command.text,
+            },
+        )
+
+    def _prepare_gm_spoke(self, command: RecordGmSpoke) -> tuple[str, int | None, dict]:
+        """GM이 한 말 한 줄을 사건으로 남긴다(D-02, 판 11).
+
+        중복 판정(D-12, 「이미 같은 dedupe_key로 말했는가」)은 이 계층이
+        아니라 호출부(`routes_creation.py::_gm_dedupe_key` 조회)가 AI를
+        부르기 **전에** 먼저 본다 — 이 메서드는 새 값을 무조건 사건으로
+        만든다. `RecordInterjection`처럼 명단 잠금 여부는 검사하지 않는다
+        — GM의 안내·지목·되묻기·정리는 명단이 잠기기 **전**에만 호출되는
+        경로이고(라우트가 이미 `party_roster is not None`을 409로 막는다),
+        이 명령 자신이 그 경계를 다시 검사할 이유가 없다.
+        """
+        if not command.say.strip():
+            raise CommandRejected("say는 비어 있을 수 없다")
+        return (
+            "creation_gm_spoke",
+            None,
+            {
+                "kind": command.kind,
+                "say": command.say,
+                "target_character_id": command.target_character_id,
+                "dedupe_key": command.dedupe_key,
             },
         )
 

@@ -71,6 +71,7 @@ from gptrpg.session_actor.actor import (
     LockPartyRoster,
     OccupyCharacter,
     RecordConsent,
+    RecordGmSpoke,
     RecordInterjection,
     ReopenCreationStep,
     RosterAlreadyLocked,
@@ -501,12 +502,45 @@ def _resolve_creation_gm_provider(request: Request) -> tuple[Provider, str]:
     return provider, choices["creation_gm"].model
 
 
+def _gm_dedupe_key(kind: str, state: GameState, character_id: str | None = None) -> str:
+    """「그 시점」을 나타내는 문자열(D-02/D-12) — GM 호출의 입력이 바뀌면
+    새 값이 된다. `state.creation_gm_said`에 이미 이 키가 있으면 서버가
+    AI를 다시 부르지 않고 기록된 `say`를 그대로 돌려준다.
+
+    네 갈래를 지금 전부 적는다 — 이 계획(12.3-01)은 `announce`만 쓰지만,
+    12.3-02가 나머지 셋을 붙일 때 이 규칙을 다시 발명하지 않게 한다.
+    """
+    if kind == "announce":
+        # 세션당 한 번이다 — 인원 확정 뒤 몇 번을 부르든 안내 내용은
+        # 같은 룰북 선언에서 나오므로 입력이 바뀌지 않는다.
+        return "announce"
+    if kind == "nominate":
+        # 누군가 끝나 후보 목록이 바뀌면(닫힌 목록, `_unfinished_candidates`)
+        # 새 지목이 가능해진다.
+        return "nominate:" + "|".join(_unfinished_candidates(state))
+    if kind == "follow_up":
+        # 그 사람이 값을 하나 더 내면(만들기 항목이 늘면) 새 되묻기가
+        # 가능해진다. 값이 하나도 없으면 0.
+        max_seq = 0
+        for (fold_character_id, _step_id), fold in state.creation_step_values.items():
+            if fold_character_id == character_id:
+                max_seq = max(max_seq, fold.seq)
+        return f"follow_up:{character_id}:{max_seq}"
+    if kind == "wrap_up":
+        # 동의 관문에서 「아니요」로 항목이 다시 채워지면 값이 바뀌어
+        # GM이 다시 정리한다(D-11).
+        max_seq = max((fold.seq for fold in state.creation_step_values.values()), default=0)
+        return "wrap_up:" + str(max_seq)
+    raise ValueError(f"모르는 GM 말 갈래: {kind!r}")
+
+
 class AnnounceCreationRequest(BaseModel):
     rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
 
 
 class AnnounceCreationResponse(BaseModel):
     message: str
+    seq: int
 
 
 @router.post("/sessions/{session_id}/creation/announce", response_model=AnnounceCreationResponse)
@@ -519,6 +553,11 @@ async def announce_creation(
     `rulebook.creation_steps` 선언에서 그대로 나온다(CHAR-01). GM 호출이
     실패해도 `announce_requirements`가 내부에서 폴백 문구로 떨어지므로
     이 경로는 500을 내지 않는다(ARCH-05).
+
+    **D-02/D-12 — 사건에 남고, 서버가 한 번만 낸다.** `_gm_dedupe_key`로
+    「이미 말했나」를 AI를 부르기 **전에** 본다 — 이미 기록에 있으면
+    제공자 해석조차 하지 않는다(제공자 설정이 없어도 화면이 지난 안내를
+    볼 수 있어야 한다).
     """
     actor = request.app.state.registry.get_or_create(session_id)
     if actor.state.party_roster is not None:
@@ -529,13 +568,28 @@ async def announce_creation(
     except UnknownRulebook as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    key = _gm_dedupe_key("announce", actor.state)
+    already_said = actor.state.creation_gm_said.get(key)
+    if already_said is not None:
+        return AnnounceCreationResponse(message=already_said.say, seq=already_said.seq)
+
     try:
         provider, model = _resolve_creation_gm_provider(request)
     except _AGENT_RESOLUTION_ERRORS as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     message = await asyncio.to_thread(announce_requirements, rulebook, provider, model)
-    return AnnounceCreationResponse(message=message)
+    try:
+        seq = await actor.submit(
+            RecordGmSpoke(kind="announce", say=message, target_character_id=None, dedupe_key=key)
+        )
+    except RosterAlreadyLocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CommandRejected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SequenceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return AnnounceCreationResponse(message=message, seq=seq)
 
 
 class NominateSpeakerRequest(BaseModel):
