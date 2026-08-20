@@ -77,6 +77,7 @@ from gptrpg.session_actor.actor import (
     ReopenCreationStep,
     RosterAlreadyLocked,
 )
+from gptrpg.web import creation_state
 from gptrpg.web.cookie_auth import COOKIE_NAME, read_identity, sign_cookie
 from gptrpg.web.routes_actions import MAX_ID_LEN, MAX_RAW_TEXT_LEN
 
@@ -423,27 +424,6 @@ async def record_interjection(
 # ---------------------------------------------------------------------------
 
 
-def _unfinished_candidates(state: GameState) -> tuple[str, ...]:
-    """진행 중인데 아직 완성되지 않은 사람의 닫힌 목록.
-
-    **대화의 상태 기계는 코드가 돌린다**(12.1-03-PLAN.md § 결정한 열린
-    지점 ①) — 에이전트에게 묻지 않는다. `state.creation_step_values`의
-    키에서 `character_id`를 뽑고 `state.created_characters`에 아직 없는
-    사람만 남긴다. 순서는 그 사람이 만들기 항목을 처음 제출한 순서를
-    보존한다(딕셔너리 삽입 순서 = 사건 순번 오름차순).
-
-    아직 항목을 하나도 제출하지 않은 사람은 이 목록에 못 들어간다 —
-    플랫폼이 아는 유일한 참가자 식별 통로가 `CompleteCreationStep`의
-    `character_id`이기 때문이다(방을 여는 사람이 정한 인원수와 실제
-    참가자 식별자는 다른 정보다).
-    """
-    seen: list[str] = []
-    for character_id, _step_id in state.creation_step_values:
-        if character_id not in state.created_characters and character_id not in seen:
-            seen.append(character_id)
-    return tuple(seen)
-
-
 def _transcript_for(state: GameState, character_ids: tuple[str, ...]) -> tuple[str, ...]:
     """참가자들이 지금까지 낸 자유 서술 값을 대화록 모양으로 편다.
 
@@ -459,15 +439,6 @@ def _transcript_for(state: GameState, character_ids: tuple[str, ...]) -> tuple[s
         if fold.text_value:
             lines.append(f"{character_id}: {fence_player_text(fold.text_value)}")
     return tuple(lines)
-
-
-def _required_steps_filled(state: GameState, rulebook: Rulebook, character_id: str) -> bool:
-    """룰북 최소선(`required=True`)이 채워졌는지 코드가 직접 본다(D-05
-    아래층) — GM 재량(위층, `judge_hooks`)과는 다른 층의 판단이다."""
-    for step in rulebook.creation_steps:
-        if step.required and (character_id, step.step_id) not in state.creation_step_values:
-            return False
-    return True
 
 
 def _fallback_intro_for(state: GameState, rulebook: Rulebook, character_id: str) -> str:
@@ -516,9 +487,9 @@ def _gm_dedupe_key(kind: str, state: GameState, character_id: str | None = None)
         # 같은 룰북 선언에서 나오므로 입력이 바뀌지 않는다.
         return "announce"
     if kind == "nominate":
-        # 누군가 끝나 후보 목록이 바뀌면(닫힌 목록, `_unfinished_candidates`)
+        # 누군가 끝나 후보 목록이 바뀌면(닫힌 목록, `creation_state.unfinished_candidates`)
         # 새 지목이 가능해진다.
-        return "nominate:" + "|".join(_unfinished_candidates(state))
+        return "nominate:" + "|".join(creation_state.unfinished_candidates(state))
     if kind == "follow_up":
         # 그 사람이 값을 하나 더 내면(만들기 항목이 늘면) 새 되묻기가
         # 가능해진다. 값이 하나도 없으면 0.
@@ -628,7 +599,7 @@ async def nominate_creation_speaker(
     if state.party_size_fixed is None:
         raise HTTPException(status_code=409, detail="인원이 아직 확정되지 않아 차례가 없다")
 
-    candidates = _unfinished_candidates(state)
+    candidates = creation_state.unfinished_candidates(state)
     if not candidates:
         raise HTTPException(status_code=409, detail="아직 자기소개를 안 끝낸 사람이 없다")
 
@@ -739,7 +710,9 @@ async def creation_follow_up(
     except UnknownRulebook as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    required_steps_filled = _required_steps_filled(state, rulebook, body.character_id)
+    required_steps_filled = creation_state.required_steps_filled(
+        state, rulebook, body.character_id
+    )
 
     key = _gm_dedupe_key("follow_up", state, body.character_id)
     already_said = state.creation_gm_said.get(key)
@@ -835,7 +808,7 @@ async def wrap_up_creation(
     유일한 자리다.
 
     **「전원 완성」의 판정 기준은 `party_size_fixed`(룰북 권장 인원)가
-    아니라 `_unfinished_candidates`다** — 12.1-CONTEXT.md D-08이 「명단과
+    아니라 `creation_state.unfinished_candidates`다** — 12.1-CONTEXT.md D-08이 「명단과
     출석은 다르다」를 명시한다(정원이 안 차도 진행한다, D22). 룰북 권장
     범위 안에서 방을 열었어도 실제 참가자가 그보다 적을 수 있다 — 그
     경우에도 「시작한 사람 전원이 끝났는가」만 보면 된다. 아직 아무도
@@ -854,7 +827,7 @@ async def wrap_up_creation(
         raise HTTPException(status_code=409, detail="파티 명단이 이미 잠겼다")
     if not state.created_characters:
         raise HTTPException(status_code=409, detail="아직 완성된 캐릭터가 없다")
-    if _unfinished_candidates(state):
+    if creation_state.unfinished_candidates(state):
         raise HTTPException(status_code=409, detail="아직 자기소개를 안 끝낸 사람이 있다")
 
     try:

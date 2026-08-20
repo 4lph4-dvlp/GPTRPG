@@ -274,6 +274,33 @@ export type GameEvent =
   | CreationConsentRecordedEvent
   | CreationHostClaimedEvent;
 
+/** 완성된 캐릭터 하나(D-04) — `consented`/`required_steps_filled`는
+ * 서버가 이미 하는 판단을 그대로 옮긴 것이지 화면이 다시 계산하지 않는다. */
+export interface CreationCharacterView {
+  character_id: string;
+  display_name: string;
+  consented: boolean;
+  required_steps_filled: boolean;
+}
+
+/** 지금 다시 열려 있는 항목 하나(D-11 부분 재진행). */
+export interface CreationReopenedStepView {
+  character_id: string;
+  step_id: string;
+}
+
+/** 만들기 항목 하나가 접힌 뒤의 값 — `browser_id`는 싣지 않는다(T-12.3-05). */
+export interface CreationStepValueView {
+  character_id: string;
+  step_id: string;
+  kind: string;
+  text_value: string | null;
+  picked: string[] | null;
+  axis_values: [string, number][] | null;
+  rolls: number[] | null;
+  seq: number;
+}
+
 export interface GameStateView {
   session_id: string;
   last_seq: number;
@@ -289,6 +316,30 @@ export interface GameStateView {
   last_grade: string | null;
   clock_segment_count: number;
   auto_advance_threshold: number;
+  /** 방장이 확정한 이 세션의 인원(D-01) — `null`은 아직 확정 전. */
+  party_size_fixed: number | null;
+  /** 인원 확정과 함께 정해지는 이 세션의 룰북(D-01). `null`이면 만들기가
+   * 아직 시작되지 않은 세션이다. */
+  creation_rulebook_id: string | null;
+  /** 잠긴 명단(D-08) — `null`과 빈 배열의 뜻이 다르다. `null`은 「아직 안
+   * 잠겼다」다. */
+  party_roster: string[] | null;
+  /** 항목을 하나라도 냈지만 아직 완성되지 않은 사람의 닫힌 목록. */
+  creation_unfinished_character_ids: string[];
+  /** GM이 가장 최근에 지목한 사람 — 그 사람이 이미 완성됐으면 차례가
+   * 끝난 것이므로 `null`이다. */
+  creation_current_speaker_id: string | null;
+  /** 완성된 캐릭터 목록. */
+  creation_characters: CreationCharacterView[];
+  /** 지금 다시 열려 있는 항목들(D-11). */
+  creation_reopened_step_ids: CreationReopenedStepView[];
+  /** 접힌 뒤의 항목 값 전부(D-09) — 확정한 항목이 목록으로 보이고 각
+   * 항목 옆에 고치기가 있으려면 화면이 이 목록을 읽어야 한다. 접는 일은
+   * 서버만 한다. */
+  creation_step_values: CreationStepValueView[];
+  /** 이 세션의 방장이 잡혔는지 여부만(D-11) — `creation_host_browser_id`
+   * 값 자체는 절대 싣지 않는다(T-12.3-05). */
+  creation_host_claimed: boolean;
 }
 
 export interface PollResponse {

@@ -328,6 +328,123 @@ def test_follow_up_rejects_mismatched_character_id_with_403_and_records_no_event
         assert [e for e in events if e["kind"] == "follow_up"] == []
 
 
+# ---------------------------------------------------------------------------
+# Task 2 — 만들기 진행 상태를 폴링 응답에 싣는다(D-04).
+# ---------------------------------------------------------------------------
+
+
+def _poll_state(client, *, session_id: str = SESSION_ID) -> dict:
+    response = client.get(f"/api/sessions/{session_id}/events", params={"from_seq": 0})
+    assert response.status_code == 200
+    return response.json()["state"]
+
+
+def test_poll_state_reports_party_size_and_unfinished_candidates(
+    web_client_with_fake_provider,
+):
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-poll-unfinished"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+        assert _submit_step(
+            client,
+            character_id=CHARACTER_ID,
+            browser_id=BROWSER_ID,
+            step_id="archetype",
+            session_id=session_id,
+            picked=["몸으로 먼저 막아선다"],
+        ).status_code == 200
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["party_size_fixed"] == 3
+        assert state["creation_rulebook_id"] == "dungeonworld_like"
+        assert state["creation_unfinished_character_ids"] == [CHARACTER_ID]
+
+
+def test_poll_state_current_speaker_clears_once_that_person_finishes(
+    web_client_with_fake_provider,
+):
+    provider = FakeProvider(complete_value="[]")  # 계약 위반 -> 후보 첫 번째로 폴백
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-poll-speaker"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+        assert _nominate(client, session_id=session_id).status_code == 200
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == CHARACTER_ID
+
+        _complete_all_required_steps(client, session_id=session_id)
+        assert _complete_creation(client, session_id=session_id).status_code == 200
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] is None
+
+
+def test_poll_state_lists_completed_character_with_consent_false(
+    web_client_with_fake_provider,
+):
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-poll-characters"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        _complete_all_required_steps(client, session_id=session_id)
+        assert _complete_creation(client, session_id=session_id).status_code == 200
+
+        state = _poll_state(client, session_id=session_id)
+        assert len(state["creation_characters"]) == 1
+        character = state["creation_characters"][0]
+        assert character["character_id"] == CHARACTER_ID
+        assert character["display_name"]
+        assert character["consented"] is False
+        assert character["required_steps_filled"] is True
+
+
+def test_poll_state_step_values_keep_only_the_latest_submission_and_omit_browser_id(
+    web_client_with_fake_provider,
+):
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-poll-values"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(
+            client, text_value="브람", session_id=session_id
+        ).status_code == 200
+        assert _submit_name_step(
+            client, text_value="브람 2세", session_id=session_id
+        ).status_code == 200
+
+        state = _poll_state(client, session_id=session_id)
+        name_values = [v for v in state["creation_step_values"] if v["step_id"] == "name"]
+        assert len(name_values) == 1
+        assert name_values[0]["text_value"] == "브람 2세"
+        assert name_values[0]["character_id"] == CHARACTER_ID
+        assert "browser_id" not in name_values[0]
+
+        raw_state_text = json.dumps(state)
+        assert "browser_id" not in raw_state_text
+        assert "host_browser_id" not in state
+
+
+def test_poll_state_before_any_rulebook_chosen_returns_200_with_empty_defaults(
+    web_client,
+):
+    session_id = SESSION_ID + "-poll-empty"
+    response = web_client.get(f"/api/sessions/{session_id}/events", params={"from_seq": 0})
+    assert response.status_code == 200
+    state = response.json()["state"]
+    assert state["party_size_fixed"] is None
+    assert state["creation_rulebook_id"] is None
+    assert state["party_roster"] is None
+    assert state["creation_unfinished_character_ids"] == []
+    assert state["creation_current_speaker_id"] is None
+    assert state["creation_characters"] == []
+    assert state["creation_reopened_step_ids"] == []
+    assert state["creation_step_values"] == []
+    assert state["creation_host_claimed"] is False
+
+
 def test_wrap_up_records_a_single_creation_gm_spoke_event(web_client_with_fake_provider):
     provider = FakeProvider(complete_value="[]")  # 계약 위반 -> 기본 정리 문구로 폴백
     with web_client_with_fake_provider(action_classifier=provider) as client:

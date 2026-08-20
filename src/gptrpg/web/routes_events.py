@@ -27,12 +27,61 @@ from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
 from gptrpg.event_log.schema import GameEvent
+from gptrpg.rulebooks import UnknownRulebook, get_rulebook
+from gptrpg.rules_core.reducer import GameState
+from gptrpg.rules_core.rulebook import Rulebook
 from gptrpg.session_actor.actor import AUTO_ADVANCE_FAILURE_THRESHOLD
 from gptrpg.session_actor.projection import rebuild_state_from_events
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT
+from gptrpg.web import creation_state
 from gptrpg.web.check_views import CheckCalculationView, calculation_view_for
 
 router = APIRouter()
+
+
+class CreationCharacterView(BaseModel):
+    """완성된 캐릭터 하나(D-04) — 목록으로 만들기 진행 상태를 그린다.
+
+    `consented`/`required_steps_filled`는 서버가 이미 하는 판단을 그대로
+    옮긴 것이지 화면이 다시 계산하는 값이 아니다(D-04, Phase 12.2가 세운
+    규율).
+    """
+
+    character_id: str
+    display_name: str
+    consented: bool
+    required_steps_filled: bool
+
+
+class CreationReopenedStepView(BaseModel):
+    """지금 다시 열려 있는 항목 하나(D-11 부분 재진행). 자기 것만 고르는
+    일은 화면이 `character_id`로 한다 — 이 목록 자체는 세션 전체를 담는다."""
+
+    character_id: str
+    step_id: str
+
+
+class CreationStepValueView(BaseModel):
+    """만들기 항목 하나가 접힌 뒤의 값(`CreationStepFold`의 화면용 얇은
+    거울) — 같은 키로 다시 오면 나중 값이 이긴다는 규칙은 서버(리듀서)만
+    적용한다(D-09 경계, Phase 12.2가 고친 사고를 반복하지 않는다).
+
+    **`browser_id`를 싣지 않는다(T-12.3-05)** — `CreationStepFold`에는
+    있지만 화면이 쓸 일이 없고, 실으면 남의 식별자가 세션의 네 탭 전부에
+    뿌려진다.
+    """
+
+    character_id: str
+    step_id: str
+    kind: str
+    text_value: str | None
+    picked: list[str] | None
+    axis_values: list[tuple[str, int]] | None
+    """(축 이름, 값) 짝의 목록 — pydantic이 튜플을 JSON 배열로 그대로
+    직렬화한다(`[[axis_name, value], ...]`). 새 응답 모델을 하나 더
+    늘리지 않는다."""
+    rolls: list[int] | None
+    seq: int
 
 
 class GameStateView(BaseModel):
@@ -42,6 +91,11 @@ class GameStateView(BaseModel):
     import해서 채운다 — 문턱값이 화면에 하드코딩되면 표시된 "/3"과 실제로
     시계를 돌리는 규칙이 어긋날 수 있다. 값이 한 자리(액터)에만 있어야
     이 어긋남이 구조적으로 불가능하다.
+
+    **만들기 칸(D-04, Phase 12.3)도 같은 규율을 따른다 — 값이 한 자리
+    (서버)에만 있어야 어긋남이 구조적으로 불가능하다.** 계산은
+    `creation_state.py`(서버 두 라우터가 공유)와 `GameState`에서 그대로
+    가져온다. 화면은 이 칸들을 읽기만 하고 다시 접지 않는다.
     """
 
     session_id: str
@@ -61,6 +115,96 @@ class GameStateView(BaseModel):
     last_grade: str | None
     clock_segment_count: int
     auto_advance_threshold: int
+
+    party_size_fixed: int | None
+    """방장이 확정한 이 세션의 인원(D-01) — `None`은 아직 확정 전."""
+    creation_rulebook_id: str | None
+    """인원 확정과 함께 정해지는 이 세션의 룰북(D-01). `None`이면 만들기가
+    아직 시작되지 않은 세션이다."""
+    party_roster: list[str] | None
+    """잠긴 명단(D-08) — `None`과 빈 목록의 뜻이 다르다는 `GameState` 규약을
+    그대로 옮긴다. `None`은 「아직 안 잠겼다」, 빈 목록은 이 저장소 규칙상
+    일어나지 않지만 `GameState.party_roster`의 타입을 그대로 반영한다."""
+    creation_unfinished_character_ids: list[str]
+    """항목을 하나라도 냈지만 아직 완성되지 않은 사람의 닫힌 목록
+    (`creation_state.unfinished_candidates` 그대로)."""
+    creation_current_speaker_id: str | None
+    """GM이 가장 최근에 지목한 사람 — 그 사람이 이미 완성됐으면 차례가
+    끝난 것이므로 `None`이다."""
+    creation_characters: list[CreationCharacterView]
+    """완성된 캐릭터 목록 — 이름·동의 여부·룰북 최소선 충족 여부."""
+    creation_reopened_step_ids: list[CreationReopenedStepView]
+    """지금 다시 열려 있는 항목들(D-11)."""
+    creation_step_values: list[CreationStepValueView]
+    """접힌 뒤의 항목 값 전부(D-09) — 확정한 항목이 목록으로 보이고 각
+    항목 옆에 고치기가 있으려면(D-09) 화면이 이 목록을 읽어야 한다. 접는
+    일(같은 키가 다시 오면 나중 것이 이긴다)은 서버만 한다."""
+    creation_host_claimed: bool
+    """이 세션의 방장이 잡혔는지 **여부만**(D-11) — `creation_host_browser_id`
+    값 자체는 절대 싣지 않는다(T-12.3-05). 다른 브라우저의 식별자가 네 탭
+    전부에 뿌려지면 그 값을 사칭해 남의 항목을 제출할 수 있게 된다. 「내가
+    방장인가」는 부른 사람에게만 답하는 전용 경로(12.3-03)가 답한다."""
+
+
+def _creation_character_views(
+    game_state: GameState, rulebook: Rulebook | None
+) -> list[CreationCharacterView]:
+    """완성된 캐릭터마다 이름·동의·룰북 최소선 충족 여부를 묶는다.
+
+    `rulebook`이 `None`이면(룰북을 못 찾았거나 아직 안 정해졌으면)
+    `required_steps_filled`를 `False`로 둔다 — 폴링을 절대 500으로
+    만들지 않는다(T-12.3-09).
+    """
+    views: list[CreationCharacterView] = []
+    for character_id, entity in game_state.created_characters.items():
+        filled = (
+            creation_state.required_steps_filled(game_state, rulebook, character_id)
+            if rulebook is not None
+            else False
+        )
+        views.append(
+            CreationCharacterView(
+                character_id=character_id,
+                display_name=entity.display_name,
+                consented=game_state.creation_consents.get(character_id, False),
+                required_steps_filled=filled,
+            )
+        )
+    return views
+
+
+def _creation_current_speaker_id(game_state: GameState) -> str | None:
+    """가장 최근 `nominate` 지목의 대상 — 이미 완성됐으면 차례가 끝난
+    것이므로 `None`이다."""
+    latest_seq = -1
+    latest_target: str | None = None
+    for fold in game_state.creation_gm_said.values():
+        if fold.kind != "nominate":
+            continue
+        if fold.seq > latest_seq:
+            latest_seq = fold.seq
+            latest_target = fold.target_character_id
+    if latest_target is None or latest_target in game_state.created_characters:
+        return None
+    return latest_target
+
+
+def _creation_step_value_views(game_state: GameState) -> list[CreationStepValueView]:
+    """`GameState.creation_step_values`를 화면용 얇은 거울로 옮긴다 —
+    `browser_id`는 뺀다(T-12.3-05)."""
+    return [
+        CreationStepValueView(
+            character_id=character_id,
+            step_id=step_id,
+            kind=fold.kind,
+            text_value=fold.text_value,
+            picked=list(fold.picked) if fold.picked is not None else None,
+            axis_values=list(fold.axis_values) if fold.axis_values is not None else None,
+            rolls=list(fold.rolls) if fold.rolls is not None else None,
+            seq=fold.seq,
+        )
+        for (character_id, step_id), fold in game_state.creation_step_values.items()
+    ]
 
 
 class PollResponse(BaseModel):
@@ -104,6 +248,17 @@ async def poll_events(
         if event.event_type == "check_resolved"
         and (view := calculation_view_for(event)) is not None
     ]
+
+    # 룰북을 못 찾거나 아직 안 정해졌으면 만들기 최소선 계산을 False로
+    # 두고 넘어간다 — 폴링이 절대 500을 내지 않아야 한다(T-12.3-09,
+    # ARCH-05와 같은 층의 규율). 세션 전체가 이 응답 하나에 걸려 있다.
+    rulebook = None
+    if game_state.creation_rulebook_id is not None:
+        try:
+            rulebook = get_rulebook(game_state.creation_rulebook_id)
+        except UnknownRulebook:
+            rulebook = None
+
     state_view = GameStateView(
         session_id=game_state.session_id,
         last_seq=game_state.last_seq,
@@ -122,5 +277,21 @@ async def poll_events(
         last_grade=game_state.last_grade,
         clock_segment_count=CLOCK_SEGMENT_COUNT,
         auto_advance_threshold=AUTO_ADVANCE_FAILURE_THRESHOLD,
+        party_size_fixed=game_state.party_size_fixed,
+        creation_rulebook_id=game_state.creation_rulebook_id,
+        party_roster=(
+            list(game_state.party_roster) if game_state.party_roster is not None else None
+        ),
+        creation_unfinished_character_ids=list(
+            creation_state.unfinished_candidates(game_state)
+        ),
+        creation_current_speaker_id=_creation_current_speaker_id(game_state),
+        creation_characters=_creation_character_views(game_state, rulebook),
+        creation_reopened_step_ids=[
+            CreationReopenedStepView(character_id=character_id, step_id=step_id)
+            for character_id, step_id in game_state.reopened_creation_steps
+        ],
+        creation_step_values=_creation_step_value_views(game_state),
+        creation_host_claimed=game_state.creation_host_browser_id is not None,
     )
     return PollResponse(events=events, state=state_view, check_calculations=check_calculations)
