@@ -2,7 +2,7 @@
  * 서버 응답 모양 — 파이썬 쪽 pydantic 모델과 칸 이름을 한 글자도 다르게 짓지
  * 않는다. 권위는 다음 세 파일이고 이쪽은 화면 전용 사본이다:
  *
- *   src/gptrpg/event_log/schema.py             사건 16종
+ *   src/gptrpg/event_log/schema.py             사건 19종
  *   src/gptrpg/web/routes_events.py            폴링 응답
  *   src/gptrpg/web/routes_characters.py        캐릭터 목록·시트
  *   src/gptrpg/rules_core/check_calculation.py 계산 조각 모양의 권위(Phase 12.2)
@@ -162,6 +162,36 @@ export interface SceneIllustratedEvent extends EventEnvelope {
   latency_ms: number;
 }
 
+/** 캐릭터를 처음 점유했다 — 먼저 잡은 사람이 임자다(D-05/D-06). 놓기
+ * 사건은 없다(D-07) — `schema.py::CharacterOccupied`. */
+export interface CharacterOccupiedEvent extends EventEnvelope {
+  event_type: "character_occupied";
+  character_id: string;
+  browser_id: string;
+}
+
+/** AI 출력 안전 장치가 걸렀거나 의심스럽다고 표시한 운영자 기록(판 6+,
+ * 10-06/10-07) — `schema.py::SafetyFlagged`. 상태를 바꾸지 않는다(`last_seq`만
+ * 갱신) — 화면은 이 종류를 몰라도 안전하지만, 유니온에서 빠지면 폴링
+ * 응답을 그대로 통과시키는 자리(`PollResponse.events`)에서 이 사건이 하나라도
+ * 온 세션의 파싱이 깨진다(WR-02, 12.3-REVIEW.md). */
+export interface SafetyFlaggedEvent extends EventEnvelope {
+  event_type: "safety_flagged";
+  source: "narration" | "classifier";
+  reason: "think_block" | "source_overlap" | "character_break" | "unknown_move" | "corrupted_glyph";
+  disposition: "blocked" | "flagged";
+  matched_len: number;
+  subject_len: number;
+  chunk_index: number | null;
+}
+
+/** 분류기가 이 선언에 판정이 필요한지 최종 결정했다(판 7, 11-06 rework) —
+ * `schema.py::ActionClassified`. */
+export interface ActionClassifiedEvent extends EventEnvelope {
+  event_type: "action_classified";
+  no_check: boolean;
+}
+
 /** 만들기 항목 하나가 확정한 자원 축 값 하나(판 9) — `schema.py::CreationAxisValueRecord`. */
 export interface CreationAxisValueRecord {
   axis_name: string;
@@ -264,6 +294,9 @@ export type GameEvent =
   | ClockAdvancedEvent
   | AiInvokedEvent
   | SceneIllustratedEvent
+  | CharacterOccupiedEvent
+  | SafetyFlaggedEvent
+  | ActionClassifiedEvent
   | ResourceChangedEvent
   | PartySizeFixedEvent
   | CreationStepCompletedEvent
