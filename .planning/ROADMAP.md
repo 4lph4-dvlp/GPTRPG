@@ -614,7 +614,7 @@ Plans:
 **Depends on**: Phase 12.1 (만들기 경로·GM 대화·동의·명단 잠금이 전부 서버에 있다),
 Phase 8 (점유 규칙과 서명 쿠키 신원)
 **Requirements**: TBD (논의 전 — `/gsd-discuss-phase 12.3`에서 정한다)
-**Plans:** 1/5 plans executed
+**Plans:** 2/5 plans executed
 
 Plans:
 **Wave 1**
@@ -623,7 +623,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 12.3-02-PLAN.md — 서버가 만들기 상태와 룰북 항목 선언을 화면에 내려준다
+- [x] 12.3-02-PLAN.md — 서버가 만들기 상태와 룰북 항목 선언을 화면에 내려준다
 
 **Wave 3** *(blocked on Wave 2 completion)*
 

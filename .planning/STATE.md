@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면
 status: executing
-stopped_at: Completed 12.3-01-PLAN.md
-last_updated: "2026-08-20T14:21:53.543Z"
+stopped_at: Completed 12.3-02-PLAN.md
+last_updated: "2026-08-20T14:46:04.778Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 12.3 execution started
-state_head: 646263a7605a50273e78227713a37eef1bc2ba3c
+state_head: 53afc7454fe4f26236d858506d1d82e757cb5611
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 43
-  completed_plans: 39
+  completed_plans: 40
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.3 (캐릭터 만들기 화면) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-20 — Phase 12.3 execution started
@@ -132,6 +132,7 @@ Progress: [██████████] 100%
 | Phase 12.2 P02 | not tracked precisely | 3 tasks | 10 files |
 | Phase 12.2 P03 | ~4h | 3 tasks | 8 files |
 | Phase 12.3 P01 | 78min | 3 tasks | 19 files |
+| Phase 12.3 P02 | 24min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -308,6 +309,7 @@ Progress: [██████████] 100%
 - [Phase 12.3]: Task 0 사람 결정: GM의 말을 CreationGmSpoke 하나(one-event)로 묶는다 — kind 리터럴로 네 갈래 구분, dedupe_key 하나로 D-12 중복 방지를 전부 덮는다
 - [Phase 12.3]: Command 클래스는 RecordGmSpoke로 짓는다 — 계획 문서의 CreationGmSpoke 문구는 schema.py Event 클래스와 이름이 겹쳐 파이썬에서 재사용할 수 없다(FixPartySize/PartySizeFixed 규약을 따름)
 - [Phase 12.3]: CharacterSelect 화면을 지운다(D-10) — 만들기 완성이 자동 점유까지 끝내므로 쿠키 없는 브라우저가 명단 잠금 뒤 고를 목록이 애초에 없다
+- [Phase 12.3]: GM의 지목·되묻기·정리를 announce와 같은 사건화 모양으로 통일하고, 만들기 진행 상태 계산을 web/creation_state.py 한 자리로 모아 routes_creation.py·routes_events.py가 공유한다 — 판단이 두 곳에 생기면 언젠가 어긋난다는 Phase 12.2 규율을 그대로 따랐다(D-04)
 
 ### Pending Todos
 
@@ -365,8 +367,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-20T14:21:53.254Z
-Stopped at: Completed 12.3-01-PLAN.md
+Last session: 2026-08-20T14:46:04.489Z
+Stopped at: Completed 12.3-02-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
