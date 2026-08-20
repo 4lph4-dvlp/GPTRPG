@@ -5,8 +5,8 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면
 status: planning
-stopped_at: Completed 12.2-03-PLAN.md (D-15 human-verify gate approved)
-last_updated: "2026-08-19T19:28:29.342Z"
+stopped_at: Phase 12.3 context gathered
+last_updated: "2026-08-20T09:39:34.317Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 12.2 complete, transitioned to Phase 12.3
 progress:
@@ -361,10 +361,10 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-19T19:11:17.083Z
-Stopped at: Completed 12.2-03-PLAN.md (D-15 human-verify gate approved)
+Last session: 2026-08-20T09:39:34.267Z
+Stopped at: Phase 12.3 context gathered
 이어받아 Task 2·Task 3 커밋까지 완료
-Resume file: None
+Resume file: .planning/phases/12.3-creation-screen/12.3-CONTEXT.md
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
 `resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
