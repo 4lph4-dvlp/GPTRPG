@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면
-status: executing
-stopped_at: Completed 12.3-04-PLAN.md
-last_updated: "2026-08-20T15:35:24.790Z"
+status: verifying
+stopped_at: Completed 12.3-05-PLAN.md (CHAR-06 사람 확인 대기 중)
+last_updated: "2026-08-20T16:33:08.713Z"
 last_activity: 2026-08-20
 last_activity_desc: Phase 12.3 execution started
-state_head: 28736ef24fa3aad1099f9b87c09c8df7c38481e3
+state_head: 7b1c06dfad2af83b0cd9eab958c0e43df42fa783
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 43
-  completed_plans: 42
+  completed_plans: 43
 ---
 
 # Project State
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 12.3 (캐릭터 만들기 화면) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-20 — Phase 12.3 execution started
 
@@ -135,6 +135,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P02 | 24min | 3 tasks | 6 files |
 | Phase 12.3 P03 | 45min | 3 tasks | 9 files |
 | Phase 12.3 P04 | 40min | 3 tasks | 9 files |
+| Phase 12.3 P05 | 55min | 4 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -316,6 +317,8 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 방장 재실 표는 사건이 아니라 프로세스 메모리로 뒀다 — 판단은 서버 한 자리에만 있되 그 재료까지 전부 사건일 필요는 없다는 재량 판단(12.3-03 Task 2)
 - [Phase 12.3]: 만들기 대화판이 단일 활성 항목(activeRow) 모델을 쓴다 — 다음 미완료 필수 항목이나 고치기로 연 항목 하나에만 조작 UI를 그린다 — 12.1 D-03의 자기소개처럼을 마법사가 아니면서도 한 번에 하나씩 답하는 대화 리듬으로 해석했다
 - [Phase 12.3]: DiceModal이 판정과 만들기 굴림 두 자리에서 재사용된다 — roll 프롭을 유니온으로 넓히고 눈 개수·타이밍·착지값 코드는 한 줄도 안 바꿨다 — 같은 굴림은 같게 보여야 한다(D-07) — 새 연출을 만들지 않는다
+- [Phase 12.3]: 12.3-05: 인원 확정/동의 두 관문을 순수 게이트 함수(partySizeGate/consentGate)+렌더 스위치로 배선, CreationScreen이 onEntered로 App의 Gate를 세션으로 바꾼다
+- [Phase 12.3]: 12.3-05: CHAR-06을 REQUIREMENTS.md/ROADMAP.md에 만들었지만 사람 확인(Task 4, 14개 항목) 전이라 체크하지 않는다 — requirements.ready-ids는 1/1이지만 그것은 계획 완료이지 사람 확인이 아니다
 
 ### Pending Todos
 
@@ -373,8 +376,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-20T15:35:24.498Z
-Stopped at: Completed 12.3-04-PLAN.md
+Last session: 2026-08-20T16:33:08.412Z
+Stopped at: Completed 12.3-05-PLAN.md (CHAR-06 사람 확인 대기 중)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 

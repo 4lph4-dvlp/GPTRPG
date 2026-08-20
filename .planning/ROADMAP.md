@@ -614,7 +614,7 @@ Plans:
 **Depends on**: Phase 12.1 (만들기 경로·GM 대화·동의·명단 잠금이 전부 서버에 있다),
 Phase 8 (점유 규칙과 서명 쿠키 신원)
 **Requirements**: CHAR-06
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans executed
 
 Plans:
 **Wave 1**
@@ -632,7 +632,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 12.3-05-PLAN.md — 인원 확정 · 동의 관문 · 세션 진입 · CHAR-06
+- [x] 12.3-05-PLAN.md — 인원 확정 · 동의 관문 · 세션 진입 · CHAR-06
 
 > **왜 새로 생겼나 (2026-08-19, Phase 12.1 사람 확인 중 발견).** Phase 12.1이 캐릭터 만들기를
 > **서버에 전부** 만들었다 — 일곱 조작, 세 룰북의 서로 다른 조합, GM이 진행하는 자기소개
