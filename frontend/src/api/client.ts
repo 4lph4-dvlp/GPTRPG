@@ -156,10 +156,15 @@ export function fixPartySize(
   sessionId: string,
   playerCharacterCount: number,
   rulebookId: string,
+  browserId: string,
 ): Promise<SeqResponse> {
   return postJsonWithDetail<SeqResponse>(`${sessionBase(sessionId)}/creation/party-size`, {
     player_character_count: playerCharacterCount,
     rulebook_id: rulebookId,
+    // 방장 관문 대조용(T-12.3-11, D-11) — 화면이 뜨는 순간 방장이 잡히므로,
+    // 사람이 이 버튼을 누를 때는 서버에 이미 방장이 등록돼 있다. 이 값을
+    // 빼면 서버가 빈 문자열로 채워 방장 본인도 403으로 막힌다.
+    browser_id: browserId,
   });
 }
 

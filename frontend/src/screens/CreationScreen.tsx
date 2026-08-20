@@ -76,11 +76,13 @@ const MAX_QUEUED_ROLLS = 3;
 function PartySizeControl({
   sessionId,
   rulebookId,
+  browserId,
   onDone,
   onError,
 }: {
   sessionId: string;
   rulebookId: string;
+  browserId: string;
   onDone: () => void;
   onError: (message: string) => void;
 }) {
@@ -90,7 +92,7 @@ function PartySizeControl({
   async function confirm(): Promise<void> {
     setBusy(true);
     try {
-      await fixPartySize(sessionId, count, rulebookId);
+      await fixPartySize(sessionId, count, rulebookId, browserId);
       onDone();
     } catch (err) {
       onError(creationErrorMessage(err));
@@ -303,6 +305,7 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
             <PartySizeControl
               sessionId={sessionId}
               rulebookId={DEFAULT_RULEBOOK_ID}
+              browserId={myBrowserId}
               onDone={feed.pollNow}
               onError={setError}
             />
