@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
-current_phase_name: creation-screen
+current_phase_name: 캐릭터 만들기 화면 (INSERTED)
 status: executing
-stopped_at: Completed 12.3-08-PLAN.md (흘려보낸 차례 회복 경로 완성, Phase 12.3 전 계획(8/8) 실행 완료 — CHAR-06은 12.3-05 체크리스트·동의 교차 전파 화면 절반·5분 UX 사람 확인이 남아 Pending 유지, /gsd-verify-work 필요)
-last_updated: "2026-08-21T13:47:00.947Z"
+stopped_at: Completed 12.3-09-PLAN.md (흘려보낸 지목 회복이 영구 배제로 굳던 CR-01 결함 닫음, Phase 12.3 전 9개 계획 실행 완료 — CHAR-06은 동의 교차 전파 화면 절반·5분 UX 사람 확인이 남아 Pending 유지, /gsd-verify-work 필요)
+last_updated: "2026-08-21T14:25:28.577Z"
 last_activity: 2026-08-21
 last_activity_desc: Phase 12.3 execution started
-state_head: bc4124da65db99e4a16d1d24b5385cc8242c04f9
+state_head: 287c82f69c3ff1d234b2267def923df17016fd71
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 47
-  completed_plans: 46
+  completed_plans: 47
 ---
 
 # Project State
@@ -30,11 +30,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 12.3 (creation-screen) — READY TO EXECUTE
-Plan: 8 of 8
-Status: Ready to execute
-"자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-21 — Phase 12.3 execution started
+Phase: 12.3 (캐릭터 만들기 화면 (INSERTED)) — 전 9개 계획 실행 완료, /gsd-verify-work 대기
+Plan: 9 of 9 (12.3-09, gap-closure)
+Status: Executed — 5차 검증 필요
+Last activity: 2026-08-21 — 12.3-09(흘려보낸 지목 회복 gap 닫기) 완료
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -138,6 +137,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P05 | 55min | 4 tasks | 11 files |
 | Phase 12.3 P06 | 체크포인트 재개 - 미측정 | 4 tasks | 9 files |
 | Phase 12.3 P08 | 40min | 3 tasks | 4 files |
+| Phase 12.3 P09 | 미측정 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -325,6 +325,7 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 12.3-07: 첫 지목 교착(D-06)이 실제 브라우저에서 세 사람 전원 이어서 지목됨을 라이브로 확인. D-07/D-08/D-11 승계/D-13 세 문구도 라이브 확인. 동의 관문 3인 교차 전파는 QA 도구(단일 크로미움 프로필, 서명 쿠키·localStorage 전역 공유) 제약으로 라이브 미확인 — 사람이 별도 브라우저로 확인 필요. CHAR-06 여전히 미체크
 - [Phase 12.3]: [Phase 12.3] 12.3-08: forfeited_nominee/latest_nomination/nomination_progress_seq 신설(D-04, routes_events에서 옮김) — 흘려보낸 지목이 HOST_IDLE_S(재실 끊김)·NOMINATION_IDLE_S(무응답 300초) 두 갈래로 스스로 풀리고, present_candidates가 흘려보낸 식별자를 후보 뒤로 민다
 - [Phase 12.3]: [Phase 12.3] 12.3-08: CHAR-06을 Complete로 표시하지 않음 — 8개 계획 전부가 이 ID를 선언해 기계적 requirements gate는 준비됨을 반환하지만, 계획서 자신이 12.3-05 14개 체크리스트·동의 교차 전파 화면 절반·5분 UX를 미해결로 명시해 REQUIREMENTS.md에서 Pending으로 유지
+- [Phase 12.3]: 12.3-09: _forfeited_at를 (시각, 지목순번) 짝으로 바꾸고 nominate 중복 방지 키에 흘려보냄 표시를 이어 붙여 회복이 영구 배제로 굳던 CR-01을 닫음(4차 검증 truth #20/missing③)
 
 ### Pending Todos
 
@@ -382,8 +383,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-21T12:53:28.924Z
-Stopped at: Completed 12.3-08-PLAN.md (흘려보낸 차례 회복 경로 완성, Phase 12.3 전 계획(8/8) 실행 완료 — CHAR-06은 12.3-05 체크리스트·동의 교차 전파 화면 절반·5분 UX 사람 확인이 남아 Pending 유지, /gsd-verify-work 필요)
+Last session: 2026-08-21T14:25:28.259Z
+Stopped at: Completed 12.3-09-PLAN.md (흘려보낸 지목 회복이 영구 배제로 굳던 CR-01 결함 닫음, Phase 12.3 전 9개 계획 실행 완료 — CHAR-06은 동의 교차 전파 화면 절반·5분 UX 사람 확인이 남아 Pending 유지, /gsd-verify-work 필요)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
