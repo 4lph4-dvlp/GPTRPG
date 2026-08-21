@@ -10,6 +10,8 @@ import json
 
 from conftest import FakeProvider
 
+from gptrpg.web import creation_state
+
 SESSION_ID = "creation-screen-state-s1"
 CHARACTER_ID = "hero-1"
 BROWSER_ID = "b-hero-1"
@@ -390,6 +392,154 @@ def test_nominate_after_party_size_fixed_works_with_no_prior_step_submission(
         events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
         nominate_events = [e for e in events if e["kind"] == "nominate"]
         assert len(nominate_events) == 1
+
+
+def test_nominate_moves_to_the_next_present_participant_after_the_first_one_finishes(
+    web_client_with_fake_provider,
+):
+    """T-12.3-20 회귀 그물 — `_gm_dedupe_key`가 후보 목록과 따로 계산되면
+    이 시험이 무너진다: 첫 사람이 완성돼 candidates가 바뀌었는데 키가 그걸
+    안 반영하면 두 번째 지목이 첫 번째 기록을 그대로 재사용해, 이미
+    완성된 사람을 다시 가리키는 채로 같은 교착이 되돌아온다. 이 그물이
+    무엇을 잡는지는 이름만으로 안 보이므로 여기 적는다."""
+    provider = FakeProvider(complete_value="[]")  # 계약 위반 -> 후보 첫 번째로 폴백
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-next-participant"
+        browsers = {"pc-a1": "b-a1", "pc-a2": "b-a2", "pc-a3": "b-a3"}
+        for character_id, browser_id in browsers.items():
+            assert (
+                _claim_host(
+                    client,
+                    character_id=character_id,
+                    browser_id=browser_id,
+                    session_id=session_id,
+                ).status_code
+                == 200
+            )
+
+        host_browser_id = next(iter(browsers.values()))
+        assert (
+            _fix_party_size(
+                client, browser_id=host_browser_id, session_id=session_id
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session_id}/creation/announce",
+                json={"rulebook_id": "dungeonworld_like"},
+            ).status_code
+            == 200
+        )
+
+        first = _nominate(client, session_id=session_id)
+        assert first.status_code == 200
+        first_target = first.json()["character_id"]
+        assert first_target in browsers
+
+        _complete_all_required_steps(
+            client,
+            character_id=first_target,
+            browser_id=browsers[first_target],
+            session_id=session_id,
+        )
+        assert (
+            _complete_creation(
+                client,
+                character_id=first_target,
+                browser_id=browsers[first_target],
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+        client.cookies.clear()  # 다음 지목은 신원을 안 보므로 필수는 아니지만 위생상 비운다
+
+        second = _nominate(client, session_id=session_id)
+        assert second.status_code == 200
+        second_target = second.json()["character_id"]
+        assert second_target != first_target
+        assert second_target in browsers
+
+        events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
+        nominate_events = [e for e in events if e["kind"] == "nominate"]
+        assert len(nominate_events) == 2
+
+
+def test_nominate_candidates_never_exceed_the_remaining_party_size(
+    web_client_with_fake_provider,
+):
+    """T-12.3-17 상한 회귀 그물 — 재실 신호는 브라우저가 스스로 신고하는
+    값이라 위조될 수 있다. `present_candidates`가 남은 자리 수로 뒤쪽
+    (재실에서 나온) 항목만 자르는지, 그리고 남은 자리가 후보 수와
+    정확히 같을 때는(adjacency 경계) 전부 들어오는지 직접 확인한다.
+    던전월드류의 인원 하한이 3이라(`DUNGEONWORLD_PARTY_SIZE_RANGE`) 인원을
+    3으로 고정하고 신호 수 쪽을 바꿔 두 경우를 가른다."""
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        # 경우 1 — 재실 신호 다섯, 남은 자리 셋: 후보가 셋을 못 넘는다.
+        session_over = SESSION_ID + "-cap-over"
+        for i in range(5):
+            assert (
+                _claim_host(
+                    client,
+                    character_id=f"pc-over-{i}",
+                    browser_id=f"b-over-{i}",
+                    session_id=session_over,
+                ).status_code
+                == 200
+            )
+        assert (
+            _fix_party_size(
+                client, count=3, browser_id="b-over-0", session_id=session_over
+            ).status_code
+            == 200
+        )
+
+        state = client.app.state.registry.get_or_create(session_over).state
+        candidates = creation_state.present_candidates(state, session_over)
+        assert len(candidates) == 3
+
+        # 경우 2 — 재실 신호 셋, 남은 자리도 정확히 셋: 전부 들어온다.
+        session_exact = SESSION_ID + "-cap-exact"
+        for i in range(3):
+            assert (
+                _claim_host(
+                    client,
+                    character_id=f"pc-exact-{i}",
+                    browser_id=f"b-exact-{i}",
+                    session_id=session_exact,
+                ).status_code
+                == 200
+            )
+        assert (
+            _fix_party_size(
+                client, count=3, browser_id="b-exact-0", session_id=session_exact
+            ).status_code
+            == 200
+        )
+
+        state = client.app.state.registry.get_or_create(session_exact).state
+        exact_candidates = creation_state.present_candidates(state, session_exact)
+        assert len(exact_candidates) == 3
+        # 탐침 ordering — 같은 상태를 연달아 두 번 물으면 같은 순서가 나온다.
+        assert creation_state.present_candidates(state, session_exact) == exact_candidates
+
+
+def test_nominate_without_any_presence_signal_is_still_rejected_and_records_no_event(
+    web_client_with_fake_provider,
+):
+    """탐침 empty 해소 — 재실 신호를 보낸 사람도 항목을 낸 사람도 없으면
+    지목할 대상이 진짜로 없다. 빈 후보 목록이 조용히 통과하지 않는다."""
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-no-presence"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+
+        response = _nominate(client, session_id=session_id)
+        assert response.status_code == 409
+
+        events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
+        assert [e for e in events if e["kind"] == "nominate"] == []
 
 
 # ---------------------------------------------------------------------------
