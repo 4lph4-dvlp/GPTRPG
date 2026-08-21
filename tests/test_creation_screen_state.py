@@ -581,6 +581,108 @@ def test_ghost_presence_signals_do_not_permanently_push_out_real_participants(
     assert creation_state.present_candidates(state, session_id) == ("real-1", "real-2")
 
 
+def test_a_forfeited_ruling_holds_for_the_same_nomination_but_a_new_one_starts_the_clock_over(
+    web_client_with_fake_provider,
+):
+    """12.3-VERIFICATION.md 4차 §CR-01 독립 재현의 정식 이관본(12.3-09).
+    「차례를 흘려보냈다」는 **그 차례에 대한** 판정이지 **그 사람에 대한**
+    판정이 아니다 — 4차 검증 truth #20과 12.3-08-PLAN.md의 금지 조항
+    「회복이 영구 배제로 바뀌지 않는다」를 함께 지킨다."""
+    session_id = SESSION_ID + "-reopen-same-vs-new"
+    creation_state.mark_character_present(session_id, "pc-reopen-1")
+    state = GameState(session_id=session_id, party_size_fixed=1)
+    state = dataclasses.replace(
+        state,
+        creation_gm_said={
+            "n1": CreationGmLineFold(
+                seq=1, kind="nominate", say="", target_character_id="pc-reopen-1"
+            ),
+        },
+    )
+
+    # 관측 시계를 처음 맞추는 호출이다.
+    assert creation_state.forfeited_nominee(state, session_id) is None
+
+    # 순번은 그대로 두고 시각만 되감는다.
+    seq, _started_at = creation_state._nomination_watermark[(session_id, "pc-reopen-1")]
+    creation_state._nomination_watermark[(session_id, "pc-reopen-1")] = (
+        seq,
+        time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
+    )
+    assert creation_state.forfeited_nominee(state, session_id) == "pc-reopen-1"
+
+    # 같은 차례면 유지 — 아무것도 안 바꾸고 다시 물어도 판정이 흔들리지
+    # 않는다. 폴링마다 판정이 흔들리면 화면이 열렸다 닫혔다 한다.
+    assert creation_state.forfeited_nominee(state, session_id) == "pc-reopen-1"
+
+    # 새 차례면 다시 — 같은 대상의 새 지목(seq=2)이 하나 더 남는다(옛
+    # 줄은 남긴다 — 사건 기록은 덧붙이기만 한다).
+    state2 = dataclasses.replace(
+        state,
+        creation_gm_said={
+            "n1": CreationGmLineFold(
+                seq=1, kind="nominate", say="", target_character_id="pc-reopen-1"
+            ),
+            "n2": CreationGmLineFold(
+                seq=2, kind="nominate", say="", target_character_id="pc-reopen-1"
+            ),
+        },
+    )
+    assert creation_state.latest_nomination(state2) == ("pc-reopen-1", 2)
+    # 이 단언이 4차 검증이 실패로 기록한 바로 그 자리다.
+    assert creation_state.forfeited_nominee(state2, session_id) is None
+
+    # 회복이 면제권이 되지 않는다 — 새 차례의 워터마크도 되감으면 다시
+    # 흘려보낸 것으로 판정된다.
+    seq2, _started_at2 = creation_state._nomination_watermark[(session_id, "pc-reopen-1")]
+    creation_state._nomination_watermark[(session_id, "pc-reopen-1")] = (
+        seq2,
+        time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
+    )
+    assert creation_state.forfeited_nominee(state2, session_id) == "pc-reopen-1"
+
+
+def test_a_forfeited_nomination_changes_the_dedupe_mark_but_a_healthy_one_leaves_it_untouched(
+    web_client_with_fake_provider,
+):
+    """`forfeited_nomination_mark`의 세 경계 — 흘려보냄이 없으면(정상
+    지목이든 지목 자체가 없든) 오늘의 중복 방지 키가 글자 하나도 안
+    바뀐다(D-12 비-회귀, 경계 탐침 `empty`), 흘려보냄이 서 있으면 표시가
+    비지 않고 결정론적이다(D-12, 흘려보냄 하나당 AI 호출 최대 한 번)."""
+    session_id = SESSION_ID + "-dedupe-mark"
+    creation_state.mark_character_present(session_id, "pc-mark-1")
+
+    # 지목이 있고 아직 안 흘려보내진 상태 — 빈 문자열.
+    state = GameState(session_id=session_id, party_size_fixed=1)
+    state = dataclasses.replace(
+        state,
+        creation_gm_said={
+            "n1": CreationGmLineFold(
+                seq=1, kind="nominate", say="", target_character_id="pc-mark-1"
+            ),
+        },
+    )
+    assert creation_state.forfeited_nomination_mark(state, session_id) == ""
+
+    # 지목이 아예 없는 상태 — 경계 탐침 `empty`의 답.
+    empty_state = GameState(session_id=session_id, party_size_fixed=1)
+    assert creation_state.forfeited_nomination_mark(empty_state, session_id) == ""
+
+    # 워터마크를 되감아 흘려보낸 것으로 판정시킨다.
+    seq, _started_at = creation_state._nomination_watermark[(session_id, "pc-mark-1")]
+    creation_state._nomination_watermark[(session_id, "pc-mark-1")] = (
+        seq,
+        time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
+    )
+    mark = creation_state.forfeited_nomination_mark(state, session_id)
+    assert mark != ""
+    assert "pc-mark-1" in mark
+    assert "1" in mark
+
+    # 결정론적이다 — 같은 상태를 연달아 두 번 물으면 같은 값이 나온다.
+    assert creation_state.forfeited_nomination_mark(state, session_id) == mark
+
+
 def test_a_nominee_that_keeps_submitting_values_never_loses_the_turn(
     web_client_with_fake_provider,
 ):
