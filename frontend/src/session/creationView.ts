@@ -199,6 +199,37 @@ export function consentGate(state: GameStateView, wrappedUp: boolean): ConsentGa
   return wrappedUp ? "open" : "needs_wrap_up";
 }
 
+/**
+ * GM에게 다음 차례를 지목해 달라고 부를 때인가(12.3-06, D-06) — 이
+ * 저장소는 RTL을 안 쓰고 순수 함수만 시험하므로(CR-01이 이번 결함으로
+ * 확인시켜 준 것) 이 부트스트랩 판단을 컴포넌트 안에 두면 시험이 그
+ * 조건을 볼 수 없다. **`creation_unfinished_character_ids`(이미 항목을
+ * 낸 사람만 담는 목록)를 조건으로도 의존성으로도 쓰지 않는다** — 그게
+ * 이전 결함의 정체였다: 아무도 아직 항목을 안 낸 부트스트랩 세션에서는
+ * 그 목록이 영원히 비어 지목이 한 번도 안 불렸다. 이 함수는 대신
+ * `creation_characters.length`(완성된 사람 수)와 `party_size_fixed`만
+ * 비교한다 — 완성 안 된 사람이 남아 있다는 사실은 「후보가 이미 있다」가
+ * 아니라 「아직 끝나지 않았다」로 충분하다.
+ */
+export function shouldNominateNext(state: GameStateView, announced: boolean): boolean {
+  if (!announced) {
+    return false;
+  }
+  if (state.party_roster !== null) {
+    return false;
+  }
+  if (state.party_size_fixed === null) {
+    return false;
+  }
+  if (state.creation_current_speaker_id !== null) {
+    return false;
+  }
+  if (state.creation_characters.length >= state.party_size_fixed) {
+    return false;
+  }
+  return true;
+}
+
 /** 아직 동의를 안 누른 캐릭터의 `display_name` 목록이다(D-03) —
  * `character_id`가 아니라 사람이 알아볼 이름을 돌려준다. 순서는
  * `state.creation_characters` 순서를 그대로 따른다. */

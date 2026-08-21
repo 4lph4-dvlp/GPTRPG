@@ -25,6 +25,7 @@ import {
   nextUnfilledStep,
   partySizeGate,
   pendingConsenters,
+  shouldNominateNext,
   stepRows,
 } from "./creationView.ts";
 
@@ -432,5 +433,71 @@ describe("pendingConsenters", () => {
       ],
     });
     expect(pendingConsenters(state)).toEqual([]);
+  });
+});
+
+describe("shouldNominateNext", () => {
+  it("부트스트랩(인원 확정·안내됨·완성 0·미완성 빈 목록·지목 없음)이면 참이다 — 오늘 화면의 조건(unfinished.length>0)으로는 거짓이다(12.3-06 gap)", () => {
+    const state = baseState({
+      party_size_fixed: 3,
+      party_roster: null,
+      creation_current_speaker_id: null,
+      creation_characters: [],
+      creation_unfinished_character_ids: [],
+    });
+    expect(shouldNominateNext(state, true)).toBe(true);
+  });
+
+  it("첫 사람이 완성되고 나머지는 아직 아무 항목도 안 낸 상태여도 참이다 — 두 번째 교착을 막는다", () => {
+    const state = baseState({
+      party_size_fixed: 3,
+      party_roster: null,
+      creation_current_speaker_id: null,
+      creation_characters: [
+        { character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true },
+      ],
+      creation_unfinished_character_ids: [],
+    });
+    expect(shouldNominateNext(state, true)).toBe(true);
+  });
+
+  it("이미 지목된 사람이 있으면 거짓이다", () => {
+    const state = baseState({
+      party_size_fixed: 3,
+      creation_current_speaker_id: "hero-1",
+    });
+    expect(shouldNominateNext(state, true)).toBe(false);
+  });
+
+  it("안내가 아직 없으면 거짓이다", () => {
+    const state = baseState({ party_size_fixed: 3, creation_current_speaker_id: null });
+    expect(shouldNominateNext(state, false)).toBe(false);
+  });
+
+  it("명단이 잠겼으면 거짓이다", () => {
+    const state = baseState({
+      party_size_fixed: 3,
+      party_roster: ["hero-1", "hero-2", "hero-3"],
+      creation_current_speaker_id: null,
+    });
+    expect(shouldNominateNext(state, true)).toBe(false);
+  });
+
+  it("완성 수가 확정 인원과 정확히 같으면 거짓이다(경계값) — 다음은 지목이 아니라 정리·동의다", () => {
+    const state = baseState({
+      party_size_fixed: 1,
+      party_roster: null,
+      creation_current_speaker_id: null,
+      creation_characters: [
+        { character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true },
+      ],
+      creation_unfinished_character_ids: [],
+    });
+    expect(shouldNominateNext(state, true)).toBe(false);
+  });
+
+  it("인원이 아직 확정 안 됐으면 거짓이다", () => {
+    const state = baseState({ party_size_fixed: null, creation_current_speaker_id: null });
+    expect(shouldNominateNext(state, true)).toBe(false);
   });
 });

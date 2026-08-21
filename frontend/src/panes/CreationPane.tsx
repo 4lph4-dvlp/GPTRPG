@@ -68,6 +68,7 @@ import {
   isMyTurn,
   nextUnfilledStep,
   pendingConsenters,
+  shouldNominateNext,
   stepRows,
 } from "../session/creationView.ts";
 
@@ -448,10 +449,16 @@ export function CreationPane({
   const submittedDeriveRef = useRef<Set<string>>(new Set());
 
   const conversation = conversationLines(events, state.creation_characters);
+  // gmLinesFrom(events)는 여기 한 번만 불러 wrappedUp/announced 둘 다
+  // 이 결과에서 계산한다(12.3-06 Task 2 ③) — 같은 배열을 두 번 안 훑는다.
+  const gmLines = gmLinesFrom(events);
   // 「kind: "wrap_up"」인 GM 말이 기록에 있는가 — 존재 여부만 본다(진행
   // 상태를 다시 계산하지 않는다, D-04). consentGate가 이 값과 state를
   // 조합해 네 갈래를 고른다.
-  const wrappedUp = gmLinesFrom(events).some((line) => line.kind === "wrap_up");
+  const wrappedUp = gmLines.some((line) => line.kind === "wrap_up");
+  // 「kind: "announce"」인 GM 말이 기록에 있는가 — shouldNominateNext가
+  // 요구하는 값이다(CHAR-06의 흐름이 안내부터 시작한다).
+  const announced = gmLines.some((line) => line.kind === "announce");
   const consentPhase = consentGate(state, wrappedUp);
 
   async function submitStep(stepId: string, payload: StepSubmitPayload): Promise<void> {
@@ -499,22 +506,21 @@ export function CreationPane({
     }
   }, [rows, myTurn]);
 
-  // CR-01(12.3-REVIEW.md) — GM이 아직 아무도 지목하지 않았고(D-06) 자기
-  // 소개를 안 끝낸 사람이 남아 있으면 자동으로 다음 차례를 지목해 달라고
-  // 부른다. `nominateCreationSpeaker`를 실제로 부르는 자리가 이 저장소
-  // 어디에도 없었다 — `creation_current_speaker_id`가 영원히 `null`로
-  // 남아 `stepEditingEnabled`가 참이 될 방법이 없었다(CR-01 본문). 여러
-  // 탭이 동시에 이 effect를 타도 서버의 `_gm_dedupe_key`(같은 후보
-  // 집합이면 같은 키)가 중복 지목을 막으므로(D-12) 안전하다 — derive
-  // 자동 제출과 같은 자리, `nominatingRef`는 응답이 오기 전 같은 요청을
-  // 두 번 겹쳐 보내지 않게만 막는다.
+  // CR-01(12.3-REVIEW.md) + 12.3-06(D-06 첫 지목 교착 gap) — GM이 아직
+  // 아무도 지목하지 않았으면 자동으로 다음 차례를 지목해 달라고 부른다.
+  // **`creation_unfinished_character_ids`(이미 항목을 낸 사람만 담는
+  // 목록)를 조건으로도 의존성으로도 쓰지 않는다** — 그 목록만 보면
+  // 완전히 새 세션에서는 아무도 항목을 낸 적이 없어 이 effect가 영원히
+  // 안 돈다(12.3-VERIFICATION.md 2차가 실제로 재현한 결함). 대신
+  // `shouldNominateNext`(순수 함수, 시험됨)가 「완성 인원이 확정 인원
+  // 미만이고 안내됐고 지목 없음」만 보고 판단한다. 여러 탭이 동시에 이
+  // effect를 타도 서버의 `_gm_dedupe_key`(그 호출이 실제로 쓴 후보
+  // 목록에서 나온 키)가 중복 지목을 막으므로(D-12/T-12.3-20) 안전하다 —
+  // derive 자동 제출과 같은 자리, `nominatingRef`는 응답이 오기 전 같은
+  // 요청을 두 번 겹쳐 보내지 않게만 막는다.
   const nominatingRef = useRef(false);
   useEffect(() => {
-    if (
-      state.creation_current_speaker_id !== null ||
-      state.creation_unfinished_character_ids.length === 0 ||
-      nominatingRef.current
-    ) {
+    if (!shouldNominateNext(state, announced) || nominatingRef.current) {
       return;
     }
     nominatingRef.current = true;
@@ -524,11 +530,17 @@ export function CreationPane({
       .finally(() => {
         nominatingRef.current = false;
       });
+    // party_roster 배열 자체는 의존성에 안 넣는다(폴링마다 새 참조라
+    // effect가 매번 다시 돈다) — 재실 신호 effect(CreationScreen.tsx)의
+    // 같은 규율을 그대로 따른다. null 여부만 shouldNominateNext 안에서 본다.
   }, [
     sessionId,
     rulebookId,
+    announced,
     state.creation_current_speaker_id,
-    state.creation_unfinished_character_ids.length,
+    state.party_size_fixed,
+    state.party_roster !== null,
+    state.creation_characters.length,
   ]);
 
   async function askGm(): Promise<void> {

@@ -46,8 +46,17 @@ describe("만들기 POST 본문", () => {
   });
 
   it("방장 잡기도 같은 식별자를 싣는다 — 두 호출이 같은 사람으로 보여야 관문이 통과한다", async () => {
-    await claimCreationHost("s1", "browser-abc");
+    await claimCreationHost("s1", "browser-abc", "pc-browser-");
 
     expect(lastBody?.browser_id).toBe("browser-abc");
+  });
+
+  it("방장 잡기(재실 신호)가 캐릭터 식별자도 싣는다 — 빠지면 첫 지목이 영원히 안 일어난다(12.3-06)." +
+    " 서버의 ClaimHostRequest.character_id는 기본값이 있는 관대한 칸이라 빠져도 조용히 통과하므로," +
+    " 이 시험이 화면이 실제로 이 값을 보내는지 확인하는 유일한 가드다", async () => {
+    await claimCreationHost("s1", "browser-abc", "pc-browser-");
+
+    expect(lastBody?.browser_id).toBe("browser-abc");
+    expect(lastBody?.character_id).toBe("pc-browser-");
   });
 });
