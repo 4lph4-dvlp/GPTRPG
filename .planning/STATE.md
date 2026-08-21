@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
-current_phase_name: creation-screen
+current_phase_name: 캐릭터 만들기 화면 (INSERTED)
 status: executing
-stopped_at: Completed 12.3-05-PLAN.md (CHAR-06 사람 확인 대기 중)
-last_updated: "2026-08-21T09:40:29.696Z"
-last_activity: 2026-08-20
+stopped_at: Completed 12.3-06-PLAN.md (backstop 진실 사람 확인 대기 중, CHAR-06 여전히 미체크)
+last_updated: "2026-08-21T10:06:48.826Z"
+last_activity: 2026-08-21
 last_activity_desc: Phase 12.3 execution started
-state_head: d3e20983767b66c805f4bbdbbac296f48b569c87
+state_head: 91fc1a9037b22f5ddfa07650671b9ed5744c723f
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 45
-  completed_plans: 43
+  completed_plans: 44
 ---
 
 # Project State
@@ -24,17 +24,17 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 12.3 — 캐릭터 만들기 화면
+**Current focus:** Phase 12.3 — 캐릭터 만들기 화면 (INSERTED)
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 12.3 (creation-screen) — READY TO EXECUTE
-Plan: 5 of 5
+Phase: 12.3 (캐릭터 만들기 화면 (INSERTED)) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
-Last activity: 2026-08-20 — Phase 12.3 execution started
+Last activity: 2026-08-21 — Phase 12.3 execution started
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -136,6 +136,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P03 | 45min | 3 tasks | 9 files |
 | Phase 12.3 P04 | 40min | 3 tasks | 9 files |
 | Phase 12.3 P05 | 55min | 4 tasks | 11 files |
+| Phase 12.3 P06 | 체크포인트 재개 - 미측정 | 4 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -319,6 +320,7 @@ Progress: [██████████] 100%
 - [Phase 12.3]: DiceModal이 판정과 만들기 굴림 두 자리에서 재사용된다 — roll 프롭을 유니온으로 넓히고 눈 개수·타이밍·착지값 코드는 한 줄도 안 바꿨다 — 같은 굴림은 같게 보여야 한다(D-07) — 새 연출을 만들지 않는다
 - [Phase 12.3]: 12.3-05: 인원 확정/동의 두 관문을 순수 게이트 함수(partySizeGate/consentGate)+렌더 스위치로 배선, CreationScreen이 onEntered로 App의 Gate를 세션으로 바꾼다
 - [Phase 12.3]: 12.3-05: CHAR-06을 REQUIREMENTS.md/ROADMAP.md에 만들었지만 사람 확인(Task 4, 14개 항목) 전이라 체크하지 않는다 — requirements.ready-ids는 1/1이지만 그것은 계획 완료이지 사람 확인이 아니다
+- [Phase 12.3]: 12.3-06 Task 0(사장님 결정): 첫 지목 교착 gap 해소 — 재실 신호(POST /creation/host)에 character_id를 얹는 갈래 ①을 선택. add-alongside로 present_candidates를 명단 잠금 판단에는 안 흘려보낸다 — 갈래 ②는 후보가 항상 한 명이라 GM이 고를 게 없어져 D-06 취지를 흐리고, 갈래 ③(참가 사건화)은 사건 기록을 되돌릴 수 없게 바꿔야 해서 기각
 
 ### Pending Todos
 
@@ -376,8 +378,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-20T16:33:08.412Z
-Stopped at: Completed 12.3-05-PLAN.md (CHAR-06 사람 확인 대기 중)
+Last session: 2026-08-21T10:06:48.519Z
+Stopped at: Completed 12.3-06-PLAN.md (backstop 진실 사람 확인 대기 중, CHAR-06 여전히 미체크)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
