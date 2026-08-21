@@ -202,33 +202,48 @@ def forfeited_nominee(state: GameState, session_id: str) -> str | None:
 
 
 def forfeited_nomination_mark(state: GameState, session_id: str) -> str:
-    """지금 지목이 흘려보낸 것으로 판정된 상태면 `"#after:{nominee}:
-    {nominated_seq}"`를, 아니면 빈 문자열을 돌려준다(Phase 12.3-09,
-    4차 검증 `missing` ③).
+    """이 세션에서 **마지막으로 판정된 흘려보냄**을 나타내는 표시
+    (`"#after:{character_id}:{nominated_seq}"`), 한 번도 흘려보낸 적이
+    없으면 빈 문자열(Phase 12.3-09가 만들고 Phase 12.3-10이 의미를
+    고친 함수 — 4차 검증 `missing` ③ / 5차 검증·`12.3-REVIEW.md`
+    CR-01).
 
-    **판정을 여기서 새로 계산하지 않는다**(D-04, 판단은 한 자리) —
-    `latest_nomination`과 `forfeited_nominee`를 부르는 것으로 끝난다.
+    **이 값은 「지금 흘려보낸 상태인가」가 아니다 — 「이 세션에서
+    마지막으로 판정된 흘려보냄이 무엇인가」다.** 그래서 회복 지목이
+    기록되어 판정이 풀려도 **뒤로 안 돌아간다.** 옛 구현(12.3-09)은
+    `latest_nomination`/`forfeited_nominee`가 `None`을 돌려주는
+    순간(=회복) 조기 반환으로 빈 문자열을 냈는데, 이미 항목 값을 낸
+    사람이 흘려보내진 경우(후보 앞줄, 후보 목록 자체는 안 바뀐다)에는
+    그 빈 문자열이 흘려보내지기 **전**의 원래 키와 완전히 같아져, 회복
+    뒤 같은 상황에서 지목을 한 번 더 부르면 리듀서가 영구 보관한 옛
+    (흘려보내지기 전) 지목 기록이 그대로 되돌아왔다 — `_forfeited_at`
+    자체는 안 지워졌는데 그 사실을 표시가 숨겼다(5차 검증 CR-01의
+    본체).
 
-    **이 함수가 있는 이유:** 지목의 중복 방지 키는 「그 시점의 GM 호출
-    입력」을 나타내는데(D-12), 차례가 흘려보내진 것 자체가 그 입력의
-    변화다. 이 표시가 없으면, 이미 항목 값을 낸 사람은 후보 목록
-    앞줄에 있어 흘려보내져도 후보 목록이 안 바뀐다 — 그러면 후보
-    목록에서만 나오는 중복 방지 키도 안 바뀌어 서버가 옛 지목을 그대로
-    되돌려 준다. 새 지목 사건이 영원히 안 생기면 새 순번도 없어, 위
-    `forfeited_nominee`의 회복 판정이 돌 기회조차 없다(4차 검증
-    `missing` ③의 경로).
+    **`_forfeited_at`을 지우거나 조건부로 무시하면 이 함수가 다시 뒤로
+    돌아가 이 결함이 그대로 되살아난다** — 안 지우는 것이 이 함수의
+    전제다. `present_candidates`가 이미 `_forfeited_at`을 판정이 서
+    있든 아니든 그대로 읽어 뒤로 밀기 정렬에 쓰는 것과 같은 관례다.
 
-    **결정론적이다** — 같은 흘려보냄 판정이 서 있는 동안 이 값은 늘
-    같다. 그래서 새 지목이 한 번 기록되고 나면 그 뒤의 지목 호출은
-    다시 중복 방지에 잡힌다 — 흘려보냄 하나당 AI 호출은 최대 한 번이다
-    (D-12 경계 유지)."""
-    nomination = latest_nomination(state)
-    if nomination is None:
+    **값이 단조(앞으로만 간다)라서 D-12가 안 깨진다.** `forfeited_nominee`
+    를 여전히 부르는 것(부수효과로 판정을 최신으로 만들기 위해서다,
+    D-04)과 별개로, 표시 자체는 이 세션의 `_forfeited_at` 항목 중
+    **적용 대상 지목 순번이 가장 큰 것** 하나로 조립한다 — 그 값은
+    새로운 흘려보냄 판정이 나올 때만 바뀌므로, 같은 시대의 재호출(아무
+    것도 안 바뀐 이중 클릭·경쟁 폴링)은 여전히 같은 키로 중복 방지에
+    잡힌다(D-12, truth #4 유지)."""
+    forfeited_nominee(state, session_id)  # 판정을 최신으로 만드는 부수효과 호출(D-04)
+
+    session_entries = (
+        (character_id, applied_seq)
+        for (sid, character_id), (_ruled_at, applied_seq) in _forfeited_at.items()
+        if sid == session_id
+    )
+    latest = max(session_entries, key=lambda entry: (entry[1], entry[0]), default=None)
+    if latest is None:
         return ""
-    nominee, nominated_seq = nomination
-    if forfeited_nominee(state, session_id) is None:
-        return ""
-    return f"#after:{nominee}:{nominated_seq}"
+    character_id, applied_seq = latest
+    return f"#after:{character_id}:{applied_seq}"
 
 
 def present_candidates(state: GameState, session_id: str) -> tuple[str, ...]:

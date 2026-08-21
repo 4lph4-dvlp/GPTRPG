@@ -1087,6 +1087,137 @@ def test_a_forfeited_participant_who_already_submitted_a_value_gets_another_turn
         assert unblocked.status_code == 200
 
 
+def test_a_third_nominate_call_after_recovery_returns_the_latest_nomination_not_the_pre_forfeit_one(
+    web_client_with_fake_provider,
+):
+    """12.3-VERIFICATION.md 5차 §CR-01 / `12.3-REVIEW.md` CR-01의 정식
+    이관본(12.3-10). `forfeited_nomination_mark`가 회복으로 판정이 풀리는
+    순간 빈 문자열로 되돌아가면, 이미 항목 값을 낸 사람(후보 앞줄, 후보
+    목록 자체는 안 바뀐다)의 중복 방지 키가 흘려보내지기 전과 완전히
+    같아져, 회복 뒤 세 번째 지목 호출이 리듀서가 영구 보관한 옛(흘려보
+    내지기 전) 지목 기록을 그대로 돌려준다 — 실제 최신(회복) 기록이
+    아니다. 이 시험은 다른 참가자의 캐릭터 완성에 기대지 않는다 — 그
+    완성이 후보 목록을 우연히 바꿔서 이 결함을 가려 온 바로 그 탈출구다.
+
+    D-12(같은 시점 재호출은 AI를 다시 안 부른다, truth #4)와
+    T-12.3-05(브라우저 식별자가 새지 않는다)가 같은 시험에서 함께
+    지켜지는 것도 못박는다."""
+    provider = FakeProvider(complete_value="[]")  # 계약 위반 -> candidates[0] 폴백
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-stale-echo"
+        for character_id, browser_id in (
+            ("pc-stale-1", "b-stale-1"),
+            ("pc-stale-2", "b-stale-2"),
+            ("pc-stale-3", "b-stale-3"),
+        ):
+            assert (
+                _claim_host(
+                    client,
+                    character_id=character_id,
+                    browser_id=browser_id,
+                    session_id=session_id,
+                ).status_code
+                == 200
+            )
+        assert (
+            _fix_party_size(
+                client, count=3, browser_id="b-stale-1", session_id=session_id
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session_id}/creation/announce",
+                json={"rulebook_id": "dungeonworld_like"},
+            ).status_code
+            == 200
+        )
+
+        # pc-stale-1만 name 항목 값을 하나 낸다 — 후보 앞줄에 서서
+        # 흘려보내져도 후보 목록이 안 바뀐다.
+        assert (
+            _submit_name_step(
+                client,
+                character_id="pc-stale-1",
+                browser_id="b-stale-1",
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+
+        # CALL 1(첫 지목). announce가 이미 provider를 한 번 썼으므로 여기서는
+        # 절대 개수가 아니라 이 호출이 실제로 provider를 하나 더 썼다는
+        # 것만 기준으로 잡는다.
+        calls_before_first = len(provider.calls)
+        first = _nominate(client, session_id=session_id)
+        assert first.status_code == 200
+        assert first.json()["character_id"] == "pc-stale-1"
+        calls_after_first = len(provider.calls)
+        assert calls_after_first == calls_before_first + 1
+
+        # 이 폴링이 관측 시계를 처음 찍는다.
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == "pc-stale-1"
+        candidates_before_recovery = state["creation_unfinished_character_ids"]
+
+        # 흘려보냄 — 순번은 그대로 두고 시각만 과거로 되감는다.
+        seq, _started_at = creation_state._nomination_watermark[(session_id, "pc-stale-1")]
+        creation_state._nomination_watermark[(session_id, "pc-stale-1")] = (
+            seq,
+            time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
+        )
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] is None
+
+        # CALL 2(회복 지목).
+        second = _nominate(client, session_id=session_id)
+        assert second.status_code == 200
+        assert second.json()["character_id"] == "pc-stale-1"
+        calls_after_recovery = len(provider.calls)
+        assert calls_after_recovery == calls_after_first + 1  # 회복도 AI를 한 번 부른다(새 지목 사건)
+
+        nominate_events = [
+            e
+            for e in _events_of_type(client, "creation_gm_spoke", session_id=session_id)
+            if e["kind"] == "nominate"
+        ]
+        assert len(nominate_events) == 2
+        assert nominate_events[1]["seq"] > nominate_events[0]["seq"]
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == "pc-stale-1"
+
+        # 후보 목록이 CALL 2 전후로 안 바뀐 것을 못박는다 — 아무도
+        # 완성하지 않았고(다른 참가자 완성에 안 기댄다), 후보 목록
+        # 자체가 CALL 3의 옛-기록 재사용을 가릴 여지가 없다.
+        assert state["creation_unfinished_character_ids"] == candidates_before_recovery
+        assert state["creation_characters"] == []
+
+        # CALL 3(아무것도 안 바꾸고 세 번째 호출) — 회복 기록(CALL 2)과
+        # 완전히 같아야 하고, CALL 1의 옛 기록으로 되돌아가면 안 된다.
+        third = _nominate(client, session_id=session_id)
+        assert third.status_code == 200
+        assert third.json() == second.json()
+        assert third.json()["seq"] != first.json()["seq"]
+        max_nominate_seq = max(e["seq"] for e in nominate_events)
+        assert third.json()["seq"] == max_nominate_seq
+
+        # D-12 — CALL 3도 AI를 다시 안 부르고 새 사건을 안 남긴다.
+        assert len(provider.calls) == calls_after_recovery
+        nominate_events_after_third = [
+            e
+            for e in _events_of_type(client, "creation_gm_spoke", session_id=session_id)
+            if e["kind"] == "nominate"
+        ]
+        assert len(nominate_events_after_third) == 2
+
+        # T-12.3-05 — 브라우저 식별자가 기록된 사건 어디에도 안 샌다.
+        all_gm_events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
+        serialized = json.dumps(all_gm_events, ensure_ascii=False)
+        for browser_id in ("b-stale-1", "b-stale-2", "b-stale-3"):
+            assert browser_id not in serialized
+
+
 def test_poll_state_lists_completed_character_with_consent_false(
     web_client_with_fake_provider,
 ):
