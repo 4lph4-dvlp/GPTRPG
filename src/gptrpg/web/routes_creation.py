@@ -812,6 +812,11 @@ async def nominate_creation_speaker(
         raise HTTPException(status_code=409, detail="아직 자기소개를 안 끝낸 사람이 없다")
 
     key = _gm_dedupe_key("nominate", state, candidates=candidates)
+    # 흘려보낸 지목이 서 있으면 표시를 이어 붙인다 — 이미 항목 값을 낸
+    # 사람이 흘려보내지면 후보 목록 자체는 안 바뀌므로(그 사람이 앞줄에
+    # 그대로 있다), 이 표시가 없으면 서버가 옛 지목을 그대로 되돌려 줘
+    # 새 지목 사건이 영원히 안 생긴다(12.3-09, 4차 검증 `missing` ③).
+    key = key + creation_state.forfeited_nomination_mark(state, session_id)
     already_said = state.creation_gm_said.get(key)
     if already_said is not None and already_said.target_character_id is not None:
         return NominateSpeakerResponse(

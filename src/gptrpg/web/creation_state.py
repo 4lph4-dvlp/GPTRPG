@@ -100,11 +100,16 @@ _nomination_watermark: dict[tuple[str, str], tuple[int, float]] = {}
 왜 사건이 아니라 프로세스 메모리인지는 `_browser_last_seen`의
 docstring이 이미 말한 이유와 같다(되풀이하지 않는다)."""
 
-_forfeited_at: dict[tuple[str, str], float] = {}
-"""(session_id, character_id) -> 차례를 흘려보낸 것으로 판정된 시각
-(`time.monotonic()` 기준) — Phase 12.3-08. 한 번 들어가면 세션 동안
-안 지운다(재시작하면 프로세스 메모리라 자연히 빈다, T-12.3-26이 그
-한계를 받아들인 이유)."""
+_forfeited_at: dict[tuple[str, str], tuple[float, int]] = {}
+"""(session_id, character_id) -> (차례를 흘려보낸 것으로 판정된 시각
+(`time.monotonic()` 기준), 그 판정이 적용되는 `nominated_seq`) —
+Phase 12.3-08, 값 모양은 12.3-09(4차 검증 CR-01, `missing` ①)가
+고쳤다. 한 번 들어가면 세션 동안 안 지운다(재시작하면 프로세스
+메모리라 자연히 빈다, T-12.3-26이 그 한계를 받아들인 이유) — 그러나
+**지우지 않는 것이 그 사람이 영원히 지목을 못 받는다는 뜻은 아니다.**
+기록은 남되, 저장된 지목 순번과 **같은** 지목에만 적용된다. 새 지목
+(다른 순번)이 오면 이 옛 기록은 조회되지 않고 회복 판정이 처음부터
+다시 돈다(`forfeited_nominee`의 순번 비교 참조)."""
 
 
 def latest_nomination(state: GameState) -> tuple[str, int] | None:
@@ -155,10 +160,14 @@ def forfeited_nominee(state: GameState, session_id: str) -> str | None:
         return None
     nominee, nominated_seq = nomination
     key = (session_id, nominee)
-    if key in _forfeited_at:
-        # 같은 판정을 되풀이 계산하지 않는다 — 이미 흘려보낸 것으로
-        # 판정된 지목은 그 사람이 완성되거나 새 지목이 나기 전까지
-        # 계속 흘려보낸 상태다.
+    forfeited = _forfeited_at.get(key)
+    if forfeited is not None and forfeited[1] == nominated_seq:
+        # 같은 판정을 되풀이 계산하지 않는다 — **이 지목 순번에 대해서만**
+        # 이미 흘려보낸 것으로 판정됐으면 그 사람이 완성되거나 이 순번의
+        # 지목이 남아 있는 동안 계속 흘려보낸 상태다. 판정은 사람이 아니라
+        # 그 사람의 그 차례에 대한 것이므로, 순번이 다르면(=새 지목이면)
+        # 이 조기 반환에 안 걸리고 아래에서 관측 시계를 처음부터 다시
+        # 잰다(12.3-09, 4차 검증 CR-01/truth #20).
         return nominee
 
     # 지목 자체와 그 사람이 낸 마지막 값 중 더 앞선 순번 — 앞으로
@@ -187,9 +196,39 @@ def forfeited_nominee(state: GameState, session_id: str) -> str | None:
     slow_branch = now - started_at > NOMINATION_IDLE_S
 
     if quick_branch or slow_branch:
-        _forfeited_at[key] = time.monotonic()
+        _forfeited_at[key] = (time.monotonic(), nominated_seq)
         return nominee
     return None
+
+
+def forfeited_nomination_mark(state: GameState, session_id: str) -> str:
+    """지금 지목이 흘려보낸 것으로 판정된 상태면 `"#after:{nominee}:
+    {nominated_seq}"`를, 아니면 빈 문자열을 돌려준다(Phase 12.3-09,
+    4차 검증 `missing` ③).
+
+    **판정을 여기서 새로 계산하지 않는다**(D-04, 판단은 한 자리) —
+    `latest_nomination`과 `forfeited_nominee`를 부르는 것으로 끝난다.
+
+    **이 함수가 있는 이유:** 지목의 중복 방지 키는 「그 시점의 GM 호출
+    입력」을 나타내는데(D-12), 차례가 흘려보내진 것 자체가 그 입력의
+    변화다. 이 표시가 없으면, 이미 항목 값을 낸 사람은 후보 목록
+    앞줄에 있어 흘려보내져도 후보 목록이 안 바뀐다 — 그러면 후보
+    목록에서만 나오는 중복 방지 키도 안 바뀌어 서버가 옛 지목을 그대로
+    되돌려 준다. 새 지목 사건이 영원히 안 생기면 새 순번도 없어, 위
+    `forfeited_nominee`의 회복 판정이 돌 기회조차 없다(4차 검증
+    `missing` ③의 경로).
+
+    **결정론적이다** — 같은 흘려보냄 판정이 서 있는 동안 이 값은 늘
+    같다. 그래서 새 지목이 한 번 기록되고 나면 그 뒤의 지목 호출은
+    다시 중복 방지에 잡힌다 — 흘려보냄 하나당 AI 호출은 최대 한 번이다
+    (D-12 경계 유지)."""
+    nomination = latest_nomination(state)
+    if nomination is None:
+        return ""
+    nominee, nominated_seq = nomination
+    if forfeited_nominee(state, session_id) is None:
+        return ""
+    return f"#after:{nominee}:{nominated_seq}"
 
 
 def present_candidates(state: GameState, session_id: str) -> tuple[str, ...]:
@@ -236,9 +275,11 @@ def present_candidates(state: GameState, session_id: str) -> tuple[str, ...]:
         if character_id in state.created_characters or character_id in seen:
             continue
         seen.add(character_id)
-        forfeited_at = _forfeited_at.get((session_id, character_id))
-        if forfeited_at is not None:
-            demoted.append((character_id, forfeited_at))
+        forfeited = _forfeited_at.get((session_id, character_id))
+        if forfeited is not None:
+            # 정렬에 쓰는 것은 판정 시각(짝의 첫 원소)이다 — 짝의 두
+            # 번째 원소(적용 대상 순번)는 여기서 안 쓴다.
+            demoted.append((character_id, forfeited[0]))
         else:
             tail.append(character_id)
     # 흘려보낸 식별자는 뒤로 밀린다 — 먼저 흘려보낸 쪽이 먼저 온다

@@ -850,6 +850,141 @@ def test_a_stalled_nomination_is_released_and_the_next_one_lands_on_someone_else
         assert len(nominate_events) == 2
 
 
+def test_a_forfeited_participant_who_already_submitted_a_value_gets_another_turn_and_unblocks_the_roster_lock(
+    web_client_with_fake_provider,
+):
+    """4차 검증 truth #20과 `missing` ③을 함께 지킨다(12.3-09) — 한 번
+    흘려보낸 것으로 판정된 참가자가 이미 항목 값을 냈어도(그래서 후보
+    앞줄에 있어도) 새 지목을 받아 회복하고, 그 사람 때문에 막혀 있던
+    파티 전원의 명단 잠금(`wrap-up`)이 풀리는 것을 끝에서 끝까지 확인
+    한다. 판정 기록에 지목 순번을 함께 적는 수정(`forfeited_nominee`)과
+    중복 방지 키에 흘려보냄 표시를 잇는 수정(`forfeited_nomination_mark`)
+    이 둘 다 있어야 이 시험이 통과한다 — 하나라도 빠지면 회복 뒤 폴링
+    (`creation_current_speaker_id`)이 다시 `pc-recover-1`을 못 채운다."""
+    provider = FakeProvider(complete_value="[]")  # 계약 위반 -> candidates[0] 폴백
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-recover-roster-lock"
+        for character_id, browser_id in (
+            ("pc-recover-1", "b-recover-1"),
+            ("pc-recover-2", "b-recover-2"),
+            ("pc-recover-3", "b-recover-3"),
+        ):
+            assert (
+                _claim_host(
+                    client,
+                    character_id=character_id,
+                    browser_id=browser_id,
+                    session_id=session_id,
+                ).status_code
+                == 200
+            )
+        assert (
+            _fix_party_size(
+                client, count=3, browser_id="b-recover-1", session_id=session_id
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session_id}/creation/announce",
+                json={"rulebook_id": "dungeonworld_like"},
+            ).status_code
+            == 200
+        )
+
+        # pc-recover-1이 이름 항목 하나를 낸다 — 이 한 번의 제출로 그
+        # 사람이 「아직 안 끝난 사람」 목록(후보 앞줄)에 들어가고, 그래서
+        # 흘려보내져도 후보 목록이 안 바뀐다.
+        assert (
+            _submit_name_step(
+                client,
+                character_id="pc-recover-1",
+                browser_id="b-recover-1",
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+
+        first = _nominate(client, session_id=session_id)
+        assert first.status_code == 200
+        assert first.json()["character_id"] == "pc-recover-1"
+
+        # 이 폴링이 관측 기록(`_nomination_watermark`)을 처음 찍는다.
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == "pc-recover-1"
+
+        # pc-recover-2가 필수 항목을 전부 채우고 캐릭터를 완성한다 — 이
+        # 시험에서 「끝낸 다른 참가자」 역할이다. 명단 잠금이 오직
+        # pc-recover-1 때문에 막힌다는 것을 보이려면 완성된 캐릭터가
+        # 하나는 있어야 한다.
+        _complete_all_required_steps(
+            client,
+            character_id="pc-recover-2",
+            browser_id="b-recover-2",
+            session_id=session_id,
+        )
+        assert (
+            _complete_creation(
+                client,
+                character_id="pc-recover-2",
+                browser_id="b-recover-2",
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+        client.cookies.clear()  # pc-recover-2의 쿠키를 벗어야 pc-recover-1의 남은 항목을 낼 수 있다
+
+        # 순번은 그대로 두고 시각만 되감아 흘려보냄으로 판정시킨다.
+        seq, _started_at = creation_state._nomination_watermark[(session_id, "pc-recover-1")]
+        creation_state._nomination_watermark[(session_id, "pc-recover-1")] = (
+            seq,
+            time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
+        )
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] is None
+
+        # 막힌 상태를 못박는다 — 파티 전원이 pc-recover-1 때문에 막힌다.
+        blocked = _wrap_up(client, session_id=session_id)
+        assert blocked.status_code == 409
+        assert "자기소개" in blocked.json()["detail"]
+
+        # 지목을 다시 부른다 — 새 지목 사건이 하나 더 남는다.
+        second = _nominate(client, session_id=session_id)
+        assert second.status_code == 200
+        assert second.json()["character_id"] == "pc-recover-1"
+
+        events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
+        nominate_events = [e for e in events if e["kind"] == "nominate"]
+        assert len(nominate_events) == 2
+        assert nominate_events[1]["seq"] > nominate_events[0]["seq"]
+
+        # 회복이 실제로 일어난 자리 — 폴링이 다시 pc-recover-1을 채운다.
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == "pc-recover-1"
+
+        # pc-recover-1이 남은 필수 항목을 채우고 캐릭터를 완성한다.
+        _complete_all_required_steps(
+            client,
+            character_id="pc-recover-1",
+            browser_id="b-recover-1",
+            session_id=session_id,
+        )
+        assert (
+            _complete_creation(
+                client,
+                character_id="pc-recover-1",
+                browser_id="b-recover-1",
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+
+        # 영구 409가 풀렸다.
+        unblocked = _wrap_up(client, session_id=session_id)
+        assert unblocked.status_code == 200
+
+
 def test_poll_state_lists_completed_character_with_consent_false(
     web_client_with_fake_provider,
 ):
