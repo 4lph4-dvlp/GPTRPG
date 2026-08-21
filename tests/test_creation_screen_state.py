@@ -6,11 +6,13 @@
 + `conftest.FakeProvider`)을 그대로 따른다.
 """
 
+import dataclasses
 import json
 import time
 
 from conftest import FakeProvider
 
+from gptrpg.rules_core.reducer import CreationGmLineFold, GameState
 from gptrpg.web import creation_state
 
 SESSION_ID = "creation-screen-state-s1"
@@ -524,6 +526,181 @@ def test_nominate_candidates_never_exceed_the_remaining_party_size(
         assert len(exact_candidates) == 3
         # 탐침 ordering — 같은 상태를 연달아 두 번 물으면 같은 순서가 나온다.
         assert creation_state.present_candidates(state, session_exact) == exact_candidates
+
+
+def test_ghost_presence_signals_do_not_permanently_push_out_real_participants(
+    web_client_with_fake_provider,
+):
+    """3차 검증(12.3-VERIFICATION.md §「새로 확인한 결함 (3차) — CR-01,
+    재현으로 독립 확인」)이 스크래치 스크립트로 돌린 재현을 그대로
+    옮긴다. `present_candidates`를 직접 부른다(라우트를 안 거친다 —
+    정원 2를 던전월드류의 인원 하한 3 없이 만들 수 있는 유일한 길이다).
+
+    **왜 12.3-06의 시험 넷이 이걸 못 잡았는지:** 그 넷은 전부 같은 모양의
+    정상 신호만 먹인다(`test_nominate_candidates_never_exceed_the_remaining_
+    party_size`의 다섯 신호도 `pc-over-0`..`pc-over-4`로 전부 같다) —
+    신원을 지어낸 경로를 한 번도 밟지 않는다. 개수만 세는 단언은 개수만
+    지킨다."""
+    session_id = SESSION_ID + "-ghost-presence"
+    creation_state.mark_character_present(session_id, "ghost-1")
+    creation_state.mark_character_present(session_id, "ghost-2")
+    creation_state.mark_character_present(session_id, "real-1")
+    creation_state.mark_character_present(session_id, "real-2")
+
+    state = GameState(session_id=session_id, party_size_fixed=2)
+
+    # t=0의 상태를 있는 그대로 못박는다 — 이 시점에는 서버가 넷을 가를
+    # 정보를 하나도 안 가진다(쿠키는 캐릭터 완성 시점에 구워진다). 이것은
+    # 고칠 수 있는 결함이 **아니라** 불가피한 상태다(12.3-08-PLAN.md
+    # planner_assumptions ②) — 다음 리뷰가 이 단언을 결함으로 오해하지
+    # 않게 여기 남긴다.
+    candidates = creation_state.present_candidates(state, session_id)
+    assert "real-1" not in candidates
+    assert "real-2" not in candidates
+
+    # 가짜 둘이 차례를 흘려보내면 진짜 참가자가 들어온다.
+    for seq, ghost_id in ((1, "ghost-1"), (2, "ghost-2")):
+        state = dataclasses.replace(
+            state,
+            creation_gm_said={
+                "nominate:ghost": CreationGmLineFold(
+                    seq=seq, kind="nominate", say="", target_character_id=ghost_id
+                )
+            },
+        )
+        creation_state.forfeited_nominee(state, session_id)  # 관측 기록을 찍는다.
+        key = (session_id, ghost_id)
+        watermark_seq, _started_at = creation_state._nomination_watermark[key]
+        creation_state._nomination_watermark[key] = (
+            watermark_seq,
+            time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
+        )
+        assert creation_state.forfeited_nominee(state, session_id) == ghost_id
+
+    # 최종 상태 — 진짜 참가자 둘이 정확히 후보 전부다.
+    assert creation_state.present_candidates(state, session_id) == ("real-1", "real-2")
+
+
+def test_a_nominee_that_keeps_submitting_values_never_loses_the_turn(
+    web_client_with_fake_provider,
+):
+    """이 시험이 지키는 것은 「회복이 진짜 참가자를 벌하는 도구가 되지
+    않는다」이고, 그것이 왜 이 계획에서 가장 중요한 경계인지가 이유다.
+    자기 차례에 항목 값을 계속 내고 있는 사람은 제출마다 관측 순번이
+    앞으로 밀려 시계가 다시 맞춰지므로, 회복 시계가 아무리 흘러도
+    차례를 안 뺏긴다."""
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-keeps-submitting"
+        browsers = {"pc-keep-1": "b-keep-1", "pc-keep-2": "b-keep-2", "pc-keep-3": "b-keep-3"}
+        for character_id, browser_id in browsers.items():
+            assert (
+                _claim_host(
+                    client,
+                    character_id=character_id,
+                    browser_id=browser_id,
+                    session_id=session_id,
+                ).status_code
+                == 200
+            )
+        assert (
+            _fix_party_size(
+                client, count=3, browser_id="b-keep-1", session_id=session_id
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session_id}/creation/announce",
+                json={"rulebook_id": "dungeonworld_like"},
+            ).status_code
+            == 200
+        )
+
+        nomination = _nominate(client, session_id=session_id)
+        assert nomination.status_code == 200
+        nominee = nomination.json()["character_id"]
+        assert nominee in browsers
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == nominee
+
+        seq, _started_at = creation_state._nomination_watermark[(session_id, nominee)]
+        creation_state._nomination_watermark[(session_id, nominee)] = (
+            seq,
+            time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
+        )
+
+        assert (
+            _submit_step(
+                client,
+                character_id=nominee,
+                browser_id=browsers[nominee],
+                step_id="name",
+                session_id=session_id,
+                text_value="여전히 쓰는 중",
+            ).status_code
+            == 200
+        )
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == nominee
+
+
+def test_a_restart_of_the_watermark_table_never_releases_a_nomination_immediately(
+    web_client_with_fake_provider,
+):
+    """T-12.3-13과 같은 규율 — 관측 기록이 빈 상태를 「오래 조용했다」로
+    오판하면 재시작마다 멀쩡한 차례가 날아간다. 재시작 직후에는 관측을
+    처음부터 다시 시작해야지, 곧바로 풀리면 안 된다."""
+    provider = FakeProvider(complete_value="[]")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-watermark-restart"
+        browsers = {
+            "pc-restart-1": "b-restart-1",
+            "pc-restart-2": "b-restart-2",
+            "pc-restart-3": "b-restart-3",
+        }
+        for character_id, browser_id in browsers.items():
+            assert (
+                _claim_host(
+                    client,
+                    character_id=character_id,
+                    browser_id=browser_id,
+                    session_id=session_id,
+                ).status_code
+                == 200
+            )
+        assert (
+            _fix_party_size(
+                client, count=3, browser_id="b-restart-1", session_id=session_id
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session_id}/creation/announce",
+                json={"rulebook_id": "dungeonworld_like"},
+            ).status_code
+            == 200
+        )
+
+        nomination = _nominate(client, session_id=session_id)
+        assert nomination.status_code == 200
+        nominee = nomination.json()["character_id"]
+        assert nominee in browsers
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == nominee
+
+        # 프로세스 재시작 재현 — 관측 기록만 통째로 지운다(GameState는
+        # 사건에서 다시 접히므로 지목은 그대로다).
+        creation_state._nomination_watermark.pop((session_id, nominee), None)
+        for character_id in browsers:
+            creation_state._character_last_seen.pop((session_id, character_id), None)
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == nominee
 
 
 def test_nominate_without_any_presence_signal_is_still_rejected_and_records_no_event(
