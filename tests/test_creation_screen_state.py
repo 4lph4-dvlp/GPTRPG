@@ -645,14 +645,35 @@ def test_a_forfeited_ruling_holds_for_the_same_nomination_but_a_new_one_starts_t
 def test_a_forfeited_nomination_changes_the_dedupe_mark_but_a_healthy_one_leaves_it_untouched(
     web_client_with_fake_provider,
 ):
-    """`forfeited_nomination_mark`의 세 경계 — 흘려보냄이 없으면(정상
-    지목이든 지목 자체가 없든) 오늘의 중복 방지 키가 글자 하나도 안
-    바뀐다(D-12 비-회귀, 경계 탐침 `empty`), 흘려보냄이 서 있으면 표시가
-    비지 않고 결정론적이다(D-12, 흘려보냄 하나당 AI 호출 최대 한 번)."""
+    """`forfeited_nomination_mark`의 네 경계와 단조성(12.3-10이 뜻을
+    다시 씀).
+
+    「지금 흘려보낸 상태가 아니면」 빈 문자열이 아니라 「이 세션에서
+    한 번도 흘려보낸 적이 없으면」 빈 문자열이다 — 지목이 있고 아직 안
+    흘려보내진 상태와 지목이 아예 없는 상태 둘 다, 그 세션에
+    `_forfeited_at` 항목이 하나도 없어서 빈 문자열이 나오는 것이지
+    「지금 흘려보낸 상태가 아니라서」가 아니다. 그래서 시험 이름의 `a
+    healthy one leaves it untouched`는 이제 「그 세션에 흘려보낸 적이
+    한 번도 없으면」을 뜻한다.
+
+    ① 정확 비교(WR-01) — 부분 문자열 확인(`in`)은 캐릭터 식별자
+    `pc-mark-1` 안의 숫자·문자 때문에 순번이 아예 안 실려도 우연히
+    통과하므로 안 쓴다. 표시 문자열 전체를 정확히 못박아 대상
+    식별자와 적용 대상 지목 순번이 각각 제자리에 실렸는지를 분리해서
+    검증한다.
+    ② 회복 뒤에도 표시가 안 돌아간다 — 이번 gap의 근본 원인을 단위
+    수준에서 고정하는 자리다. 새 지목(다른 순번)이 기록돼
+    `forfeited_nominee`가 `None`(회복)을 돌려줘도, `_forfeited_at`
+    자체는 안 지워지므로 표시는 빈 문자열로 안 돌아간다.
+    ③ 단조성 — 더 큰 적용 대상 순번을 가진 판정이 나오면 표시가 앞
+    으로 가고, 그 뒤 다시 물어도 순번이 더 작은 옛 판정으로 안
+    돌아간다.
+    """
     session_id = SESSION_ID + "-dedupe-mark"
     creation_state.mark_character_present(session_id, "pc-mark-1")
 
-    # 지목이 있고 아직 안 흘려보내진 상태 — 빈 문자열.
+    # 지목이 있고 아직 안 흘려보내진 상태 — 그 세션에 흘려보낸 적이
+    # 한 번도 없어서 빈 문자열이다.
     state = GameState(session_id=session_id, party_size_fixed=1)
     state = dataclasses.replace(
         state,
@@ -664,7 +685,7 @@ def test_a_forfeited_nomination_changes_the_dedupe_mark_but_a_healthy_one_leaves
     )
     assert creation_state.forfeited_nomination_mark(state, session_id) == ""
 
-    # 지목이 아예 없는 상태 — 경계 탐침 `empty`의 답.
+    # 지목이 아예 없는 상태 — 경계 탐침 `empty`의 답. 이유는 위와 같다.
     empty_state = GameState(session_id=session_id, party_size_fixed=1)
     assert creation_state.forfeited_nomination_mark(empty_state, session_id) == ""
 
@@ -674,13 +695,42 @@ def test_a_forfeited_nomination_changes_the_dedupe_mark_but_a_healthy_one_leaves
         seq,
         time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
     )
-    mark = creation_state.forfeited_nomination_mark(state, session_id)
-    assert mark != ""
-    assert "pc-mark-1" in mark
-    assert "1" in mark
+
+    # ① 표시 문자열 전체를 정확히 못박는다(WR-01).
+    assert creation_state.forfeited_nomination_mark(state, session_id) == "#after:pc-mark-1:1"
 
     # 결정론적이다 — 같은 상태를 연달아 두 번 물으면 같은 값이 나온다.
-    assert creation_state.forfeited_nomination_mark(state, session_id) == mark
+    assert creation_state.forfeited_nomination_mark(state, session_id) == "#after:pc-mark-1:1"
+
+    # ② 회복 뒤에도 표시가 안 돌아간다 — 같은 대상에게 새 지목(seq=2)이
+    # 하나 더 있는 상태를 만든다(옛 줄은 남긴다, 584행대 시험과 같은
+    # 관례).
+    state2 = dataclasses.replace(
+        state,
+        creation_gm_said={
+            "n1": CreationGmLineFold(
+                seq=1, kind="nominate", say="", target_character_id="pc-mark-1"
+            ),
+            "n2": CreationGmLineFold(
+                seq=2, kind="nominate", say="", target_character_id="pc-mark-1"
+            ),
+        },
+    )
+    # 회복 판정이 실제로 풀렸다 — 새 지목(seq=2)에는 옛 흘려보냄 판정이
+    # 적용되지 않는다.
+    assert creation_state.forfeited_nominee(state2, session_id) is None
+    # 그런데도 표시는 빈 문자열로 안 돌아간다 — `_forfeited_at`이 안
+    # 지워졌으므로 이 세션에서 마지막으로 판정된 흘려보냄은 여전히
+    # `pc-mark-1:1`이다.
+    assert creation_state.forfeited_nomination_mark(state2, session_id) == "#after:pc-mark-1:1"
+
+    # ③ 단조성 — 더 큰 적용 대상 순번을 가진 판정을 표에 직접 넣으면
+    # 표시가 앞으로 간다.
+    creation_state._forfeited_at[(session_id, "pc-mark-2")] = (time.monotonic(), 7)
+    assert creation_state.forfeited_nomination_mark(state2, session_id) == "#after:pc-mark-2:7"
+    # 그 뒤에 다시 물어도 순번이 더 작은 옛 판정(pc-mark-1:1)으로 안
+    # 돌아간다.
+    assert creation_state.forfeited_nomination_mark(state2, session_id) == "#after:pc-mark-2:7"
 
 
 def test_a_nominee_that_keeps_submitting_values_never_loses_the_turn(
