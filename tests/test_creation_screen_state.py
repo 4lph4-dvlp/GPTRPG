@@ -15,10 +15,25 @@ CHARACTER_ID = "hero-1"
 BROWSER_ID = "b-hero-1"
 
 
-def _fix_party_size(client, *, count: int = 3, session_id: str = SESSION_ID):
+def _fix_party_size(
+    client, *, count: int = 3, browser_id: str = "", session_id: str = SESSION_ID
+):
     return client.post(
         f"/api/sessions/{session_id}/creation/party-size",
-        json={"player_character_count": count, "rulebook_id": "dungeonworld_like"},
+        json={
+            "player_character_count": count,
+            "rulebook_id": "dungeonworld_like",
+            "browser_id": browser_id,
+        },
+    )
+
+
+def _claim_host(client, *, character_id: str, browser_id: str, session_id: str = SESSION_ID):
+    """방장 잡기(D-11)이자 재실 신호 — 12.3-06부터는 `character_id`도
+    함께 실어 서버가 「지금 누가 와 있는가」를 안다(D-06 갈래 ①)."""
+    return client.post(
+        f"/api/sessions/{session_id}/creation/host",
+        json={"browser_id": browser_id, "character_id": character_id},
     )
 
 
@@ -326,6 +341,55 @@ def test_follow_up_rejects_mismatched_character_id_with_403_and_records_no_event
 
         events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
         assert [e for e in events if e["kind"] == "follow_up"] == []
+
+
+# ---------------------------------------------------------------------------
+# 12.3-06 — 첫 지목 교착 gap 닫기(D-06). 아무도 아직 항목을 하나도 안 낸
+# 완전히 새 세션에서도 지목이 성공해야 한다.
+# ---------------------------------------------------------------------------
+
+
+def test_nominate_after_party_size_fixed_works_with_no_prior_step_submission(
+    web_client_with_fake_provider,
+):
+    """CHAR-06 gap(12.3-VERIFICATION.md 2차) — 지목 후보 목록의 유일한
+    출처가 「이미 항목을 낸 사람」이면, 완전히 새 세션에는 그런 사람이
+    있을 수 없어 지목이 영원히 안 일어난다(닭이 먼저냐 달걀이 먼저냐).
+    `_submit_name_step`을 의도적으로 안 쓴다 — 화면이 실제로 밟는 경로
+    (재실 신호 -> 인원 확정 -> 안내 -> 지목)만 밟는다. 세션 식별자를 이
+    시험 전용으로 새로 두는 이유: 재실 표(`_character_last_seen`)가
+    모듈 수준 전역이라 session_id로만 격리된다."""
+    provider = FakeProvider(complete_value="[]")  # 계약 위반 -> 후보 첫 번째로 폴백
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-bootstrap-nominate"
+        browser_id = "b-bootstrap-1"
+        character_id = "pc-bootstrap-1"
+
+        assert (
+            _claim_host(
+                client, character_id=character_id, browser_id=browser_id, session_id=session_id
+            ).status_code
+            == 200
+        )
+        assert (
+            _fix_party_size(client, browser_id=browser_id, session_id=session_id).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session_id}/creation/announce",
+                json={"rulebook_id": "dungeonworld_like"},
+            ).status_code
+            == 200
+        )
+
+        response = _nominate(client, session_id=session_id)
+        assert response.status_code == 200
+        assert response.json()["character_id"] == character_id
+
+        events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
+        nominate_events = [e for e in events if e["kind"] == "nominate"]
+        assert len(nominate_events) == 1
 
 
 # ---------------------------------------------------------------------------

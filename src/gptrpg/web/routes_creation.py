@@ -200,6 +200,14 @@ async def get_creation_steps(
 
 class ClaimHostRequest(BaseModel):
     browser_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    character_id: str = Field(default="", max_length=MAX_ID_LEN)
+    """이 브라우저가 만들고 있는 캐릭터(D-06 갈래 ①, Phase 12.3-06) —
+    비어 있으면 재실 신호만이고 「지금 이 방에 와 있는 사람」에 안 더해진다.
+    기본값을 빈 문자열로 둔 이유는 옆 `FixPartySizeRequest.browser_id`와
+    같다(화면 없는 호출부·시험·스크립트를 막지 않는다). **다만 그 관대한
+    기본값이 곧 1차 검증이 찾은 결함(`fixPartySize`가 이 칸을 빠뜨린 것)의
+    모양이었다** — 화면이 이 칸을 실제로 싣는지는
+    `frontend/src/api/creationBody.test.ts`가 지킨다."""
 
 
 class CreationHostResponse(BaseModel):
@@ -234,6 +242,8 @@ async def claim_creation_host(
     — 부른 사람에게 「너인가 아닌가」만 답한다.
     """
     creation_state.mark_browser_seen(session_id, body.browser_id)
+    if body.character_id:
+        creation_state.mark_character_present(session_id, body.character_id)
     actor = request.app.state.registry.get_or_create(session_id)
     changed = False
 
@@ -651,7 +661,12 @@ def _resolve_creation_gm_provider(request: Request) -> tuple[Provider, str]:
     return provider, choices["creation_gm"].model
 
 
-def _gm_dedupe_key(kind: str, state: GameState, character_id: str | None = None) -> str:
+def _gm_dedupe_key(
+    kind: str,
+    state: GameState,
+    character_id: str | None = None,
+    candidates: tuple[str, ...] | None = None,
+) -> str:
     """「그 시점」을 나타내는 문자열(D-02/D-12) — GM 호출의 입력이 바뀌면
     새 값이 된다. `state.creation_gm_said`에 이미 이 키가 있으면 서버가
     AI를 다시 부르지 않고 기록된 `say`를 그대로 돌려준다.
@@ -664,9 +679,15 @@ def _gm_dedupe_key(kind: str, state: GameState, character_id: str | None = None)
         # 같은 룰북 선언에서 나오므로 입력이 바뀌지 않는다.
         return "announce"
     if kind == "nominate":
-        # 누군가 끝나 후보 목록이 바뀌면(닫힌 목록, `creation_state.unfinished_candidates`)
-        # 새 지목이 가능해진다.
-        return "nominate:" + "|".join(creation_state.unfinished_candidates(state))
+        # 이 키는 그 호출이 **실제로 쓴** 후보 목록에서 나와야 한다
+        # (T-12.3-20, 정확성 문제이지 선택이 아니다, Phase 12.3-06) — 키를
+        # 후보 목록과 따로 재계산하면, 첫 사람이 완성돼 사건 기반 목록이
+        # 다시 비는 순간 두 번째 지목이 첫 번째 지목과 같은 키로 뭉쳐 지난
+        # 지목이 그대로 재사용되고, 이미 완성된 사람을 다시 지목한 꼴이
+        # 되어 같은 교착이 되돌아온다. `candidates`가 안 주어지면(다른
+        # 호출부·시험 호환) 옛 계산으로 떨어진다.
+        cands = candidates if candidates is not None else creation_state.unfinished_candidates(state)
+        return "nominate:" + "|".join(cands)
     if kind == "follow_up":
         # 그 사람이 값을 하나 더 내면(만들기 항목이 늘면) 새 되묻기가
         # 가능해진다. 값이 하나도 없으면 0.
@@ -782,11 +803,15 @@ async def nominate_creation_speaker(
     if state.party_size_fixed is None:
         raise HTTPException(status_code=409, detail="인원이 아직 확정되지 않아 차례가 없다")
 
-    candidates = creation_state.unfinished_candidates(state)
+    # D-06 갈래 ① (Phase 12.3-06) — 사건에서 나온 후보(절대 안 잘림)에
+    # 재실 신호만 있는 사람(아직 항목을 안 낸 사람)을 뒤에 더한다. 그래야
+    # 완전히 새 세션에서도 첫 지목이 일어난다 — `unfinished_candidates`
+    # 하나만 쓰면 아무도 이미 항목을 낸 적이 없어 후보가 영원히 빈다.
+    candidates = creation_state.present_candidates(state, session_id)
     if not candidates:
         raise HTTPException(status_code=409, detail="아직 자기소개를 안 끝낸 사람이 없다")
 
-    key = _gm_dedupe_key("nominate", state)
+    key = _gm_dedupe_key("nominate", state, candidates=candidates)
     already_said = state.creation_gm_said.get(key)
     if already_said is not None and already_said.target_character_id is not None:
         return NominateSpeakerResponse(

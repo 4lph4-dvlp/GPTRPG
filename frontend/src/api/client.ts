@@ -285,13 +285,20 @@ export function recordCreationConsent(
 /** 방장을 잡거나 승계한다(D-11) — 이 호출 자체가 재실 신호다. 서버가
  * 경쟁에서 진 호출도 409로 올리지 않고 `you_are_host: false`로 200을
  * 돌려주므로 이 함수가 실제로 4xx/`ApiError`를 던지는 일은 드물지만,
- * 다른 만들기 POST와 같은 함수를 써 일관성을 지킨다(D-15). */
+ * 다른 만들기 POST와 같은 함수를 써 일관성을 지킨다(D-15).
+ *
+ * `characterId`도 함께 싣는다(12.3-06, D-06 갈래 ①) — 서버가 「지금 이
+ * 방에 누가 와 있는가」를 이 값으로 안다. 후보 목록(`present_candidates`)이
+ * 사건에서 나온 것 옆에 이 값을 나란히 두므로, 완전히 새 세션에서도 첫
+ * 지목이 일어난다. */
 export function claimCreationHost(
   sessionId: string,
   browserId: string,
+  characterId: string,
 ): Promise<CreationHostResponse> {
   return postJsonWithDetail<CreationHostResponse>(`${sessionBase(sessionId)}/creation/host`, {
     browser_id: browserId,
+    character_id: characterId,
   });
 }
 

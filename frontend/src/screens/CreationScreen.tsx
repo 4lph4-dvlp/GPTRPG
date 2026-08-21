@@ -223,7 +223,7 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
     let alive = true;
     async function beacon(): Promise<void> {
       try {
-        const response = await claimCreationHost(sessionId, myBrowserId);
+        const response = await claimCreationHost(sessionId, myBrowserId, myCharacterId);
         if (!alive) {
           return;
         }
@@ -247,7 +247,7 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
     };
     // partyRoster는 null 여부만 본다 — 배열 자체는 폴링마다 새 참조라
     // 매번 타이머를 다시 세우면 주기가 지켜지지 않는다.
-  }, [sessionId, myBrowserId, partyRoster !== null]);
+  }, [sessionId, myBrowserId, myCharacterId, partyRoster !== null]);
 
   // 명단 잠금 -> 세션 진입(D-11 뒤, Task 2). 서버를 다시 조회하지 않는다
   // — complete_creation이 이미 쿠키를 구웠다.

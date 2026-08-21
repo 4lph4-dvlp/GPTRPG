@@ -62,6 +62,61 @@ def browser_last_seen(session_id: str, browser_id: str) -> float | None:
     return _browser_last_seen.get((session_id, browser_id))
 
 
+_character_last_seen: dict[tuple[str, str], float] = {}
+"""(session_id, character_id) -> 마지막으로 재실 신호를 받은 시각(Phase
+12.3-06, D-06 갈래 ①) — `_browser_last_seen`과 정확히 같은 몸이다. 왜
+사건이 아니라 프로세스 메모리인지, 재시작하면 왜 비는지는 위
+`_browser_last_seen`의 docstring이 이미 말한 이유와 같다(되풀이하지
+않는다). 이 표가 닫는 gap: 지목 후보 목록의 유일한 출처가 이제까지
+「이미 항목을 낸 사람」(`unfinished_candidates`)뿐이었는데, 완전히 새
+세션에는 그런 사람이 있을 수 없어 첫 지목이 구조적으로 절대 못 일어났다
+(12.3-VERIFICATION.md 2차). 이 표는 그 반대 재료 — 「지금 이 방에 와
+있는 사람」 — 를 더한다."""
+
+
+def mark_character_present(session_id: str, character_id: str) -> None:
+    """캐릭터가 지금 살아 있다고 표시한다 — `POST /creation/host` 호출에
+    `character_id`가 함께 실리면 이 함수가 불린다. `mark_browser_seen`과
+    정확히 같은 몸이다."""
+    _character_last_seen[(session_id, character_id)] = time.monotonic()
+
+
+def present_candidates(state: GameState, session_id: str) -> tuple[str, ...]:
+    """지목 후보 목록 — `unfinished_candidates`(사건에서 나온, 절대
+    안 잘림)를 앞에 놓고, 재실 신호만 있고 아직 항목을 안 낸 사람을
+    처음 본 순서대로 뒤에 붙인다(Phase 12.3-06, D-06 갈래 ①).
+
+    **`unfinished_candidates`는 이 함수가 바꾸지 않는다** — 정리
+    (`wrap_up`)와 폴링의 `creation_unfinished_character_ids`, 화면의
+    동의 관문은 여전히 사건 기반 목록만 본다(add-alongside, 12.3-06
+    계획의 `<assumption_delta_decision>`). 재실 표는 서버 재시작에
+    취약하므로 그 값이 명단 잠금 판단에 흘러들면 재시작 직후 「아무도
+    안 남았다」로 오판할 수 있다 — 그래서 지목 후보 계산 하나에만
+    쓴다.
+
+    **상한(T-12.3-17, 위조 방지):** `state.party_size_fixed`가 정해져
+    있으면 남은 자리(`party_size_fixed - len(created_characters)`)를
+    넘는 **뒤쪽(재실에서 나온) 항목만** 버린다 — 앞쪽(사건에서 나온
+    항목)은 상한을 넘더라도 절대 안 버린다. 실제로 값을 낸 사람을
+    후보에서 빼면 그 사람이 영영 못 끝낸다.
+    """
+    front = list(unfinished_candidates(state))
+    seen = set(front)
+    now = time.monotonic()
+    tail: list[str] = []
+    for (sid, character_id), seen_at in _character_last_seen.items():
+        if sid != session_id or now - seen_at > HOST_IDLE_S:
+            continue
+        if character_id in state.created_characters or character_id in seen:
+            continue
+        tail.append(character_id)
+        seen.add(character_id)
+    if state.party_size_fixed is not None:
+        tail_budget = max(0, state.party_size_fixed - len(state.created_characters) - len(front))
+        tail = tail[:tail_budget]
+    return tuple(front + tail)
+
+
 def alive_browsers(session_id: str) -> tuple[str, ...]:
     """이 세션에서 `HOST_IDLE_S` 안에 재실 신호를 보낸 브라우저들 —
     처음 본 순서를 보존한다(딕셔너리 삽입 순서)."""
