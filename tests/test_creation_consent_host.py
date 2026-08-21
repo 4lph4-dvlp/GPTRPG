@@ -145,6 +145,14 @@ def _events_of_type(client, event_type: str, *, session_id: str = SESSION_ID) ->
     return [event for event in response.json()["events"] if event["event_type"] == event_type]
 
 
+def _poll_state(client, *, session_id: str = SESSION_ID) -> dict:
+    """`tests/test_creation_screen_state.py`의 같은 이름 도우미와 같은
+    모양 — 폴링 응답의 `state` 칸만 돌려준다."""
+    response = client.get(f"/api/sessions/{session_id}/events", params={"from_seq": 0})
+    assert response.status_code == 200
+    return response.json()["state"]
+
+
 def _act_as(client, cookie_value: str) -> None:
     """진짜 그 사람의 서명 쿠키로 (다시) 갈아 끼운다 — `tests/test_creation_flow.py`의
     같은 이름 도우미와 같은 이유(CR-01 뒤에는 `cookies.clear()`만으로는
@@ -316,6 +324,137 @@ def test_disagreeing_reopens_the_step_in_reconstructed_state_and_closes_on_refil
     )
     assert recreate.status_code == 200
     _act_as(client, hero1_cookie)  # 신원 확인만 하고 이 이후로는 안 쓴다.
+
+
+def test_one_persons_reopen_clears_every_other_characters_consent_in_the_polled_state(
+    web_client,
+):
+    """D-03/D-11 교차 전파의 서버 쪽 절반(Phase 12.3-08, 3차 검증이 QA
+    도구의 구조적 제약으로 확인하지 못한 항목) — 한 사람의 재오픈이
+    `creation_consent_recorded(agree=False)`의 `creation_consents={}`
+    (`reducer.py:546~563`)로 세션 전체의 동의를 통째로 비우고, 그 값이
+    폴링 응답 하나로 두 사람 화면 모두에 나간다.
+
+    **이 시험이 증명하는 것:** 재오픈 하나가 다른 캐릭터의 동의 표시
+    까지 서버 상태에서 되돌리고, 그 값이 폴링으로 모두에게 나가는
+    **배선**. **증명하지 못하는 것:** 먼저 동의한 사람의 **화면**에
+    그것이 실제로 그려지는가 — 그것은 실제로 서로 다른 브라우저 둘이
+    필요해 사람 확인 목록에 남는다(12.3-VERIFICATION.md
+    `behavior_unverified_items`, 단일 크로미움 프로필은 쿠키·브라우저
+    저장소를 탭 전체에 전역 공유해 두 사람이 동시에 각자 유효한 인증
+    상태를 갖는 상황 자체를 만들 수 없다). **이 시험을 그 사람 확인
+    항목의 대체물로 부르지 않는다.**
+    """
+    client = web_client
+    session_id = SESSION_ID + "-cross-consent-reopen"
+    assert _fix_party_size(client, session_id=session_id).status_code == 200
+
+    # 세 번째 참가자가 아직 한창 만드는 중이면(CR-02, `_all_created_
+    # characters_consented`) 완성된 둘이 동의해도 명단이 자동으로 안
+    # 잠긴다 — 재오픈을 걸 수 있는 창을 만든다. 이 참가자 자체는 이
+    # 시험이 확인하는 교차 전파와 무관하다.
+    third_character_id = "hero-3"
+    third_browser_id = "b-hero-3"
+    assert (
+        _complete_step(
+            client,
+            character_id=third_character_id,
+            browser_id=third_browser_id,
+            session_id=session_id,
+            step_id="archetype",
+            picked=["몸으로 먼저 막아선다"],
+        ).status_code
+        == 200
+    )
+
+    _complete_all_required_steps(
+        client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
+    )
+    assert (
+        _complete_creation(
+            client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
+        ).status_code
+        == 200
+    )
+    first_cookie = client.cookies.get("gptrpg_character")
+    client.cookies.clear()  # 두 번째 캐릭터의 항목 제출이 첫 번째 사람의 쿠키와 안 부딪히게 한다.
+
+    _complete_all_required_steps(
+        client,
+        character_id=SECOND_CHARACTER_ID,
+        browser_id=SECOND_BROWSER_ID,
+        session_id=session_id,
+    )
+    assert (
+        _complete_creation(
+            client,
+            character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID,
+            session_id=session_id,
+        ).status_code
+        == 200
+    )
+    second_cookie = client.cookies.get("gptrpg_character")
+
+    _act_as(client, first_cookie)
+    assert (
+        _consent(
+            client,
+            session_id=session_id,
+            character_id=CHARACTER_ID,
+            browser_id=BROWSER_ID,
+            agree=True,
+        ).status_code
+        == 200
+    )
+    _act_as(client, second_cookie)
+    assert (
+        _consent(
+            client,
+            session_id=session_id,
+            character_id=SECOND_CHARACTER_ID,
+            browser_id=SECOND_BROWSER_ID,
+            agree=True,
+        ).status_code
+        == 200
+    )
+
+    state = _poll_state(client, session_id=session_id)
+    consented = {c["character_id"]: c["consented"] for c in state["creation_characters"]}
+    assert consented[CHARACTER_ID] is True
+    assert consented[SECOND_CHARACTER_ID] is True
+
+    # 첫 번째 사람이 자기 항목 하나를 재오픈한다.
+    _act_as(client, first_cookie)
+    reopen = _consent(
+        client,
+        session_id=session_id,
+        character_id=CHARACTER_ID,
+        browser_id=BROWSER_ID,
+        agree=False,
+        step_id="backstory",
+    )
+    assert reopen.status_code == 200
+    assert reopen.json()["reopened_step_id"] == "backstory"
+
+    # 핵심 단언 — 재오픈 뒤의 폴링 응답에서 두 번째 사람의 동의도
+    # False로 되돌아간다.
+    state = _poll_state(client, session_id=session_id)
+    consented = {c["character_id"]: c["consented"] for c in state["creation_characters"]}
+    assert consented[CHARACTER_ID] is False
+    assert consented[SECOND_CHARACTER_ID] is False
+
+    disagree_events = [
+        e
+        for e in _events_of_type(client, "creation_consent_recorded", session_id=session_id)
+        if e["agree"] is False
+    ]
+    assert len(disagree_events) == 1
+    assert disagree_events[0]["reopened_step_id"] == "backstory"
+
+    # 서버를 재시작해도 이 초기화가 남는다.
+    rebuilt = _rebuild_state(client, session_id)
+    assert rebuilt.creation_consents == {}
 
 
 def test_consent_without_any_cookie_is_rejected_and_creates_no_events(web_client):
