@@ -29,6 +29,19 @@ HOST_IDLE_S = 30.0
 두 배를 두는 이유는 한 번의 폴링 지연이나 네트워크 요동만으로 방장을
 잃지 않으려면 최소 두 번은 놓쳐야 하기 때문이다."""
 
+NOMINATION_IDLE_S = 300.0
+"""지목된 사람이 만들기 항목 값을 하나도 안 낸 채로 흘려보낸 것으로
+판정되는 문턱(초, Phase 12.3-08). `HOST_IDLE_S`(30초)보다 훨씬 큰 이유:
+자기소개 서술을 쓰는 사람이 5분 동안 항목 값을 **하나도** 안 내는 일은
+없고, 30초로 잡으면 글을 쓰고 있는 진짜 참가자의 편집 화면이 도중에
+닫혀 이 값이 고치려는 것보다 나쁜 결함이 된다.
+
+**이 값은 재실 신호가 살아 있는데도 아무것도 안 내는 경우에만 쓴다.**
+재실 신호 자체가 `HOST_IDLE_S`를 넘겨 끊긴 경우(탭을 닫고 떠났다)는
+`forfeited_nominee`가 그 문턱을 그대로 쓴다 — 12.3-VERIFICATION.md의
+`missing` ②가 문자 그대로 `HOST_IDLE_S`를 적었으나 그 값은 재실 신호가
+끊긴 갈래에만 안전하다(12.3-08-PLAN.md planner_assumptions ①)."""
+
 _browser_last_seen: dict[tuple[str, str], float] = {}
 """(session_id, browser_id) -> 마지막으로 재실 신호를 받은 시각
 (`time.monotonic()` 기준, 벽시계가 아니다 — 이 저장소가 경과 시간을 잴 때
@@ -81,6 +94,104 @@ def mark_character_present(session_id: str, character_id: str) -> None:
     _character_last_seen[(session_id, character_id)] = time.monotonic()
 
 
+_nomination_watermark: dict[tuple[str, str], tuple[int, float]] = {}
+"""(session_id, character_id) -> (지금까지 관측한 가장 앞선 순번, 그
+순번을 **처음 본** 시각(`time.monotonic()` 기준)) — Phase 12.3-08.
+왜 사건이 아니라 프로세스 메모리인지는 `_browser_last_seen`의
+docstring이 이미 말한 이유와 같다(되풀이하지 않는다)."""
+
+_forfeited_at: dict[tuple[str, str], float] = {}
+"""(session_id, character_id) -> 차례를 흘려보낸 것으로 판정된 시각
+(`time.monotonic()` 기준) — Phase 12.3-08. 한 번 들어가면 세션 동안
+안 지운다(재시작하면 프로세스 메모리라 자연히 빈다, T-12.3-26이 그
+한계를 받아들인 이유)."""
+
+
+def latest_nomination(state: GameState) -> tuple[str, int] | None:
+    """가장 최근 `nominate` 지목의 대상과 순번 — 대상이 없거나 이미
+    `state.created_characters`에 있으면(차례가 끝났으면) `None`이다.
+
+    **이 본문은 `routes_events._creation_current_speaker_id`에서 그대로
+    옮겨온 것이다** — 새로 쓴 계산이 아니다(D-04, 판단은 한 자리)."""
+    latest_seq = -1
+    latest_target: str | None = None
+    for fold in state.creation_gm_said.values():
+        if fold.kind != "nominate":
+            continue
+        if fold.seq > latest_seq:
+            latest_seq = fold.seq
+            latest_target = fold.target_character_id
+    if latest_target is None or latest_target in state.created_characters:
+        return None
+    return (latest_target, latest_seq)
+
+
+def nomination_progress_seq(state: GameState, character_id: str) -> int:
+    """`character_id`가 만들기 항목에 낸 값 중 가장 앞선 순번
+    (`CreationStepFold.seq`) — 하나도 없으면 `0`."""
+    max_seq = 0
+    for (fold_character_id, _step_id), fold in state.creation_step_values.items():
+        if fold_character_id == character_id and fold.seq > max_seq:
+            max_seq = fold.seq
+    return max_seq
+
+
+def forfeited_nominee(state: GameState, session_id: str) -> str | None:
+    """지금 지목된 사람이 자기 차례를 흘려보냈으면 그 `character_id`를,
+    아니면 `None`을 돌려준다(Phase 12.3-08, T-12.3-22).
+
+    **부수효과가 있다 — 순수 함수가 아니다.** 호출할 때마다
+    `_nomination_watermark`의 관측 시계를 다시 맞추고, 판정되면
+    `_forfeited_at`에 그 사실을 찍는다. `present_candidates`가 폴링마다
+    이 함수를 불러 관측을 최신으로 유지하는 것이 그래서다.
+
+    **이 구간에는 신원을 증명시킬 수단이 구조적으로 없다**(서명 쿠키는
+    캐릭터가 완성돼야 구워진다) — 그래서 신원을 검증하는 대신 자격을
+    회수 가능하게 만든다: 차례를 받고 아무 값도 안 낸 식별자는 그
+    차례를 잃는다.
+    """
+    nomination = latest_nomination(state)
+    if nomination is None:
+        return None
+    nominee, nominated_seq = nomination
+    key = (session_id, nominee)
+    if key in _forfeited_at:
+        # 같은 판정을 되풀이 계산하지 않는다 — 이미 흘려보낸 것으로
+        # 판정된 지목은 그 사람이 완성되거나 새 지목이 나기 전까지
+        # 계속 흘려보낸 상태다.
+        return nominee
+
+    # 지목 자체와 그 사람이 낸 마지막 값 중 더 앞선 순번 — 앞으로
+    # 나아간 것이 있으면 이 값이 커진다.
+    mark = max(nominated_seq, nomination_progress_seq(state, nominee))
+    watermark = _nomination_watermark.get(key)
+    if watermark is None or watermark[0] != mark:
+        # 재시작 직후와 「방금 값을 냈다」가 같은 갈래로 처리된다 —
+        # 처음 본 순간부터 다시 잰다(T-12.3-13이 방장에게 세운 것과
+        # 같은 규율).
+        _nomination_watermark[key] = (mark, time.monotonic())
+        return None
+
+    _, started_at = watermark
+    now = time.monotonic()
+    last_seen = _character_last_seen.get((session_id, nominee))
+
+    # 빠른 갈래 — 재실 신호가 `HOST_IDLE_S`를 넘겨 끊겼다(탭을 닫고
+    # 떠났다). 진짜 참가자는 글을 쓰는 동안에도 재실 신호를 계속
+    # 보내므로 이 갈래에 안 걸린다.
+    quick_branch = now - started_at > HOST_IDLE_S and (
+        last_seen is None or now - last_seen > HOST_IDLE_S
+    )
+    # 느린 갈래 — 재실 신호는 살아 있는데 아무것도 안 낸다(탭을 열어
+    # 둔 채 방치했다).
+    slow_branch = now - started_at > NOMINATION_IDLE_S
+
+    if quick_branch or slow_branch:
+        _forfeited_at[key] = time.monotonic()
+        return nominee
+    return None
+
+
 def present_candidates(state: GameState, session_id: str) -> tuple[str, ...]:
     """지목 후보 목록 — `unfinished_candidates`(사건에서 나온, 절대
     안 잘림)를 앞에 놓고, 재실 신호만 있고 아직 항목을 안 낸 사람을
@@ -100,17 +211,31 @@ def present_candidates(state: GameState, session_id: str) -> tuple[str, ...]:
     항목)은 상한을 넘더라도 절대 안 버린다. 실제로 값을 낸 사람을
     후보에서 빼면 그 사람이 영영 못 끝낸다.
     """
+    # 폴링이 먼저 돌았는지에 기대지 않고 이 함수를 부르는 것만으로
+    # 관측이 최신이 된다 — 돌려받은 값 자체는 아래 목록 분류에 안
+    # 쓴다, `_forfeited_at`이 최신이 되게 하는 것이 목적이다.
+    forfeited_nominee(state, session_id)
+
     front = list(unfinished_candidates(state))
     seen = set(front)
     now = time.monotonic()
     tail: list[str] = []
+    demoted: list[tuple[str, float]] = []
     for (sid, character_id), seen_at in _character_last_seen.items():
         if sid != session_id or now - seen_at > HOST_IDLE_S:
             continue
         if character_id in state.created_characters or character_id in seen:
             continue
-        tail.append(character_id)
         seen.add(character_id)
+        forfeited_at = _forfeited_at.get((session_id, character_id))
+        if forfeited_at is not None:
+            demoted.append((character_id, forfeited_at))
+        else:
+            tail.append(character_id)
+    # 흘려보낸 식별자는 뒤로 밀린다 — 먼저 흘려보낸 쪽이 먼저 온다
+    # (결정론적 순서, 탐침 `ordering` 유지).
+    demoted.sort(key=lambda item: item[1])
+    tail = tail + [character_id for character_id, _forfeited_at in demoted]
     if state.party_size_fixed is not None:
         tail_budget = max(0, state.party_size_fixed - len(state.created_characters) - len(front))
         tail = tail[:tail_budget]

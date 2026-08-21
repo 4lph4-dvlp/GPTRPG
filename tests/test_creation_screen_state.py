@@ -7,6 +7,7 @@
 """
 
 import json
+import time
 
 from conftest import FakeProvider
 
@@ -594,6 +595,82 @@ def test_poll_state_current_speaker_clears_once_that_person_finishes(
 
         state = _poll_state(client, session_id=session_id)
         assert state["creation_current_speaker_id"] is None
+
+
+def test_a_stalled_nomination_is_released_and_the_next_one_lands_on_someone_else(
+    web_client_with_fake_provider,
+):
+    """3차 검증이 코드 실행으로 재현한 새 교착(12.3-VERIFICATION.md
+    `missing` ②) — 가짜 식별자가 지목되면 그 지목은 완성돼야만 풀리는데
+    가짜는 완성될 수 없어 `creation_current_speaker_id`가 영원히
+    고정된다(회복 경로가 코드 어디에도 없었다). 이 시험은 그 회복
+    경로가 서버 함수(`forfeited_nominee`)부터 폴링 응답까지 끝에서
+    끝까지 이어지는지 확인한다.
+
+    시간은 `_nomination_watermark`의 시각만 되감아 흘려보낸다(실제로
+    잠들지 않는다) — `test_idle_host_is_succeeded_by_another_browser_
+    and_cannot_reclaim`(test_creation_consent_host.py)과 같은 관례다."""
+    provider = FakeProvider(complete_value="[]")  # 계약 위반 -> candidates[0] 폴백
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-stalled-nomination"
+        # 가짜가 먼저 도착하는 것이 이 결함의 모양이다(T-12.3-21).
+        for character_id, browser_id in (
+            ("pc-stall-ghost", "b-stall-ghost"),
+            ("pc-stall-1", "b-stall-1"),
+            ("pc-stall-2", "b-stall-2"),
+        ):
+            assert (
+                _claim_host(
+                    client,
+                    character_id=character_id,
+                    browser_id=browser_id,
+                    session_id=session_id,
+                ).status_code
+                == 200
+            )
+        assert (
+            _fix_party_size(
+                client, count=3, browser_id="b-stall-ghost", session_id=session_id
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                f"/api/sessions/{session_id}/creation/announce",
+                json={"rulebook_id": "dungeonworld_like"},
+            ).status_code
+            == 200
+        )
+
+        first = _nominate(client, session_id=session_id)
+        assert first.status_code == 200
+        assert first.json()["character_id"] == "pc-stall-ghost"
+
+        # 이 폴링이 관측 기록(`_nomination_watermark`)을 처음 찍는다.
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] == "pc-stall-ghost"
+
+        # 순번은 그대로 두고 시각만 되감아 "흘려보냈다"를 재현한다.
+        seq, _started_at = creation_state._nomination_watermark[
+            (session_id, "pc-stall-ghost")
+        ]
+        creation_state._nomination_watermark[(session_id, "pc-stall-ghost")] = (
+            seq,
+            time.monotonic() - creation_state.NOMINATION_IDLE_S - 5,
+        )
+
+        state = _poll_state(client, session_id=session_id)
+        assert state["creation_current_speaker_id"] is None
+
+        second = _nominate(client, session_id=session_id)
+        assert second.status_code == 200
+        second_target = second.json()["character_id"]
+        assert second_target != "pc-stall-ghost"
+        assert second_target in ("pc-stall-1", "pc-stall-2")
+
+        events = _events_of_type(client, "creation_gm_spoke", session_id=session_id)
+        nominate_events = [e for e in events if e["kind"] == "nominate"]
+        assert len(nominate_events) == 2
 
 
 def test_poll_state_lists_completed_character_with_consent_false(

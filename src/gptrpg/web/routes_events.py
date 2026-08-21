@@ -136,7 +136,12 @@ class GameStateView(BaseModel):
     (`creation_state.unfinished_candidates` 그대로)."""
     creation_current_speaker_id: str | None
     """GM이 가장 최근에 지목한 사람 — 그 사람이 이미 완성됐으면 차례가
-    끝난 것이므로 `None`이다."""
+    끝난 것이므로 `None`이다.
+
+    **해제 조건이 하나 더 있다(Phase 12.3-08, T-12.3-22).** 그 사람이
+    자기 차례를 흘려보낸 것으로 판정돼도(`creation_state.forfeited_nominee`)
+    이 값은 `None`이다 — 그래서 이 값은 이제 사건 기록만의 함수가
+    아니라 시계(재실 신호·항목 제출 시각)에도 의존한다."""
     creation_characters: list[CreationCharacterView]
     """완성된 캐릭터 목록 — 이름·동의 여부·룰북 최소선 충족 여부."""
     creation_reopened_step_ids: list[CreationReopenedStepView]
@@ -180,19 +185,18 @@ def _creation_character_views(
 
 
 def _creation_current_speaker_id(game_state: GameState) -> str | None:
-    """가장 최근 `nominate` 지목의 대상 — 이미 완성됐으면 차례가 끝난
-    것이므로 `None`이다."""
-    latest_seq = -1
-    latest_target: str | None = None
-    for fold in game_state.creation_gm_said.values():
-        if fold.kind != "nominate":
-            continue
-        if fold.seq > latest_seq:
-            latest_seq = fold.seq
-            latest_target = fold.target_character_id
-    if latest_target is None or latest_target in game_state.created_characters:
+    """가장 최근 `nominate` 지목의 대상 — 이미 완성됐으면(D-04,
+    `creation_state.latest_nomination`) 또는 자기 차례를 흘려보낸
+    것으로 판정됐으면(Phase 12.3-08, `creation_state.forfeited_nominee`)
+    `None`이다. 판단 본문은 `creation_state`에만 있다 — 여기서는 위임만
+    한다."""
+    nomination = creation_state.latest_nomination(game_state)
+    if nomination is None:
         return None
-    return latest_target
+    nominee, _seq = nomination
+    if creation_state.forfeited_nominee(game_state, game_state.session_id) == nominee:
+        return None
+    return nominee
 
 
 def _creation_step_value_views(game_state: GameState) -> list[CreationStepValueView]:
