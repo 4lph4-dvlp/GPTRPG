@@ -614,7 +614,7 @@ Plans:
 **Depends on**: Phase 12.1 (만들기 경로·GM 대화·동의·명단 잠금이 전부 서버에 있다),
 Phase 8 (점유 규칙과 서명 쿠키 신원)
 **Requirements**: CHAR-06
-**Plans:** 5/5 plans executed
+**Plans:** 5/7 plans executed (2차 검증이 「첫 지목이 구조적으로 안 일어난다」를 찾아 gap closure 두 개 추가)
 
 Plans:
 **Wave 1**
@@ -633,6 +633,14 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 12.3-05-PLAN.md — 인원 확정 · 동의 관문 · 세션 진입 · CHAR-06
+
+**Wave 5** *(gap closure — 12.3-VERIFICATION.md 2차가 찾은 결함)*
+
+- [ ] 12.3-06-PLAN.md — 첫 지목이 구조적으로 안 일어나던 교착을 푼다 (재실 신호가 캐릭터를 싣는다)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 12.3-07-PLAN.md — 교착에 막혀 한 번도 못 본 다섯 진실을 실제 브라우저로 확인한다
 
 > **왜 새로 생겼나 (2026-08-19, Phase 12.1 사람 확인 중 발견).** Phase 12.1이 캐릭터 만들기를
 > **서버에 전부** 만들었다 — 일곱 조작, 세 룰북의 서로 다른 조합, GM이 진행하는 자기소개
