@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면 (INSERTED)
 status: executing
-stopped_at: Completed 12.3-06-PLAN.md (backstop 진실 사람 확인 대기 중, CHAR-06 여전히 미체크)
-last_updated: "2026-08-21T10:06:48.826Z"
+stopped_at: Completed 12.3-07-PLAN.md (첫 지목 라이브 재확인 완료, CHAR-06 여전히 미체크 — 동의 관문 3인 교차 전파와 12.3-05의 14개 항목이 사람 확인 대기 중)
+last_updated: "2026-08-21T10:51:43.672Z"
 last_activity: 2026-08-21
 last_activity_desc: Phase 12.3 execution started
-state_head: 91fc1a9037b22f5ddfa07650671b9ed5744c723f
+state_head: ecc7703022b6322cc3ce5977a26b5c814d95a7c0
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 45
-  completed_plans: 44
+  completed_plans: 45
 ---
 
 # Project State
@@ -30,9 +30,9 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 12.3 (캐릭터 만들기 화면 (INSERTED)) — EXECUTING
-Plan: 2 of 7
-Status: Ready to execute
+Phase: 12.3 (캐릭터 만들기 화면 (INSERTED)) — EXECUTING (모든 계획 완료, 사람 확인 대기)
+Plan: 7 of 7
+Status: 코드 계획 전부 완료 — CHAR-06은 사람 확인(동의 관문 3인 교차 전파 + 12.3-05의 14개 항목) 대기 중
 "자랄 수 있는 모양" 나머지 원자 연산을 더해야 그 요구사항이 완전히 닫힌다 — 지금 체크하지 않는다)
 Last activity: 2026-08-21 — Phase 12.3 execution started
 
@@ -321,6 +321,7 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 12.3-05: 인원 확정/동의 두 관문을 순수 게이트 함수(partySizeGate/consentGate)+렌더 스위치로 배선, CreationScreen이 onEntered로 App의 Gate를 세션으로 바꾼다
 - [Phase 12.3]: 12.3-05: CHAR-06을 REQUIREMENTS.md/ROADMAP.md에 만들었지만 사람 확인(Task 4, 14개 항목) 전이라 체크하지 않는다 — requirements.ready-ids는 1/1이지만 그것은 계획 완료이지 사람 확인이 아니다
 - [Phase 12.3]: 12.3-06 Task 0(사장님 결정): 첫 지목 교착 gap 해소 — 재실 신호(POST /creation/host)에 character_id를 얹는 갈래 ①을 선택. add-alongside로 present_candidates를 명단 잠금 판단에는 안 흘려보낸다 — 갈래 ②는 후보가 항상 한 명이라 GM이 고를 게 없어져 D-06 취지를 흐리고, 갈래 ③(참가 사건화)은 사건 기록을 되돌릴 수 없게 바꿔야 해서 기각
+- [Phase 12.3]: 12.3-07: 첫 지목 교착(D-06)이 실제 브라우저에서 세 사람 전원 이어서 지목됨을 라이브로 확인. D-07/D-08/D-11 승계/D-13 세 문구도 라이브 확인. 동의 관문 3인 교차 전파는 QA 도구(단일 크로미움 프로필, 서명 쿠키·localStorage 전역 공유) 제약으로 라이브 미확인 — 사람이 별도 브라우저로 확인 필요. CHAR-06 여전히 미체크
 
 ### Pending Todos
 
@@ -378,8 +379,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-21T10:06:48.519Z
-Stopped at: Completed 12.3-06-PLAN.md (backstop 진실 사람 확인 대기 중, CHAR-06 여전히 미체크)
+Last session: 2026-08-21T10:51:30.628Z
+Stopped at: Completed 12.3-07-PLAN.md (첫 지목 라이브 재확인 완료, CHAR-06 여전히 미체크 — 동의 관문 3인 교차 전파와 12.3-05의 14개 항목이 사람 확인 대기 중)
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
