@@ -115,7 +115,10 @@ function PartySizeControl({
   browserId: string;
   range: PartySizeRangeView;
   onDone: () => void;
-  onError: (message: string) => void;
+  /** 문장 하나 또는 비움(`null`) — 새 시도가 시작되면 이전 거절을
+   * 지운다(G-12.3-4). 호출부는 이미 `setError`를 그대로 넘기고 있어
+   * 이 타입만 사실에 맞춘다(호출부 변경 없음). */
+  onError: (message: string | null) => void;
 }) {
   const [count, setCount] = useState(range.min_player_characters);
   const [busy, setBusy] = useState(false);
@@ -129,6 +132,12 @@ function PartySizeControl({
 
   async function confirm(): Promise<void> {
     setBusy(true);
+    // 새 시도의 정확한 경계(G-12.3-4) — 오늘 이 화면에서 오류를 지우는
+    // 자리가 announce() 안 한 곳뿐이었다, 그래서 3명으로 성공한 확정이
+    // 2명으로 거절당한 문구를 안 지우고 화면에 남겨 뒀다. `CreationPane.tsx`
+    // 의 네 조작이 이미 지키는 관례(새 시도를 시작할 때 먼저 비운다)를
+    // 인원 확정에도 적용한다 — 새로 발명한 규칙이 아니다.
+    onError(null);
     try {
       await fixPartySize(sessionId, count, rulebookId, browserId);
       onDone();
@@ -157,7 +166,13 @@ function PartySizeControl({
         // 경우에만 성립하지 않는다 — 그래서 이 값 하나만 화면이 막는다.
         // 룰북 범위·절대 상한 검사는 여전히 서버 몫이고 화면으로 안
         // 옮긴다.
-        onChange={(event) => setCount(clampToRange(Math.trunc(Number(event.target.value)) || range.min_player_characters))}
+        // 사람이 숫자를 고치는 순간 이전 거절은 이미 그 숫자에 관한
+        // 말이 아니다(G-12.3-4) — 여기서도 비운다(성공 뒤·값 변경 뒤
+        // 둘 다 닫는다, 사장님 보고가 그 둘 다였다).
+        onChange={(event) => {
+          onError(null);
+          setCount(clampToRange(Math.trunc(Number(event.target.value)) || range.min_player_characters));
+        }}
       />
       <button
         type="button"
