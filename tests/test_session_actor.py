@@ -27,8 +27,10 @@ from gptrpg.rules_core.rulebook import (
     TWO_D6,
     CreationStepDecl,
     GradeBand,
+    PartySizeOutOfRange,
     ResourceAxisDecl,
     Rulebook,
+    validate_party_size,
 )
 from gptrpg.session_actor.actor import (
     AdvanceClock,
@@ -975,6 +977,45 @@ async def test_fix_party_size_rejects_a_count_below_the_rulebook_minimum(tmp_db_
         await actor.stop()
         store.close()
     assert _read_events(tmp_db_path) == []
+
+
+async def test_fix_party_size_rejection_message_is_human_readable_only(tmp_db_path):
+    """G-12.3-3 — 사람 화면으로 나가는 문장은 `PartySizeOutOfRange.reason`과
+    정확히 같아야 하고, 파이썬 내부 표현(예외 클래스 이름·dataclass repr의
+    대입 기호 꼬리표)의 자취가 없어야 한다.
+
+    이 시험이 지키는 것은 문구의 예쁨이 아니라 **경계**다 — 사람 화면으로
+    나가는 문장과 개발자 로그로 나가는 문장이 같은 자리에서 나오면
+    언젠가 내부 표현이 사람에게 샌다(D-15). 사장님 화면에 실제로 뜬 것이
+    정확히 이 두 조각(예외 클래스 이름과 `allowed=`/`requested=` 꼬리표)
+    이었다.
+    """
+    from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_PARTY_SIZE_RANGE
+
+    # 기대값은 손으로 다시 적지 않고 예외 자신에서 뽑는다 — 문장이 바뀌면
+    # 시험만 옳게 남는다.
+    try:
+        validate_party_size(DUNGEONWORLD_PARTY_SIZE_RANGE, 2)
+    except PartySizeOutOfRange as exc:
+        expected_reason = exc.reason
+    else:
+        pytest.fail("validate_party_size가 범위 밖 인원에 대해 예외를 안 던졌다")
+
+    store, actor = _make_actor(tmp_db_path)
+    try:
+        with pytest.raises(CommandRejected) as excinfo:
+            await actor.submit(
+                FixPartySize(player_character_count=2, rulebook_id=DUNGEONWORLD_LIKE_ID)
+            )
+    finally:
+        await actor.stop()
+        store.close()
+
+    message = str(excinfo.value)
+    assert message == expected_reason
+    assert "PartySizeOutOfRange" not in message
+    assert "allowed=" not in message
+    assert "requested=" not in message
 
 
 async def test_fix_party_size_rejects_a_count_above_the_rulebook_maximum(tmp_db_path):

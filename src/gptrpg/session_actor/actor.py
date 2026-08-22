@@ -1425,7 +1425,15 @@ class SessionActor:
         try:
             validate_party_size(rulebook.party_size_range, command.player_character_count)
         except PartySizeOutOfRange as exc:
-            raise CommandRejected(str(exc)) from exc
+            # 사람 화면까지 통째로 나가는 유일한 지점이었다(G-12.3-3) —
+            # 예외 전체(`str(exc)`)를 그대로 실으면 dataclass repr
+            # (`allowed=PartySizeRange(...)`)이 사람 눈에 그대로 나간다.
+            # 사람이 읽을 절반은 예외에 이미 따로 있다(`exc.reason`,
+            # 「2명은 최소 3명보다 적다」). 예외 자체(`rules_core/rulebook.py`)
+            # 는 안 고친다 — 개발자용 로그에는 repr이 유용하므로 두 쓰임을
+            # 갈라 둔다(D-15 「이유는 한 자리에만」은 사람용 이유가 한
+            # 자리라는 뜻이지, 예외가 정보를 덜 담으라는 뜻이 아니다).
+            raise CommandRejected(exc.reason) from exc
         return (
             "party_size_fixed",
             None,
