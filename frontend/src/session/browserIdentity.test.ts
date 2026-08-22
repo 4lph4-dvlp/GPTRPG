@@ -84,4 +84,34 @@ describe("getBrowserId/getCreationCharacterId", () => {
     expect(first).toBe(second);
     expect(first.length).toBeGreaterThan(0);
   });
+
+  /**
+   * 안전한 맥락이 아닌 브라우저(평문 http + 일반 IP)에서 실제로 관찰되는
+   * 전역 모양 — `crypto.getRandomValues`는 있고 `crypto.randomUUID`는
+   * 없다(Phase 12.3-11, 크로미움 151로 직접 측정). 이 시험은 `crypto`
+   * 전역을 그 모양으로 갈아 끼워, 화면이 실제로 여는 조건에서도 식별자
+   * 생성이 예외 없이 동작하는 것을 단위 수준에서 고정한다.
+   */
+  it("안전한 맥락이 아닌 브라우저(crypto.randomUUID 없음)에서도 식별자를 만들고 예외를 안 던진다", () => {
+    vi.stubGlobal("crypto", {
+      getRandomValues: <T extends ArrayBufferView>(array: T): T => {
+        const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+        for (let i = 0; i < bytes.length; i += 1) {
+          bytes[i] = i;
+        }
+        return array;
+      },
+    });
+    const session = "session-insecure-context";
+    let first = "";
+    let second = "";
+    expect(() => {
+      first = getBrowserId(session);
+    }).not.toThrow();
+    expect(() => {
+      second = getBrowserId(session);
+    }).not.toThrow();
+    expect(first).toBe(second);
+    expect(first.length).toBeLessThanOrEqual(MAX_ID_LEN);
+  });
 });
