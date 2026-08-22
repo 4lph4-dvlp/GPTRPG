@@ -8,6 +8,7 @@
  * 의미 없는 유일한 경우이고, 그래서 폴링을 멈추고 이유를 말한다.
  */
 
+import { Component, type ReactNode } from "react";
 import { COPY } from "../labels.ts";
 
 export function MissingSession() {
@@ -78,4 +79,59 @@ export function Loading() {
       </div>
     </div>
   );
+}
+
+/**
+ * 앱 최상단 오류 경계(Phase 12.3-11, 6차 검증 gap) — 마운트·렌더 도중 어떤
+ * 예외든 빈 `#app`으로 끝나던 것을 막는다. 실제로 있었던 일: 안전한
+ * 맥락(secure context)에서만 있는 브라우저 API를 `CreationScreen`의 렌더
+ * 본문이 곧바로 불렀고, README가 참가자에게 나눠 주라고 지시하는 형태
+ * (평문 http + 이 기계의 일반 IP)에서는 그 API가 없어 첫 렌더가 예외로
+ * 끊겼다. `main.tsx`에 오류 경계가 없어 그 예외가 조용히 삼켜졌고,
+ * 참가자 전원이 아무 설명 없는 빈 화면을 봤다.
+ *
+ * 오류 문장을 사람에게 그대로 보이는 이유 — 실험 현장에는 개발자 도구를
+ * 열 사람이 없다. 진행자가 참가자에게 「무엇이 보이냐」고 물어 화면에
+ * 적힌 문장으로 원인을 좁힐 수 있어야 한다(D-13/D-15의 연장).
+ * 아래 예외 처리 훅이 `console.error`로도 원본 예외와 컴포넌트 스택을
+ * 남긴다 — 화면과 콘솔 둘 다에 흔적을 남기는 것이 목표다.
+ *
+ * **이 경계가 못 잡는 것** — React 오류 경계의 구조적 한계다. 모듈을
+ * 불러오는 시점에 터지는 예외(import 단계)와 이벤트 핸들러 안의 예외는
+ * 이 경계를 안 거친다. 이 계획은 그 두 자리를 새로 처리하지 않는다.
+ */
+export class ErrorBoundary extends Component<{ children: ReactNode }, { message: string | null }> {
+  state: { message: string | null } = { message: null };
+
+  static getDerivedStateFromError(error: unknown): { message: string } {
+    return { message: error instanceof Error ? error.message : String(error) };
+  }
+
+  componentDidCatch(error: unknown, info: { componentStack?: string | null }): void {
+    // 삼키지 않는다 — 화면에 문구를 보이는 것과 콘솔에 흔적을 남기는 것은
+    // 둘 다 필요하다(6차 검증 UAT가 「콘솔에도 아무것도 안 남는다」를
+    // 문제로 적었다).
+    console.error("앱 최상단에서 잡힌 예외:", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.message === null) {
+      return this.props.children;
+    }
+    return (
+      <div className="screen">
+        <div className="screen__inner">
+          <div className="screen__title">
+            <h1 className="t-display">{COPY.appCrashedTitle}</h1>
+          </div>
+          <div className="notice">
+            <p className="t-body">{COPY.appCrashed}</p>
+            <p className="t-label">
+              <code>{this.state.message}</code>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }

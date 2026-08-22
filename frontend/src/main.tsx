@@ -17,13 +17,21 @@ import "@fontsource/gowun-batang/latin-400.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
+import { ErrorBoundary } from "./screens/Notices.tsx";
 import "./styles.css";
 
 const root = document.querySelector<HTMLDivElement>("#app");
 if (root !== null) {
+  // ErrorBoundary가 여기 없던 채로 안전한 맥락 전용 API 호출이 참가자
+  // 전원의 첫 렌더를 예외로 끊었고(Phase 12.3-11, 6차 검증 gap), 그 예외가
+  // 조용히 삼켜져 아무도 원인을 알 수 없는 빈 화면만 남았다 — 사람이
+  // 먼저 겪고 나서야 그 사실을 알았다. 마운트·렌더 도중 어떤 예외든
+  // 사람이 읽을 문장으로 남도록 이 겹을 둔다.
   createRoot(root).render(
     <StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </StrictMode>,
   );
 }
