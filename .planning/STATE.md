@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면
 status: executing
-stopped_at: Completed 12.3-12-PLAN.md
-last_updated: "2026-08-22T07:13:22.134Z"
+stopped_at: Completed 12.3-13-PLAN.md
+last_updated: "2026-08-22T07:30:38.176Z"
 last_activity: 2026-08-22
 last_activity_desc: Phase 12.3 execution started
-state_head: 7f1cd22ae01831f75244139a3df5b829eb1ca8ff
+state_head: 60baf594a4e5d247f71bbac12a5a38f69abfc181
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 52
-  completed_plans: 50
+  completed_plans: 51
 ---
 
 # Project State
@@ -31,15 +31,18 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.3 (캐릭터 만들기 화면) — EXECUTING
-Plan: 2 of 14
+Plan: 14 of 14
 Status: Ready to execute
-Last activity: 2026-08-22 — Phase 12.3 execution started
+Last activity: 2026-08-22 — 12.3-13 완료(인원 확정 관문 세 결함 통합 수정)
 
 > 계획 번호 참고: `Plan: N of 11`의 카운터는 phase 초기 계획 수(10개)에
 > gap-closure로 추가된 12.3-11 한 건이 더해진 실제 파일 개수(11)를 따른다 —
 > `gsd-tools state advance-plan`이 남긴 "2 of 11"은 이 phase의 다른 카운터
 > 출처(초기 계획 수)와 어긋나 실행자가 디스크 상태(`ls *-PLAN.md`/`*-SUMMARY.md`
-> 둘 다 11개)로 직접 정정했다.
+> 둘 다 11개)로 직접 정정했다. 12.3-13 완료 시점에도 같은 드리프트가
+> 재발했다(`state advance-plan`이 "3 of 14"를 남김) — 디스크 상태
+> (`*-PLAN.md` 14개, `*-SUMMARY.md` 13개, 12.3-14만 남음)로 "14 of 14"로
+> 다시 정정했다.
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -147,6 +150,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P10 | 약 30분 | 2 tasks | 3 files |
 | Phase 12.3 P11 | 46min | 3 tasks | 9 files |
 | Phase 12.3 P12 | 12min | 2 tasks | 3 files |
+| Phase 12.3 P13 | ~16min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -339,6 +343,8 @@ Progress: [██████████] 100%
 - [Phase 12.3]: crypto.randomUUID() 대신 crypto.getRandomValues 기반 생성으로 교체(갈래 추가 아닌 호출 교체) — 실측(크로미움 151)으로 안전한 맥락 아닌 곳에서도 getRandomValues는 있다는 것을 확인 — 갈래를 두면 이번 결함과 같은 함정을 한 자리 더 만든다
 - [Phase 12.3]: 확인 스크립트는 확인-불가 경로마다 sys.exit(2)를 명시적으로 호출한다 — 확인 불가를 통과(0)로 절대 안 섞는 것이 이번 gap이 다섯 라운드를 살아남은 원인을 막는 핵심 성질
 - [Phase 12.3]: 12.3-12: 능력치 배치 잠금 판정을 값의 집합에서 개수 기반으로 바꿈 — 서로 다른 값의 중복 배정 방지는 개수 1의 특수 경우로 유지, 같은 값을 두 번 보여주는 표시는 접지 않음(Phase 16 경계)
+- [Phase 12.3]: GET /creation/steps를 배열에서 {steps, party_size_range} 봉투로 넓혀 룰북 인원 범위를 확정 전에 화면까지 실어 보낸다(D-05 확장) — 새 HTTP 경로나 폴링 대안 대신, URL은 그대로 둔다
+- [Phase 12.3]: 인원 거절 문구는 예외 전체(str(exc), dataclass repr)가 아니라 사람이 읽을 절반(exc.reason)만 CommandRejected에 싣는다 — 예외 자체(rules_core/rulebook.py)는 안 고친다(D-15)
 
 ### Pending Todos
 
@@ -396,8 +402,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-22T07:13:21.748Z
-Stopped at: Completed 12.3-12-PLAN.md
+Last session: 2026-08-22T07:30:37.786Z
+Stopped at: Completed 12.3-13-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
