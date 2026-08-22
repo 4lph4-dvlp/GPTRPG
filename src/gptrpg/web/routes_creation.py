@@ -62,6 +62,7 @@ from gptrpg.rules_core.rulebook import (
     EntityAxisMismatch,
     InvalidCreationStep,
     InvalidResourceAxis,
+    PartySizeRange,
     Rulebook,
 )
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
@@ -158,12 +159,54 @@ def _creation_step_view(decl: CreationStepDecl) -> CreationStepView:
     )
 
 
-@router.get("/sessions/{session_id}/creation/steps", response_model=list[CreationStepView])
-async def get_creation_steps(
+class PartySizeRangeView(BaseModel):
+    """`PartySizeRange`를 그대로 옮기는 얇은 응답 모델(G-12.3-2) — 최소는
+    필수, 최대는 상한이 없을 수 있다(`None`)."""
+
+    min_player_characters: int
+    max_player_characters: int | None
+
+
+class CreationDeclarationView(BaseModel):
+    """`GET /creation/steps`의 응답 봉투(G-12.3-2) — 룰북이 **선언**한 것
+    전부를 담는다: 항목 목록과 인원 범위. 둘 다 세션 중에 안 바뀌는 룰북
+    콘텐츠라 같은 자리에서 나온다(D-05가 이 경로를 그렇게 정의했다).
+    `party_size_range`는 `None`일 수 있다(룰북이 아직 인원 범위를 선언하지
+    않은 경우) — 등록 검사(`validate_registered_rulebooks`)가 등록된
+    룰북에 대해서는 이를 막지만, 이 타입은 여전히 열려 있다."""
+
+    steps: list[CreationStepView]
+    party_size_range: PartySizeRangeView | None
+
+
+def _party_size_range_view(range_: PartySizeRange | None) -> PartySizeRangeView | None:
+    if range_ is None:
+        return None
+    return PartySizeRangeView(
+        min_player_characters=range_.min_player_characters,
+        max_player_characters=range_.max_player_characters,
+    )
+
+
+@router.get("/sessions/{session_id}/creation/steps", response_model=CreationDeclarationView)
+async def get_creation_declaration(
     session_id: str,
     rulebook_id: str = Query(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN),
-) -> list[CreationStepView]:
-    """룰북이 선언한 만들기 항목 목록을 그대로 내려준다(D-05).
+) -> CreationDeclarationView:
+    """룰북이 **선언**한 것 전부를 그대로 내려준다(D-05) — 항목 목록과
+    인원 범위 둘 다. 항목 목록이 세션 중에 안 바뀌는 것과 똑같이 인원
+    범위도 룰북 **콘텐츠**이지 진행 상태가 아니므로 같은 자리에서
+    나온다.
+
+    **왜 폴링(`GET /events`)이 아닌가(G-12.3-2)** — 인원 확정 **전에는**
+    `GameState.creation_rulebook_id`가 아직 `None`이다(세션의 룰북이
+    이 확정과 **함께** 정해진다). 그래서 폴링은 어느 룰북의 범위를
+    실어야 할지 알 방법이 구조적으로 없다. 인원 범위는 확정 **전에**
+    필요한 값이므로, 확정 전에도 답할 수 있는 이 경로에서 나와야 한다.
+
+    **`party_size_range`가 `None`으로 올 수 있다** — 룰북이 아직 선언을
+    안 했을 때다. 등록 검사(`validate_registered_rulebooks`)가 등록된
+    룰북에 대해서는 이를 막지만, 이 응답의 타입은 여전히 열려 있다.
 
     **이 목록은 세션 중에 안 바뀐다** — 1.5초마다 도는 폴링(`GET /events`,
     D-04)에 실으면 안 바뀌는 것을 네 명에게 계속 나르고, AI를 거치는 안내
@@ -186,7 +229,10 @@ async def get_creation_steps(
         rulebook = get_rulebook(rulebook_id)
     except UnknownRulebook as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return [_creation_step_view(step) for step in rulebook.creation_steps]
+    return CreationDeclarationView(
+        steps=[_creation_step_view(step) for step in rulebook.creation_steps],
+        party_size_range=_party_size_range_view(rulebook.party_size_range),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -575,6 +575,24 @@ export interface CreationStepView {
   default_from: string | null;
 }
 
+/** `routes_creation.py::PartySizeRangeView`의 거울 — 룰북이 **선언**한
+ * 인원 범위이지 진행 상태가 아니다(G-12.3-2). `max_player_characters`가
+ * `null`이면 상한이 없다는 뜻이다. */
+export interface PartySizeRangeView {
+  min_player_characters: number;
+  max_player_characters: number | null;
+}
+
+/** `GET .../creation/steps`의 응답 봉투(G-12.3-2) —
+ * `routes_creation.py::CreationDeclarationView`. 룰북이 **선언**한 것
+ * 전부(항목 목록 + 인원 범위)를 담는다 — 둘 다 세션 중에 안 바뀌는
+ * 룰북 콘텐츠다. `party_size_range`는 룰북이 아직 선언하지 않았으면
+ * `null`일 수 있다. */
+export interface CreationDeclarationView {
+  steps: CreationStepView[];
+  party_size_range: PartySizeRangeView | null;
+}
+
 /** `routes_creation.py::SeqResponse` — 사건 하나를 기록한 만들기 경로가
  * 공통으로 돌려주는 순번 하나. */
 export interface SeqResponse {

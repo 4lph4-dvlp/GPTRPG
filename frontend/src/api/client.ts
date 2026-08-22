@@ -17,9 +17,9 @@ import type {
   ConsentResponse,
   CreationAxisValueRecord,
   CreationCompleteResponse,
+  CreationDeclarationView,
   CreationFollowUpResponse,
   CreationHostResponse,
-  CreationStepView,
   DeclareResponse,
   MoveCandidate,
   MyCharacterResponse,
@@ -136,16 +136,18 @@ export function announceCreation(
 }
 
 /**
- * 룰북이 선언한 만들기 항목 목록을 가져온다(D-05) — 세션 중에 안 바뀌므로
- * 폴링에 싣지 않는다(D-04 경계). 사람이 직접 트리거하는 경로가 아니라
- * 화면이 시작할 때 한 번 부르는 순수 조회이므로 공용 `getJson`으로
- * 충분하다.
+ * 룰북이 **선언**한 것 전부(항목 목록 + 인원 범위)를 가져온다(D-05,
+ * G-12.3-2) — 세션 중에 안 바뀌므로 폴링에 싣지 않는다(D-04 경계). 사람이
+ * 직접 트리거하는 경로가 아니라 화면이 시작할 때 한 번 부르는 순수
+ * 조회이므로 공용 `getJson`으로 충분하다. 이름을 `fetchCreationDeclaration`
+ * 으로 두는 이유 — 이제 항목 목록만 주는 함수가 아니라서, 항목만 가리키던
+ * 옛 이름이 사실과 안 맞는다.
  */
-export function fetchCreationSteps(
+export function fetchCreationDeclaration(
   sessionId: string,
   rulebookId: string,
-): Promise<CreationStepView[]> {
-  return getJson<CreationStepView[]>(
+): Promise<CreationDeclarationView> {
+  return getJson<CreationDeclarationView>(
     `${sessionBase(sessionId)}/creation/steps?rulebook_id=${encodeURIComponent(rulebookId)}`,
   );
 }

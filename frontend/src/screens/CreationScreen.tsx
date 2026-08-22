@@ -9,10 +9,15 @@
  * 자리가 없다.
  *
  * **항목 조작이 배선된 자리는 `CreationPane`이다(12.3-04, D-06/D-08/
- * D-09).** 룰북 식별자(`state.creation_rulebook_id`)가 채워지기 전에는
- * 인원이 아직 확정되지 않은 것이라 항목 선언(`GET /creation/steps`)을
- * 아예 부르지 않는다(D-05) — 그동안은 인원 확정 관문(아래)이 화면을
- * 차지한다.
+ * D-09).**
+ *
+ * **인원 확정 전에도 항목 선언을 부른다(G-12.3-2, 12.3-13 Task 1).**
+ * `GET /creation/steps`는 이제 항목 목록과 함께 룰북의 인원 범위
+ * (`party_size_range`)도 봉투로 내려준다(D-05 — 인원 범위는 진행 상태가
+ * 아니라 룰북 선언이라 항목 목록과 같은 자리에서 나온다). 그 범위가
+ * 인원 확정 조작(`PartySizeControl`)의 초기값·`min`·`max`·확정 잠금을
+ * 세운다 — 룰북 식별자(`state.creation_rulebook_id`)가 아직 `null`이면
+ * (인원 미확정) `DEFAULT_RULEBOOK_ID`로 부른다.
  *
  * **인원 확정 관문(12.3-05 Task 1, D-11).** 이 화면이 마운트되는 동안
  * `HOST_BEACON_MS`마다 `claimCreationHost`를 불러 방장 재실 신호를
@@ -39,8 +44,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { announceCreation, claimCreationHost, fetchCreationSteps, fixPartySize } from "../api/client.ts";
-import type { CreationStepView, GameEvent } from "../api/types.ts";
+import { announceCreation, claimCreationHost, fetchCreationDeclaration, fixPartySize } from "../api/client.ts";
+import type { CreationStepView, GameEvent, PartySizeRangeView } from "../api/types.ts";
 import { DiceModal } from "../components/DiceModal.tsx";
 import { HOST_BEACON_MS } from "../config.ts";
 import { COPY } from "../labels.ts";
@@ -52,6 +57,7 @@ import {
   creationRollsFrom,
   gmLinesFrom,
   partySizeGate,
+  partySizeOutOfRange,
 } from "../session/creationView.ts";
 import { usePolling } from "../session/usePolling.ts";
 import { RosterLocked } from "./Notices.tsx";
@@ -67,27 +73,59 @@ const DEFAULT_RULEBOOK_ID = "dungeonworld_like";
  * 나머지는 모달을 건너뛴다. */
 const MAX_QUEUED_ROLLS = 3;
 
+/** `PartySizeRange`(서버, `rules_core/rulebook.py`) 자신의 불변식이
+ * 요구하는 절대 최솟값 — "인원 1명 미만인 룰북은 없다"는 것이지 어떤
+ * 룰북의 실제 최소값이 아니다(던전월드류 3 · 케언 1 · 오픈퀘스트 2와는
+ * 별개의 사실). */
+const ABSOLUTE_MINIMUM_PARTY_SIZE = 1;
+
+/** 룰북이 아직 인원 범위를 선언하지 않았을 때(`party_size_range === null`)
+ * 조작이 떨어지는 값 — 절대 최소 · 상한 없음(G-12.3-2 ⑤). 이 갈래로
+ * 떨어져도 화면이 멈추지 않고, 그 다음 판단은 여전히 서버가 한다(Task 2가
+ * 그 거절을 사람 말로 만든다). 화면이 특정 룰북 숫자를 지어내지 않는다.
+ */
+const UNDECLARED_PARTY_SIZE_RANGE: PartySizeRangeView = {
+  min_player_characters: ABSOLUTE_MINIMUM_PARTY_SIZE,
+  max_player_characters: null,
+};
+
 /**
- * 방장에게만 보이는 인원 확정 조작(D-11) — 인원 범위(예: 3~5명) 숫자를
- * 여기 하드코딩하지 않는다. 사람이 숫자를 고르면 서버가 룰북 범위
- * (`validate_party_size`)와 절대 상한(`PARTY_MEMBER_LIMIT`)을 검사하고,
- * 범위 밖이면 409 + `detail`로 거절한 문장을 그대로 보여준다(D-15).
+ * 방장에게만 보이는 인원 확정 조작(D-11).
+ *
+ * **오늘 이 자리에 적혀 있던 「인원 범위 숫자를 여기 하드코딩하지
+ * 않는다」는 의도가 옳았는데 지켜지지 않았다** — 확정 전에 룰북 범위를
+ * 알 경로가 없어서 최소 `1`을 골랐고, 던전월드류(최소 3)에서는 그 초기값
+ * 자체가 이미 거절당할 값이었다(G-12.3-2). 이제 `range` props가 그 경로다
+ * — 초기값·`min`·`max`·확정 잠금이 전부 서버가 내려준 범위에서 나온다.
+ * 사람이 숫자를 고르면 서버가 여전히 룰북 범위(`validate_party_size`)와
+ * 절대 상한(`PARTY_MEMBER_LIMIT`)을 검사하고, 범위 밖이면 409 + `detail`로
+ * 거절한 문장을 그대로 보여준다(D-15) — 이 조작의 잠금은 편의이지 강제가
+ * 아니다.
  */
 function PartySizeControl({
   sessionId,
   rulebookId,
   browserId,
+  range,
   onDone,
   onError,
 }: {
   sessionId: string;
   rulebookId: string;
   browserId: string;
+  range: PartySizeRangeView;
   onDone: () => void;
   onError: (message: string) => void;
 }) {
-  const [count, setCount] = useState(1);
+  const [count, setCount] = useState(range.min_player_characters);
   const [busy, setBusy] = useState(false);
+
+  function clampToRange(value: number): number {
+    const atLeastMin = Math.max(range.min_player_characters, value);
+    return range.max_player_characters !== null
+      ? Math.min(range.max_player_characters, atLeastMin)
+      : atLeastMin;
+  }
 
   async function confirm(): Promise<void> {
     setBusy(true);
@@ -106,25 +144,28 @@ function PartySizeControl({
       <p className="t-caps">{COPY.creationPartySizeTitle}</p>
       <input
         type="number"
-        min={1}
+        min={range.min_player_characters}
+        {...(range.max_player_characters !== null ? { max: range.max_player_characters } : {})}
         value={count}
         disabled={busy}
-        // 값을 지우거나(→ Number("") === 0) 음수·비숫자를 넣어도 1 미만으로
-        // 못 내려가게 여기서 보정한다(WR-02, 12.3-REVIEW.md). 서버의
-        // Field(ge=1)는 이 입력을 라우트 핸들러에 닿기 전에 걸러 422의
-        // detail이 문자열이 아닌 오류 객체 배열로 오고, postJsonWithDetail이
-        // 그 모양을 못 읽어 D-15가 정한 「서버가 보낸 이유를 그대로
-        // 보여준다」가 이 한 경우에만 성립하지 않는다 — 그래서 이 값
-        // 하나만 화면이 막는다. 룰북 범위·절대 상한 검사는 여전히 서버
-        // 몫이고 화면으로 안 옮긴다.
-        onChange={(event) => setCount(Math.max(1, Math.trunc(Number(event.target.value)) || 1))}
+        // 값을 지우거나(→ Number("") === 0) 음수·비숫자를 넣어도 범위
+        // 양끝(min/max) 밖으로 못 내려가거나 못 넘어가게 여기서 보정한다
+        // (G-12.3-2, WR-02의 뒤를 잇는다). 서버의 Field(ge=1)는 이 입력을
+        // 라우트 핸들러에 닿기 전에 걸러 422의 detail이 문자열이 아닌
+        // 오류 객체 배열로 오고, postJsonWithDetail이 그 모양을 못 읽어
+        // D-15가 정한 「서버가 보낸 이유를 그대로 보여준다」가 이 한
+        // 경우에만 성립하지 않는다 — 그래서 이 값 하나만 화면이 막는다.
+        // 룰북 범위·절대 상한 검사는 여전히 서버 몫이고 화면으로 안
+        // 옮긴다.
+        onChange={(event) => setCount(clampToRange(Math.trunc(Number(event.target.value)) || range.min_player_characters))}
       />
       <button
         type="button"
         className="btn btn--primary btn--wide"
-        // count가 1 미만이면 값 자체를 보고 잠근다(WR-02) — 위 onChange
-        // 보정과 이중으로 막아, 어떤 경로로든 「0명」 요청이 서버에 안 간다.
-        disabled={busy || count < 1}
+        // 서버 판정의 거울(partySizeOutOfRange)로 잠근다 — 어떤 경로로든
+        // 범위 밖 요청이 서버에 안 간다. 룰북 숫자는 여기 없다: range가
+        // 인자로 들어온다(G-12.3-2).
+        disabled={busy || partySizeOutOfRange(count, range)}
         onClick={() => void confirm()}
       >
         {COPY.creationPartySizeConfirm}
@@ -147,6 +188,7 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
   const [error, setError] = useState<string | null>(null);
   const [steps, setSteps] = useState<CreationStepView[]>([]);
   const [stepsLoaded, setStepsLoaded] = useState(false);
+  const [partySizeRange, setPartySizeRange] = useState<PartySizeRangeView | null>(null);
   const [rollQueue, setRollQueue] = useState<CreationRollQueueItem[]>([]);
   const [youAreHost, setYouAreHost] = useState(false);
   const shownRef = useRef<Set<number>>(new Set());
@@ -175,17 +217,20 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
   const feed = usePolling(sessionId, onLiveEvents);
 
   // 세션 중에 안 바뀌는 값이라 rulebookId 하나에 대해 한 번만 부른다(D-05).
-  // 인원이 아직 확정되지 않았으면(creation_rulebook_id가 null) 아예 안 부른다.
   const rulebookId = feed.state?.creation_rulebook_id ?? null;
+  // **인원 확정 전에도 부른다(G-12.3-2)** — 옛 코드는 rulebookId가
+  // null이면(인원 미확정) 아예 안 불렀다. 이 응답이 이제 인원 범위도
+  // 함께 실어 오고 그 값이 확정 **전에** 필요하므로, 확정 전에는
+  // DEFAULT_RULEBOOK_ID로 부른다. 이 조회는 AI를 안 부르는 단순 조회라
+  // (CR-02, 12.3-REVIEW.md) 확정 전에 불러도 비용이 없다.
+  const effectiveRulebookId = rulebookId ?? DEFAULT_RULEBOOK_ID;
   useEffect(() => {
-    if (rulebookId === null) {
-      return;
-    }
     let alive = true;
-    fetchCreationSteps(sessionId, rulebookId)
-      .then((list) => {
+    fetchCreationDeclaration(sessionId, effectiveRulebookId)
+      .then((declaration) => {
         if (alive) {
-          setSteps(list);
+          setSteps(declaration.steps);
+          setPartySizeRange(declaration.party_size_range);
           setStepsLoaded(true);
         }
       })
@@ -193,7 +238,7 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
     return () => {
       alive = false;
     };
-  }, [sessionId, rulebookId]);
+  }, [sessionId, effectiveRulebookId]);
 
   // 굴림 모달에 보일 이름 — `head.creationStep.character_id`를 찾는다.
   // `feed.state`가 갱신될 때마다 새로 계산되므로 큐잉 시점(onLiveEvents)이
@@ -312,13 +357,21 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
         {gate === "fix" ? (
           <div>
             {hostTookOver ? <p className="t-label">{COPY.creationHostTookOver}</p> : null}
-            <PartySizeControl
-              sessionId={sessionId}
-              rulebookId={DEFAULT_RULEBOOK_ID}
-              browserId={myBrowserId}
-              onDone={feed.pollNow}
-              onError={setError}
-            />
+            {stepsLoaded ? (
+              <PartySizeControl
+                sessionId={sessionId}
+                rulebookId={effectiveRulebookId}
+                browserId={myBrowserId}
+                range={partySizeRange ?? UNDECLARED_PARTY_SIZE_RANGE}
+                onDone={feed.pollNow}
+                onError={setError}
+              />
+            ) : (
+              // 여기는 실제로 조회(항목 선언 + 인원 범위)가 진행 중인
+              // 자리라 「불러오는 중」이 사실이다 — G-12.3-5가 문제 삼은
+              // 「진행 중이 아닌데 진행 중이라고 말하는」 자리와 다르다.
+              <p className="t-label">{COPY.loading}</p>
+            )}
           </div>
         ) : gate === "waiting_for_host" ? (
           <p className="t-label">{COPY.creationWaitingForHost}</p>
@@ -352,10 +405,10 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
         {error !== null ? <p className="t-label">{error}</p> : null}
 
         {/* CR-02 (12.3-REVIEW.md): stepsLoaded는 GET /creation/steps 조회가
-            끝났는지일 뿐 안내 여부와 무관하다 — fetchCreationSteps는 AI를
-            안 부르는 단순 조회라 안내를 누르기도 전에 이미 끝나는 것이
-            보통이었다. 이 버튼은 "아직 안내가 없다"(gmLines가 비어 있다)
-            로만 켜진다 — stepsLoaded와 별개로, CreationPane이 이미
+            끝났는지일 뿐 안내 여부와 무관하다 — fetchCreationDeclaration은
+            AI를 안 부르는 단순 조회라 안내를 누르기도 전에 이미 끝나는
+            것이 보통이었다. 이 버튼은 "아직 안내가 없다"(gmLines가 비어
+            있다)로만 켜진다 — stepsLoaded와 별개로, CreationPane이 이미
             렌더되고 있어도 안내가 없으면 계속 보인다. */}
         {gate === "done" && gmLines.length === 0 ? (
           <button type="button" disabled={pending} onClick={() => void announce()}>

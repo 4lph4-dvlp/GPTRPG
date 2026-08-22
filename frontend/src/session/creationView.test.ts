@@ -12,6 +12,7 @@ import type {
   CreationStepView,
   GameEvent,
   GameStateView,
+  PartySizeRangeView,
 } from "../api/types.ts";
 import {
   canEdit,
@@ -24,6 +25,7 @@ import {
   myStepValues,
   nextUnfilledStep,
   partySizeGate,
+  partySizeOutOfRange,
   pendingConsenters,
   remainingFixedValues,
   shouldNominateNext,
@@ -373,6 +375,32 @@ describe("partySizeGate", () => {
   it("아직 인원도 방장도 없으면 waiting_for_claim이다", () => {
     const state = baseState({ party_size_fixed: null, creation_host_claimed: false });
     expect(partySizeGate(state, false)).toBe("waiting_for_claim");
+  });
+});
+
+describe("partySizeOutOfRange (G-12.3-2)", () => {
+  // 이 숫자들은 순수한 시험 입력이다 — 어떤 룰북의 실제 범위라고 적지
+  // 않는다(그렇게 적는 순간 화면 시험이 특정 룰북 지식을 갖게 된다).
+  const RANGE: PartySizeRangeView = { min_player_characters: 3, max_player_characters: 5 };
+  const UNBOUNDED_RANGE: PartySizeRangeView = { min_player_characters: 1, max_player_characters: null };
+
+  it("범위 안이면 거짓이다", () => {
+    expect(partySizeOutOfRange(3, RANGE)).toBe(false);
+    expect(partySizeOutOfRange(4, RANGE)).toBe(false);
+    expect(partySizeOutOfRange(5, RANGE)).toBe(false);
+  });
+
+  it("최소 미만이면 참이다", () => {
+    expect(partySizeOutOfRange(2, RANGE)).toBe(true);
+  });
+
+  it("상한 초과면 참이다", () => {
+    expect(partySizeOutOfRange(6, RANGE)).toBe(true);
+  });
+
+  it("상한이 없는 범위(null)에서는 아무리 커도 거짓이다", () => {
+    expect(partySizeOutOfRange(1, UNBOUNDED_RANGE)).toBe(false);
+    expect(partySizeOutOfRange(1_000_000, UNBOUNDED_RANGE)).toBe(false);
   });
 });
 

@@ -1391,14 +1391,14 @@ def test_creation_steps_for_dungeonworld_matches_declaration_order(web_client):
 
     response = _fetch_creation_steps(web_client, rulebook_id="dungeonworld_like")
     assert response.status_code == 200
-    step_ids = [step["step_id"] for step in response.json()]
+    step_ids = [step["step_id"] for step in response.json()["steps"]]
     assert step_ids == [decl.step_id for decl in DUNGEONWORLD_CREATION_STEPS]
 
 
 def test_creation_steps_for_cairn_carries_dice_expr(web_client):
     response = _fetch_creation_steps(web_client, rulebook_id="cairn")
     assert response.status_code == 200
-    steps_by_id = {step["step_id"]: step for step in response.json()}
+    steps_by_id = {step["step_id"]: step for step in response.json()["steps"]}
     assert steps_by_id["abilities"]["dice_expr"] == "3d6"
     assert steps_by_id["hit_protection"]["dice_expr"] == "1d6"
 
@@ -1406,7 +1406,7 @@ def test_creation_steps_for_cairn_carries_dice_expr(web_client):
 def test_creation_steps_for_openquest_carries_point_budget(web_client):
     response = _fetch_creation_steps(web_client, rulebook_id="openquest")
     assert response.status_code == 200
-    steps_by_id = {step["step_id"]: step for step in response.json()}
+    steps_by_id = {step["step_id"]: step for step in response.json()["steps"]}
     resistances = steps_by_id["skills_resistances"]
     assert resistances["point_budget"] == 50
     assert resistances["per_target_max"] == 30
@@ -1424,7 +1424,9 @@ def test_creation_steps_response_never_carries_per_character_progress(web_client
     character_id인 값)가 아니다."""
     response = _fetch_creation_steps(web_client, rulebook_id="dungeonworld_like")
     assert response.status_code == 200
-    steps = response.json()
+    body = response.json()
+    assert set(body.keys()) == {"steps", "party_size_range"}
+    steps = body["steps"]
     assert isinstance(steps, list)
     for step in steps:
         assert set(step.keys()) == {
@@ -1446,3 +1448,36 @@ def test_creation_steps_response_never_carries_per_character_progress(web_client
             "depends_on",
             "default_from",
         }
+
+
+def test_creation_declaration_carries_the_rulebook_party_size_range(web_client):
+    """G-12.3-2 — 인원 범위가 확정 **전에** 화면까지 실려야 한다. 기대값은
+    손으로 다시 적지 않고 룰북 모듈 상수에서 가져온다 — 세 룰북이 서로
+    다른 값(3~5 · 1~4 · 2~6)이라는 것이 이 gap의 요점이고, 시험이 숫자를
+    다시 적으면 룰북이 바뀔 때 시험만 옳게 남는다."""
+    from gptrpg.rulebooks.cairn import CAIRN_PARTY_SIZE_RANGE
+    from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_PARTY_SIZE_RANGE
+    from gptrpg.rulebooks.openquest import OPENQUEST_PARTY_SIZE_RANGE
+
+    for rulebook_id, expected_range in (
+        ("dungeonworld_like", DUNGEONWORLD_PARTY_SIZE_RANGE),
+        ("cairn", CAIRN_PARTY_SIZE_RANGE),
+        ("openquest", OPENQUEST_PARTY_SIZE_RANGE),
+    ):
+        response = _fetch_creation_steps(web_client, rulebook_id=rulebook_id)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["party_size_range"] == dataclasses.asdict(expected_range)
+
+
+def test_creation_declaration_still_carries_steps_in_declaration_order(web_client):
+    """봉투(`{steps, party_size_range}`)로 바뀐 뒤에도 항목 목록은
+    선언 순서 그대로다 — 오늘 있는 시험이 지키던 성질을 새 모양에서
+    다시 못박는다."""
+    from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_CREATION_STEPS
+
+    response = _fetch_creation_steps(web_client, rulebook_id="dungeonworld_like")
+    assert response.status_code == 200
+    body = response.json()
+    step_ids = [step["step_id"] for step in body["steps"]]
+    assert step_ids == [decl.step_id for decl in DUNGEONWORLD_CREATION_STEPS]

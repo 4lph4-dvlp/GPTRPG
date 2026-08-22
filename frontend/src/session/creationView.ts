@@ -20,6 +20,7 @@ import type {
   CreationStepView,
   GameEvent,
   GameStateView,
+  PartySizeRangeView,
 } from "../api/types.ts";
 
 /** `creation_gm_spoke` 사건 하나를 화면이 그리기 좋은 모양으로 옮긴 것. */
@@ -172,6 +173,28 @@ export function partySizeGate(state: GameStateView, youAreHost: boolean): PartyS
     return "fix";
   }
   return state.creation_host_claimed ? "waiting_for_host" : "waiting_for_claim";
+}
+
+/**
+ * 「인원 `count`가 서버가 내려준 범위 밖인가」(G-12.3-2) — `validate_party_size`
+ * (`rules_core/rulebook.py`)와 **정확히 같은 규칙**의 거울이다: 최소
+ * 미만이면 참, 상한이 있는데 그보다 크면 참, 경계는 양쪽 포함.
+ *
+ * (가) 이 함수는 **서버 판정의 거울이지 대체물이 아니다** — 마지막 말은
+ * 언제나 서버가 하고(D-15), 이 함수는 사람이 범위 밖 값을 애초에 못
+ * 고르게 돕는 것뿐이다. (나) 그래서 룰북 숫자를 **하나도 안 갖는다** —
+ * 범위를 인자로 받는다. 특정 룰북에 편향된 값이 이 파일에 들어오면
+ * 안 된다. (다) 진행 상태를 계산하지 않는다(D-04 경계) — 서버가 내려준
+ * 범위와 사람이 지금 고른 숫자만 본다.
+ */
+export function partySizeOutOfRange(count: number, range: PartySizeRangeView): boolean {
+  if (count < range.min_player_characters) {
+    return true;
+  }
+  if (range.max_player_characters !== null && count > range.max_player_characters) {
+    return true;
+  }
+  return false;
 }
 
 /** `consentGate`가 돌려주는 네 갈래(D-03/D-11, 12.3-05 Task 2). 「not_ready」는
