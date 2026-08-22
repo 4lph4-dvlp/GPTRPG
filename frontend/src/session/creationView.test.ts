@@ -20,6 +20,7 @@ import {
   type CreationStepRow,
   creationErrorMessage,
   creationRollsFrom,
+  creationTurn,
   gmLinesFrom,
   isMyTurn,
   myStepValues,
@@ -563,6 +564,52 @@ describe("첫 안내를 부를 때인지 판정한다 (G-12.3-5)", () => {
   it("명단이 이미 잠겼으면(party_roster !== null) 거짓이다 — 만들기가 끝난 세션이다", () => {
     const state = baseState({ party_size_fixed: 3, party_roster: ["hero-1", "hero-2", "hero-3"] });
     expect(shouldAnnounce(state, false, false)).toBe(false);
+  });
+});
+
+describe("지금 누구 차례인지 판정한다 (G-12.3-7)", () => {
+  const NAME_STEP = stepDecl({ step_id: "name", provides_display_name: true });
+  const LOOK_STEP = stepDecl({ step_id: "look", provides_display_name: false });
+  const STEPS = [NAME_STEP, LOOK_STEP];
+
+  it("아직 아무도 지목되지 않았으면 아무 차례도 아니다", () => {
+    const state = baseState({ creation_current_speaker_id: null });
+    expect(creationTurn(state, "hero-1", STEPS)).toEqual({ kind: "none" });
+  });
+
+  it("내가 지목됐으면 내 차례다", () => {
+    const state = baseState({ creation_current_speaker_id: "hero-1" });
+    expect(creationTurn(state, "hero-1", STEPS)).toEqual({ kind: "me" });
+  });
+
+  it("남이 지목됐고 그 사람이 이미 완성됐으면 그 이름을 낸다", () => {
+    const state = baseState({
+      creation_current_speaker_id: "hero-2",
+      creation_characters: [
+        { character_id: "hero-2", display_name: "나리", consented: false, required_steps_filled: true },
+      ],
+    });
+    expect(creationTurn(state, "hero-1", STEPS)).toEqual({ kind: "other", name: "나리" });
+  });
+
+  it("남이 지목됐고 이름 항목을 아직 안 채웠으면 이름이 없다고 답한다 — 없는 이름을 지어내지 않는다", () => {
+    const state = baseState({
+      creation_current_speaker_id: "hero-2",
+      creation_characters: [],
+      creation_step_values: [],
+    });
+    expect(creationTurn(state, "hero-1", STEPS)).toEqual({ kind: "other", name: null });
+  });
+
+  it("남이 지목됐고 이름 항목을 이미 채웠으면 완성 전이라도 그 이름을 낸다", () => {
+    const state = baseState({
+      creation_current_speaker_id: "hero-2",
+      creation_characters: [],
+      creation_step_values: [
+        stepValue({ character_id: "hero-2", step_id: "name", text_value: "가온" }),
+      ],
+    });
+    expect(creationTurn(state, "hero-1", STEPS)).toEqual({ kind: "other", name: "가온" });
   });
 });
 

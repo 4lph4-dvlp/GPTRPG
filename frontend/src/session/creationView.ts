@@ -288,6 +288,60 @@ export function shouldAnnounce(
   return true;
 }
 
+/**
+ * `creationTurn`이 돌려주는 세 갈래(G-12.3-7) — 「아무 차례도 아님」·
+ * 「내 차례」·「남의 차례(이름 또는 이름 없음)」.
+ */
+export type CreationTurn =
+  | { kind: "none" }
+  | { kind: "me" }
+  | { kind: "other"; name: string | null };
+
+/**
+ * 지금 누구 차례인지(G-12.3-7) — 판단은 전부 서버가 내려준 값을 읽는
+ * 것으로 끝난다(D-04). 다음이 누구일지 화면이 계산하지 않는다.
+ *
+ * 순서는 **정해진 규칙이 아니라 GM의 선택**이고(D-06, `nominate_speaker`),
+ * 그 사실이 화면에 드러나야 사람이 「규칙이 있는데 내가 못 읽는 것인가」로
+ * 헤매지 않는다 — `labels.ts::creationTurnLabel`이 「순서는 진행자가
+ * 정해요」를 문구에 넣는 이유다.
+ *
+ * **이름이 없을 수 있는 것이 정상이다** — 서버가 이름을 주는 것은 완성된
+ * 캐릭터뿐이고(`state.creation_characters`), 이름 항목이 마지막인
+ * 룰북에서는 지목받은 사람의 이름이 대개 아직 없다. **없는 이름을
+ * 지어내지 않는다** — 식별자(`pc-xxxxxxxx`)를 대신 보이지 않는다. 그
+ * 사람이 이미 항목을 채웠으면(`provides_display_name` 항목의
+ * `creation_step_values`) 완성 전이라도 그 이름을 쓴다.
+ *
+ * 「아무 차례도 아님」과 「남의 차례」를 가르는 것이 이번 gap의 절반이다
+ * — 오늘은 지목 전에도 「다른 사람의 차례예요」가 떴다.
+ */
+export function creationTurn(
+  state: GameStateView,
+  myCharacterId: string,
+  steps: CreationStepView[],
+): CreationTurn {
+  const speakerId = state.creation_current_speaker_id;
+  if (speakerId === null) {
+    return { kind: "none" };
+  }
+  if (speakerId === myCharacterId) {
+    return { kind: "me" };
+  }
+  const finished = state.creation_characters.find((character) => character.character_id === speakerId);
+  if (finished !== undefined) {
+    return { kind: "other", name: finished.display_name };
+  }
+  const nameStepId = steps.find((step) => step.provides_display_name)?.step_id;
+  const nameValue =
+    nameStepId !== undefined
+      ? state.creation_step_values.find(
+          (value) => value.character_id === speakerId && value.step_id === nameStepId,
+        )
+      : undefined;
+  return { kind: "other", name: nameValue?.text_value ?? null };
+}
+
 /** 아직 동의를 안 누른 캐릭터의 `display_name` 목록이다(D-03) —
  * `character_id`가 아니라 사람이 알아볼 이름을 돌려준다. 순서는
  * `state.creation_characters` 순서를 그대로 따른다. */

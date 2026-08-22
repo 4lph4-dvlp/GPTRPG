@@ -6,6 +6,8 @@
  * 어휘를 안다고 가정하지 않는다.
  */
 
+import type { CreationTurn } from "./session/creationView.ts";
+
 /** `src/gptrpg/rulebooks/dungeonworld_like.py`의 등급 세 개 +
  * `src/gptrpg/rulebooks/openquest.py`의 등급 네 개(IN-01, 12.1-REVIEW.md).
  * OpenQuest는 아직 실제 플레이어 캐릭터를 만드는 경로가 없어 당장
@@ -283,7 +285,22 @@ export const COPY = {
   creationEdit: "고치기",
   creationRoll: "굴리기",
   creationMyTurn: "내 차례예요",
-  creationOthersTurn: "다른 사람의 차례예요 — 자유롭게 끼어들어 말할 수 있어요",
+  /**
+   * 차례 문구의 공통 꼬리(G-12.3-7, D-06/D-08) — 「순서는 진행자가
+   * 정해요」를 넣는 이유: 사장님이 「이 차례의 순서를 모르겠어」라고 적은
+   * 것은 순서가 GM의 선택이라는 것을 몰라서다(D-06,
+   * `nominate_speaker`). 「자유롭게 끼어들어 말할 수 있어요」는 D-08(남의
+   * 차례에도 말은 항상 열려 있다)을 그대로 옮긴 것 — 이 계획은 그
+   * 노출 규칙 자체를 바꾸지 않는다(WR-01은 다음 라운드).
+   */
+  creationTurnSuffix: "차례예요 — 순서는 진행자가 정해요. 자유롭게 끼어들어 말할 수 있어요",
+  /**
+   * 이름을 모를 때 차례 문구의 주어(G-12.3-7) — 서버가 이름을 주는 것은
+   * **완성된** 캐릭터뿐이고, 이름 항목이 마지막인 룰북(예: 던전월드류)에서는
+   * 지목받은 사람의 이름이 대개 아직 없다. 이때 식별자(`pc-xxxxxxxx`)를
+   * 대신 보이지 않고 이 문구를 쓴다 — 없는 이름을 지어내지 않는다.
+   */
+  creationUnknownNameSubject: "아직 이름을 안 정한 분",
   creationInterjectPlaceholder: "끼어들어 말하기…",
   creationDerivedAuto: "자동 계산",
   creationStepKindUnsupported: "이 룰북 항목은 아직 화면에서 채울 수 없어요",
@@ -310,3 +327,25 @@ export const COPY = {
   creationConsentDone: "동의함",
   creationPickStepToReopen: "다시 열 항목을 골라 주세요",
 } as const;
+
+/**
+ * 「지금 누구 차례인가」를 화면 문구 하나로 조립한다(G-12.3-7) —
+ * `gradeLabel`/`statLabel` 계열이 이미 쓰는 관례(사전이 아니라 로직이
+ * 필요한 조립은 export 함수로 둔다)를 그대로 따른다.
+ *
+ * 「아무 차례도 아님」이면 `null`이다 — 화면이 아무 말도 안 한다. 오늘은
+ * 지목 전에도 「다른 사람의 차례예요」가 떠서 사람을 기다리게 만들었다
+ * (G-12.3-7의 절반).
+ */
+export function creationTurnLabel(turn: CreationTurn): string | null {
+  switch (turn.kind) {
+    case "none":
+      return null;
+    case "me":
+      return COPY.creationMyTurn;
+    case "other": {
+      const subject = turn.name ?? COPY.creationUnknownNameSubject;
+      return `${subject} ${COPY.creationTurnSuffix}`;
+    }
+  }
+}

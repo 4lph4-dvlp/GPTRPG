@@ -57,13 +57,14 @@ import type {
   GameEvent,
   GameStateView,
 } from "../api/types.ts";
-import { COPY, statLabel } from "../labels.ts";
+import { COPY, creationTurnLabel, statLabel } from "../labels.ts";
 import { MAX_RAW_TEXT_LEN } from "../config.ts";
 import {
   canEdit,
   consentGate,
   type CreationStepRow,
   creationErrorMessage,
+  creationTurn,
   gmLinesFrom,
   isMyTurn,
   nextUnfilledStep,
@@ -646,9 +647,15 @@ export function CreationPane({
 
   const followUpGateVisible = myTurn && editingStepId === null && nextUnfilledStep(rows) === null;
 
+  // 대화판 첫 줄의 차례 문구(G-12.3-7) — 오늘은 아무도 지목되지 않은
+  // 동안에도 「다른 사람의 차례예요」가 떠서 사람을 기다리게 만들었다.
+  // 이제 판정이 `creationView.ts`의 시험된 순수 함수(`creationTurn`)에서
+  // 오고, 「아무 차례도 아님」이면 이 줄 자체를 안 그린다.
+  const turnLabel = creationTurnLabel(creationTurn(state, myCharacterId, steps));
+
   return (
     <section className="pane pane--chat">
-      <p className="t-label">{myTurn ? COPY.creationMyTurn : COPY.creationOthersTurn}</p>
+      {turnLabel !== null ? <p className="t-label">{turnLabel}</p> : null}
 
       <div className="chat">
         {conversation.length === 0 ? (
