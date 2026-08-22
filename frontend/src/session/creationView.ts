@@ -253,6 +253,41 @@ export function shouldNominateNext(state: GameStateView, announced: boolean): bo
   return true;
 }
 
+/**
+ * 지금 첫 안내를 부를 때인가(G-12.3-5, D-06) — `shouldNominateNext`와
+ * **같은 종류의 부트스트랩 판정**이고, 그 함수의 docstring이 이미 적은
+ * 이유(이 저장소는 RTL을 안 쓰고 순수 함수만 시험하므로 이 부트스트랩
+ * 판단을 컴포넌트 안에 두면 시험이 그 조건을 볼 수 없다) 때문에 여기
+ * 있다 — 안내만 그 규율에서 빠져 있었다.
+ *
+ * 실패 뒤에는 거짓인 이유: 자동 재시도 고리를 만들지 않는다(D-13 ②) —
+ * 503(운영자 설정 문제)은 기다려도 안 되는 상황이라, 자동 재시도는 원인을
+ * 감추고 AI 호출만 폭주시킨다. 실패는 사람에게 말하고 멈춘다.
+ *
+ * 진행 상태를 다시 계산하지 않는다(D-04) — 서버가 내려준 값(`party_size_
+ * fixed`·`party_roster`)을 읽고 고르기만 하고, `announced`·
+ * `lastAttemptFailed`도 호출부가 이미 계산한 값을 그대로 받는다.
+ */
+export function shouldAnnounce(
+  state: GameStateView,
+  announced: boolean,
+  lastAttemptFailed: boolean,
+): boolean {
+  if (state.party_size_fixed === null) {
+    return false;
+  }
+  if (announced) {
+    return false;
+  }
+  if (lastAttemptFailed) {
+    return false;
+  }
+  if (state.party_roster !== null) {
+    return false;
+  }
+  return true;
+}
+
 /** 아직 동의를 안 누른 캐릭터의 `display_name` 목록이다(D-03) —
  * `character_id`가 아니라 사람이 알아볼 이름을 돌려준다. 순서는
  * `state.creation_characters` 순서를 그대로 따른다. */

@@ -58,6 +58,7 @@ import {
   gmLinesFrom,
   partySizeGate,
   partySizeOutOfRange,
+  shouldAnnounce,
 } from "../session/creationView.ts";
 import { usePolling } from "../session/usePolling.ts";
 import { RosterLocked } from "./Notices.tsx";
@@ -327,6 +328,78 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
     }
   }, [partyRoster, myCharacterId, onEntered]);
 
+  // gmLines/gate 계산을 이른 반환(`if (partyRoster !== null)`) 위로
+  // 옮긴다 — 아래 자동 안내 effect가 훅 규칙(조건부 반환보다 먼저
+  // 선언)을 지키려면 이 값들도 함께 올라와야 한다. `feed`에서 나오는
+  // 순수 계산이라 옮겨도 결과는 안 바뀐다. `gate === "done"`은
+  // `state.party_size_fixed !== null`과 같은 값이다(`partySizeGate`의
+  // 첫 줄) — 아래 `shouldAnnounce`가 `gate`가 아니라 상태를 직접 읽는
+  // 이유는 `shouldNominateNext`가 이미 같은 값을 같은 방식으로 읽고
+  // 있어서다(짝을 맞춘다), 렌더 쪽은 오늘처럼 `gate`를 계속 쓴다.
+  const gmLines = gmLinesFrom(feed.events);
+  // GM이 안내(`kind: "announce"`)를 이미 냈는가 — `CreationPane.tsx`가
+  // 지목 자동 호출(`shouldNominateNext`)에 쓰는 것과 같은 값·같은
+  // 방식이다.
+  const announced = gmLines.some((line) => line.kind === "announce");
+  const gate = feed.state !== null ? partySizeGate(feed.state, youAreHost) : null;
+
+  const announce = useCallback(async (): Promise<void> => {
+    setPending(true);
+    setError(null);
+    try {
+      await announceCreation(sessionId, rulebookId ?? DEFAULT_RULEBOOK_ID);
+      feed.pollNow();
+    } catch (err) {
+      setError(creationErrorMessage(err));
+    } finally {
+      setPending(false);
+    }
+  }, [sessionId, rulebookId, feed.pollNow]);
+
+  // 첫 안내를 화면이 스스로 부른다(G-12.3-5, D-12) — 오늘 `announce()`에는
+  // 자동 호출이 하나도 없어 **아무도 안 누르면 아무 일도 안 일어났다**.
+  // 그런데 화면은 「불러오는 중」과 「다른 사람의 차례」로 기다리라고
+  // 말해서 사람이 영원히 기다렸다(G-12.3-5). 여러 탭이 동시에 이 effect를
+  // 타도 서버의 `_gm_dedupe_key("announce")`가 세션당 한 번으로 접으므로
+  // 안전하다(D-12) — 12.3-06이 첫 지목의 같은 교착에 세운 것과 같은
+  // 규율이다(`CreationPane.tsx`의 `nominatingRef` effect). 발동 조건을
+  // 여기서 새로 쓰지 않는다 — `shouldAnnounce` 하나만 부른다.
+  const announcingRef = useRef(false);
+  useEffect(() => {
+    if (feed.state === null) {
+      // 첫 폴링 전에는 판단할 재료가 없다 — `null`을 「부를 때다」로
+      // 바꿔 읽지 않는다(`isMyTurn`이 세운 같은 규율).
+      return;
+    }
+    if (!shouldAnnounce(feed.state, announced, error !== null) || announcingRef.current) {
+      return;
+    }
+    announcingRef.current = true;
+    void announce().finally(() => {
+      announcingRef.current = false;
+    });
+    // 자동 재시도 고리를 만들지 않는다 — 실패는 `error`에 남고, 그 값이
+    // `shouldAnnounce`의 세 번째 인자로 들어가 판정을 거짓으로 만든다.
+    // 사람이 재시도 단추를 누르면 `announce()`가 맨 앞에서 `error`를
+    // 비우므로 다시 시도할 수 있다. AI 호출이 폭주하고 실패 원인이
+    // 화면에서 사라지는 것을 막는다(D-13 ②).
+    //
+    // 의존성은 원시값만(`sessionId`·`rulebookId`·`party_size_fixed`·
+    // `party_roster !== null`·`announced`·`error !== null`) + `announce`
+    // 하나다 — `shouldAnnounce`가 실제로 읽는 값과 일치해야 한다(하나라도
+    // 빠지면 조건이 참이 되는 순간을 effect가 못 본다). `feed.state`
+    // 자체나 배열/객체를 넣으면 폴링마다 새 참조가 와서 effect가 매번
+    // 다시 돈다(자동 지목 effect·방장 재실 신호 effect와 같은 규율).
+  }, [
+    sessionId,
+    rulebookId,
+    feed.state?.party_size_fixed,
+    feed.state?.party_roster !== null,
+    announced,
+    error !== null,
+    announce,
+  ]);
+
   if (partyRoster !== null) {
     if (!partyRoster.includes(myCharacterId)) {
       return <RosterLocked />;
@@ -342,22 +415,7 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
     );
   }
 
-  async function announce(): Promise<void> {
-    setPending(true);
-    setError(null);
-    try {
-      await announceCreation(sessionId, rulebookId ?? DEFAULT_RULEBOOK_ID);
-      feed.pollNow();
-    } catch (err) {
-      setError(creationErrorMessage(err));
-    } finally {
-      setPending(false);
-    }
-  }
-
-  const gmLines = gmLinesFrom(feed.events);
   const head = rollQueue[0];
-  const gate = feed.state !== null ? partySizeGate(feed.state, youAreHost) : null;
 
   return (
     <div className="screen">
@@ -391,7 +449,31 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
         ) : gate === "waiting_for_host" ? (
           <p className="t-label">{COPY.creationWaitingForHost}</p>
         ) : gate === "done" ? (
-          feed.state !== null && rulebookId !== null && stepsLoaded ? (
+          !announced ? (
+            // 「기다리라는 말」과 「누르라는 말」과 「불러오는 중」이
+            // 동시에 뜨던 자리(G-12.3-5) — 안내가 없는 동안은 이 블록
+            // **하나만** 그린다: 실패했으면 그 이유 + 재시도 단추,
+            // 아니면 진행 중 문구 하나. `gmLines.length === 0`이
+            // 아니라 `announced`를 쓰는 이유: 안내가 흐름의 첫 말이라
+            // 두 값이 실제로는 같지만, 자동 호출을 결정하는 값과
+            // 표시를 결정하는 값이 하나여야 어긋남이 구조적으로
+            // 불가능하다. 아래 위쪽 안내 단추(CR-02, 12.3-REVIEW.md)는
+            // 지웠다 — 이 블록 안에서만 산다. CR-02가 지키려던 성질
+            // (「안내가 없을 때만 보인다」)은 더 강한 형태로 여기 옮겨
+            // 왔다: 안내가 있으면 이 블록 자체가 안 그려진다.
+            <div>
+              {error !== null ? (
+                <>
+                  <p className="t-label">{error}</p>
+                  <button type="button" disabled={pending} onClick={() => void announce()}>
+                    {COPY.creationAnnounceRetry}
+                  </button>
+                </>
+              ) : (
+                <p className="t-label">{COPY.creationAnnouncing}</p>
+              )}
+            </div>
+          ) : feed.state !== null && rulebookId !== null && stepsLoaded ? (
             <CreationPane
               sessionId={sessionId}
               browserId={myBrowserId}
@@ -402,9 +484,11 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
               steps={steps}
               pollNow={feed.pollNow}
             />
-          ) : gmLines.length === 0 ? (
-            <p className="t-label">{COPY.loading}</p>
           ) : (
+            // `gmLines.length === 0`이던 대체 문구는 지웠다 — 위
+            // `!announced` 갈래가 먼저 이겨서 닿지 않는다(`announced`가
+            // 참이면 `gmLines`가 비어 있을 수 없다). 남는 갈래는 항목
+            // 선언(`GET /creation/steps`)이 아직 안 왔을 때뿐이다.
             <div>
               {gmLines.map((line) => (
                 <p key={line.seq} className="t-body">
@@ -417,19 +501,10 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
           <p className="t-label">{COPY.loading}</p>
         )}
 
-        {error !== null ? <p className="t-label">{error}</p> : null}
-
-        {/* CR-02 (12.3-REVIEW.md): stepsLoaded는 GET /creation/steps 조회가
-            끝났는지일 뿐 안내 여부와 무관하다 — fetchCreationDeclaration은
-            AI를 안 부르는 단순 조회라 안내를 누르기도 전에 이미 끝나는
-            것이 보통이었다. 이 버튼은 "아직 안내가 없다"(gmLines가 비어
-            있다)로만 켜진다 — stepsLoaded와 별개로, CreationPane이 이미
-            렌더되고 있어도 안내가 없으면 계속 보인다. */}
-        {gate === "done" && gmLines.length === 0 ? (
-          <button type="button" disabled={pending} onClick={() => void announce()}>
-            {COPY.creationAnnounce}
-          </button>
-        ) : null}
+        {/* 안내가 없는 동안(위 !announced 블록)은 그 블록이 오류를
+            말하고, 그 밖의 상태에서는 여기가 말한다 — 어느 쪽이든 한
+            번만 뜬다. */}
+        {error !== null && !(gate === "done" && !announced) ? <p className="t-label">{error}</p> : null}
       </div>
 
       {head !== undefined ? (

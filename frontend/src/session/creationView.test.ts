@@ -28,6 +28,7 @@ import {
   partySizeOutOfRange,
   pendingConsenters,
   remainingFixedValues,
+  shouldAnnounce,
   shouldNominateNext,
   stepRows,
 } from "./creationView.ts";
@@ -528,6 +529,40 @@ describe("shouldNominateNext", () => {
   it("인원이 아직 확정 안 됐으면 거짓이다", () => {
     const state = baseState({ party_size_fixed: null, creation_current_speaker_id: null });
     expect(shouldNominateNext(state, true)).toBe(false);
+  });
+});
+
+describe("첫 안내를 부를 때인지 판정한다 (G-12.3-5)", () => {
+  // 이 시험이 없으면 effect의 발동 조건이 틀려도 아무것도 안 걸린다 —
+  // 의존성 배열이 잘못돼 한 번도 안 불리거나, 인원 확정 전에도 불리거나,
+  // 실패 뒤 무한히 다시 불려도 화면 구조 검사(ref 존재·줄 순서·문구
+  // 개수)는 전부 통과한다. 이번 라운드가 닫는 결함(G-12.3-6)이 여섯
+  // 라운드를 살아남은 모양이 정확히 그것이었다 — 발동 조건은 반드시
+  // 시험이 직접 실행하는 순수 함수 하나에 있어야 한다.
+
+  it("인원이 확정됐고 안내가 없고 직전 시도가 실패하지 않았으면 참이다", () => {
+    const state = baseState({ party_size_fixed: 3, party_roster: null });
+    expect(shouldAnnounce(state, false, false)).toBe(true);
+  });
+
+  it("인원 확정 전(party_size_fixed === null)이면 거짓이다", () => {
+    const state = baseState({ party_size_fixed: null, party_roster: null });
+    expect(shouldAnnounce(state, false, false)).toBe(false);
+  });
+
+  it("이미 안내가 있으면(announced === true) 거짓이다", () => {
+    const state = baseState({ party_size_fixed: 3, party_roster: null });
+    expect(shouldAnnounce(state, true, false)).toBe(false);
+  });
+
+  it("직전 시도가 실패했으면 거짓이다 — 자동 재시도 고리를 만들지 않는다(D-13 ②)", () => {
+    const state = baseState({ party_size_fixed: 3, party_roster: null });
+    expect(shouldAnnounce(state, false, true)).toBe(false);
+  });
+
+  it("명단이 이미 잠겼으면(party_roster !== null) 거짓이다 — 만들기가 끝난 세션이다", () => {
+    const state = baseState({ party_size_fixed: 3, party_roster: ["hero-1", "hero-2", "hero-3"] });
+    expect(shouldAnnounce(state, false, false)).toBe(false);
   });
 });
 
