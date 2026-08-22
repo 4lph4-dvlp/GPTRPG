@@ -25,6 +25,7 @@ import {
   nextUnfilledStep,
   partySizeGate,
   pendingConsenters,
+  remainingFixedValues,
   shouldNominateNext,
   stepRows,
 } from "./creationView.ts";
@@ -499,5 +500,59 @@ describe("shouldNominateNext", () => {
   it("인원이 아직 확정 안 됐으면 거짓이다", () => {
     const state = baseState({ party_size_fixed: null, creation_current_speaker_id: null });
     expect(shouldNominateNext(state, true)).toBe(false);
+  });
+});
+
+describe("남은 개수로 배정 가능한 값을 고른다 (G-12.3-6)", () => {
+  // 이 숫자 여섯(2, 1, 1, 0, 0, -1)은 **시험 재료**다 — 던전월드류가 실제로
+  // 내려주는 값이지만 제품 코드의 상수가 아니다(실제로는 GET /creation/steps의
+  // fixed_values로 온다). 지금까지 이 모양(같은 값이 둘 이상인 풀)을 쓰는 시험이
+  // 하나도 없어서, 이 결함이 여섯 라운드의 코드 검증과 81건의 화면 시험을 살아남았다
+  // — 서로 다른 값만 쓰는 풀에서는 「집합」과 「개수」가 정확히 같은 답을 낸다.
+  const POOL = [2, 1, 1, 0, 0, -1];
+  const AXIS_NAMES = ["STR", "DEX", "CON", "INT", "WIS", "CHA"];
+
+  it("같은 값이 둘 있는 풀에서 하나를 쓰면 나머지 하나가 남는다", () => {
+    const assignment: Record<string, number | null> = {
+      STR: 1,
+      DEX: null,
+      CON: null,
+      INT: null,
+      WIS: null,
+      CHA: null,
+    };
+    const remaining = remainingFixedValues(POOL, assignment);
+    expect(remaining.get(1)).toBe(1);
+  });
+
+  it("값 여섯 개를 여섯 칸에 전부 배정하고 확정까지 간다", () => {
+    const assignment: Record<string, number | null> = Object.fromEntries(
+      AXIS_NAMES.map((name) => [name, null]),
+    );
+    for (let i = 0; i < AXIS_NAMES.length; i++) {
+      const axisName = AXIS_NAMES[i];
+      const valueToAssign = POOL[i];
+      const remaining = remainingFixedValues(POOL, assignment);
+      expect(remaining.get(valueToAssign)).toBeGreaterThan(0);
+      assignment[axisName] = valueToAssign;
+    }
+    expect(Object.values(assignment).every((value) => value !== null)).toBe(true);
+    const finalRemaining = remainingFixedValues(POOL, assignment);
+    for (const value of POOL) {
+      expect(finalRemaining.get(value)).toBe(0);
+    }
+  });
+
+  it("풀에 하나뿐인 값은 여전히 한 칸에만 쓸 수 있다", () => {
+    const assignment: Record<string, number | null> = {
+      STR: 2,
+      DEX: null,
+      CON: null,
+      INT: null,
+      WIS: null,
+      CHA: null,
+    };
+    const remaining = remainingFixedValues(POOL, assignment);
+    expect(remaining.get(2)).toBe(0);
   });
 });

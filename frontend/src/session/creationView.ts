@@ -254,6 +254,40 @@ export interface CreationRollQueueItem {
  * `seq`가 두 번 와도(겹쳐 도착한 폴링 응답) 하나만 남는다 —
  * `gmLinesFrom`과 같은 규칙이다.
  */
+/**
+ * 「값 V를 지금 한 칸 더 쓸 수 있는가」의 순수 산수(G-12.3-6) — 선언된 값 목록과
+ * 지금 배정 상태에서 값별 남은 개수를 낸다.
+ *
+ * (가) 근거는 **개수**이지 존재 여부가 아니다 — 값의 집합으로 다루면 같은 값이
+ * 둘 이상인 풀을 표현할 수 없다(`PlaceFixedValuesControl`이 실제로 겪은 결함의
+ * 정확한 모양). (나) 서로 다른 값의 중복 배정 방지는 사라지지 않는다 — **개수가
+ * 1인 경우**로 여기에 포함된다. (다) 이것은 **진행 상태 계산이 아니다**(D-04
+ * 경계) — 서버가 내려준 룰북 선언과 이 브라우저의 지금 배정만 보는 순수 산수이고,
+ * 서버의 어떤 판단도 다시 계산하지 않는다. (라) **마지막 말은 여전히 서버가
+ * 한다** — 배치 묶음이 룰북 선언과 다중집합으로 같은지는 `actor.py`가 검사한다
+ * (T-12.1-04). 이 함수는 사람이 불가능한 배치를 고르지 못하게 돕는 것이고,
+ * 규칙을 화면으로 옮기는 것이 아니다.
+ */
+export function remainingFixedValues(
+  fixedValues: number[],
+  assignment: Record<string, number | null>,
+): Map<number, number> {
+  const remaining = new Map<number, number>();
+  for (const value of fixedValues) {
+    remaining.set(value, (remaining.get(value) ?? 0) + 1);
+  }
+  for (const value of Object.values(assignment)) {
+    if (value === null) {
+      continue;
+    }
+    const count = remaining.get(value) ?? 0;
+    if (count > 0) {
+      remaining.set(value, count - 1);
+    }
+  }
+  return remaining;
+}
+
 export function creationRollsFrom(
   events: GameEvent[],
   stepsById: Map<string, CreationStepView>,
