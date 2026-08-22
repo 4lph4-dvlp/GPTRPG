@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면
-status: executing
-stopped_at: Completed 12.3-13-PLAN.md
-last_updated: "2026-08-22T07:30:38.176Z"
+status: verifying
+stopped_at: Completed 12.3-14-PLAN.md — phase 12.3 마지막 계획
+last_updated: "2026-08-22T07:54:13.154Z"
 last_activity: 2026-08-22
 last_activity_desc: Phase 12.3 execution started
-state_head: 60baf594a4e5d247f71bbac12a5a38f69abfc181
+state_head: cf2692356f1dc75fa4f1cdf757ef1c495904fa9c
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 52
-  completed_plans: 51
+  completed_plans: 52
 ---
 
 # Project State
@@ -32,7 +32,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 Phase: 12.3 (캐릭터 만들기 화면) — EXECUTING
 Plan: 14 of 14
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-22 — 12.3-13 완료(인원 확정 관문 세 결함 통합 수정)
 
 > 계획 번호 참고: `Plan: N of 11`의 카운터는 phase 초기 계획 수(10개)에
@@ -151,6 +151,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P11 | 46min | 3 tasks | 9 files |
 | Phase 12.3 P12 | 12min | 2 tasks | 3 files |
 | Phase 12.3 P13 | ~16min | 3 tasks | 9 files |
+| Phase 12.3 P14 | ~20min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -345,6 +346,8 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 12.3-12: 능력치 배치 잠금 판정을 값의 집합에서 개수 기반으로 바꿈 — 서로 다른 값의 중복 배정 방지는 개수 1의 특수 경우로 유지, 같은 값을 두 번 보여주는 표시는 접지 않음(Phase 16 경계)
 - [Phase 12.3]: GET /creation/steps를 배열에서 {steps, party_size_range} 봉투로 넓혀 룰북 인원 범위를 확정 전에 화면까지 실어 보낸다(D-05 확장) — 새 HTTP 경로나 폴링 대안 대신, URL은 그대로 둔다
 - [Phase 12.3]: 인원 거절 문구는 예외 전체(str(exc), dataclass repr)가 아니라 사람이 읽을 절반(exc.reason)만 CommandRejected에 싣는다 — 예외 자체(rules_core/rulebook.py)는 안 고친다(D-15)
+- [Phase 12.3]: 12.3-14: Task 1·2의 RED/GREEN 커밋을 하나로 묶되(12.3-12/13과 같은 판단), 두 Task가 공유한 파일(labels.ts/creationView.ts/test.ts)은 diff를 완전히 분리해 Task별 원자 커밋을 유지했다
+- [Phase 12.3]: 12.3-14: COPY.loading 남는 자리 넷을 전수 감사해 전부 실제 진행 중 상태로 확인 — 계획의 grep 기준선(<2)과 실측(3)이 어긋난 것은 12.3-13이 정당하게 추가한 로딩 분기를 계획이 기준선에 못 반영해서다(SUMMARY Deviations 참조)
 
 ### Pending Todos
 
@@ -402,8 +405,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-22T07:30:37.786Z
-Stopped at: Completed 12.3-13-PLAN.md
+Last session: 2026-08-22T07:54:12.764Z
+Stopped at: Completed 12.3-14-PLAN.md — phase 12.3 마지막 계획
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
