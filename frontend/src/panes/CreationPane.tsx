@@ -68,6 +68,7 @@ import {
   isMyTurn,
   nextUnfilledStep,
   pendingConsenters,
+  remainingFixedValues,
   shouldNominateNext,
   stepRows,
 } from "../session/creationView.ts";
@@ -209,9 +210,17 @@ function PlaceFixedValuesControl({ row, busy, onSubmit }: ControlProps) {
     }
     return initial;
   });
-  const usedValues = new Set(
-    Object.values(assignment).filter((value): value is number => value !== null),
-  );
+  // 지웠던 것: 이미 쓴 값을 값의 **집합**으로 모으던 지역 변수(`usedValues`).
+  // 같은 값이 둘 이상인 풀(예: 던전월드류 2, 1, 1, 0, 0, -1)에서는 집합이
+  // 「그 값이 몇 개 남았는가」를 아예 세지 않아 하나를 쓰면 나머지도 함께
+  // 잠기고, 서로 다른 값이 넷뿐이라 여섯 칸을 못 채워 「확정」이 영원히 안
+  // 켜졌다(G-12.3-6). `remainingFixedValues`(시험된 순수 함수, session/
+  // creationView.ts)가 개수 기반으로 다시 판정한다 — 서로 다른 값의 중복
+  // 배정 방지는 사라지지 않고 **개수가 1인 경우**로 그대로 남는다. 마지막
+  // 말은 여전히 서버다: 배치 묶음이 룰북 선언과 다중집합으로 같은지는
+  // `actor.py::_prepare_complete_creation_step`이 검사한다(T-12.1-04) — 이
+  // 판정은 사람이 불가능한 배치를 고르지 못하게 돕는 것일 뿐이다.
+  const remaining = remainingFixedValues(fixedValues, assignment);
   const complete = axisNames.every((name) => assignment[name] !== null);
   return (
     <div className="proposal">
@@ -228,8 +237,12 @@ function PlaceFixedValuesControl({ row, busy, onSubmit }: ControlProps) {
             }}
           >
             <option value="">—</option>
-            {fixedValues.map((value) => (
-              <option key={value} value={value} disabled={usedValues.has(value) && assignment[axisName] !== value}>
+            {fixedValues.map((value, index) => (
+              <option
+                key={`${index}:${value}`}
+                value={value}
+                disabled={(remaining.get(value) ?? 0) <= 0 && assignment[axisName] !== value}
+              >
                 {value}
               </option>
             ))}
