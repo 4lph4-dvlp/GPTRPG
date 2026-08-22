@@ -39,6 +39,7 @@ HTTPS이거나 호스트가 `localhost`/`127.0.0.1`일 때뿐이다. 안전한 �
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import socket
 import subprocess
@@ -68,7 +69,10 @@ def find_non_loopback_ipv4(explicit_host: str | None) -> str | None:
     한다 — 루프백으로는 이 확인이 원리적으로 성립하지 않는다.
     """
     if explicit_host is not None:
-        if explicit_host.startswith("127."):
+        # `127.`만 보면 `::1`·`localhost`·`0.0.0.0`이 그대로 통과해 실패
+        # 경로가 또 안 밟힌다 — 안전한 맥락이 성립하는 이름을 전부 막는다.
+        lowered = explicit_host.strip().lower()
+        if lowered.startswith("127.") or lowered in {"::1", "localhost", "0.0.0.0", ""}:
             return None
         return explicit_host
     # 패킷을 실제로 안 보내는 관례적 방법 — UDP 소켓을 "연결"만 하고
@@ -86,6 +90,25 @@ def find_non_loopback_ipv4(explicit_host: str | None) -> str | None:
     return addr
 
 
+def port_is_free(port: int) -> bool:
+    """`port`에 아무도 안 붙어 있는지 실제로 bind해 본다.
+
+    **왜 이게 필요한가.** 아래 `wait_for_server`는 그 주소에서 200이 오는지만
+    본다 — 그 200이 *이 스크립트가 띄운* 서버가 준 것인지는 안 본다. 앞선
+    실행이 `finally`를 못 밟고 죽어 서버가 남아 있으면(SIGKILL, 두 번 동시
+    실행 등), 새로 띄운 uvicorn은 포트를 못 잡고 조용히 죽고, 이 확인은
+    **남의 프로세스가 주는 옛 화면을 검사하고 통과(0)를 찍는다.** 확인을
+    안 한 것이 통과로 보이는 그 모양 그대로라, 시작 전에 막는다.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("0.0.0.0", port))  # noqa: S104 - 서버와 같은 노출로 검사해야 의미가 있다
+        except OSError:
+            return False
+    return True
+
+
 def find_chromium() -> str | None:
     for candidate in CHROMIUM_CANDIDATES:
         found = shutil.which(candidate)
@@ -101,12 +124,18 @@ def build_frontend() -> bool:
     고친 뒤 빌드를 잊으면 이 확인이 **옛 화면을 검사하고 통과해 버린다** —
     그 침묵이 이번 gap이 여섯 라운드를 살아남은 모양 그대로다.
     """
-    result = subprocess.run(
-        ["npm", "run", "build"],
-        cwd=REPO_ROOT / "frontend",
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["npm", "run", "build"],
+            cwd=REPO_ROOT / "frontend",
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        # `npm`이 아예 없는 경우 등. 여기서 예외를 그냥 두면 파이썬 기본
+        # 종료 코드 1(=「확인해 봤더니 실패」)로 끝나 「확인 불가」와 섞인다.
+        print(f"빌드를 실행하지 못했다: {exc}", file=sys.stderr)
+        return False
     if result.returncode != 0:
         print("빌드 실패:", file=sys.stderr)
         print(result.stdout, file=sys.stderr)
@@ -115,12 +144,18 @@ def build_frontend() -> bool:
     return True
 
 
-def wait_for_server(host: str, port: int, timeout_s: float) -> bool:
+def wait_for_server(
+    host: str, port: int, timeout_s: float, proc: subprocess.Popen | None = None
+) -> bool:
     import time
 
     deadline = time.monotonic() + timeout_s
     url = f"http://{host}:{port}/"
     while time.monotonic() < deadline:
+        # 우리가 띄운 서버가 죽었으면 이 포트에서 오는 200은 남의 것이다.
+        # `port_is_free`가 먼저 막지만, 경합으로 새는 경우의 이중 안전장치다.
+        if proc is not None and proc.poll() is not None:
+            return False
         try:
             with urllib.request.urlopen(url, timeout=1) as resp:  # noqa: S310 - 로컬 서버
                 if resp.status == 200:
@@ -153,7 +188,11 @@ def dump_dom(chromium: str, url: str) -> str | None:
             text=True,
             timeout=DOM_DUMP_TIMEOUT_S,
         )
-    except subprocess.TimeoutExpired:
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        # OSError는 크로미움을 실행조차 못 한 경우다 — 호출자가 종료 코드 2로
+        # 끝내도록 None을 준다(파이썬 기본 1로 새어 나가면 「실패」와 섞인다).
+        if isinstance(exc, OSError):
+            print(f"크로미움을 실행하지 못했다: {exc}", file=sys.stderr)
         return None
     if result.returncode != 0:
         print(f"크로미움이 {url}을(를) 여는 데 실패했다:", file=sys.stderr)
@@ -212,6 +251,15 @@ def main() -> int:
         )
         sys.exit(2)
 
+    if not port_is_free(args.port):
+        print(
+            f"포트 {args.port}에 이미 무언가 붙어 있다 — 앞선 실행이 남긴 서버일 수 있다. "
+            "그대로 두면 이 확인이 남의 프로세스를 검사하고 통과를 찍는다. "
+            f"그 프로세스를 끄거나 --port로 다른 포트를 줄 것. 종료 코드 2.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     if not args.skip_build:
         if not build_frontend():
             print("화면 빌드에 실패해 이 확인을 계속할 수 없다. 종료 코드 2.", file=sys.stderr)
@@ -231,18 +279,27 @@ def main() -> int:
                 str(args.port),
             ],
             cwd=REPO_ROOT,
-            env={**__import__("os").environ, "GPTRPG_DB": db_path},
+            env={**os.environ, "GPTRPG_DB": db_path},
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
         )
         try:
-            if not wait_for_server(host, args.port, STARTUP_TIMEOUT_S):
-                print(
-                    f"서버가 {STARTUP_TIMEOUT_S}초 안에 http://{host}:{args.port}/ 에서 "
-                    "응답하지 않았다. 종료 코드 2.",
-                    file=sys.stderr,
-                )
+            if not wait_for_server(host, args.port, STARTUP_TIMEOUT_S, server_proc):
+                if server_proc.poll() is not None:
+                    output = server_proc.stdout.read() if server_proc.stdout else ""
+                    print(
+                        "띄운 서버가 곧바로 죽었다 — 이 확인은 수행되지 않았다. "
+                        "종료 코드 2. 서버가 남긴 말:",
+                        file=sys.stderr,
+                    )
+                    print(output, file=sys.stderr)
+                else:
+                    print(
+                        f"서버가 {STARTUP_TIMEOUT_S}초 안에 http://{host}:{args.port}/ 에서 "
+                        "응답하지 않았다. 종료 코드 2.",
+                        file=sys.stderr,
+                    )
                 sys.exit(2)
 
             probe_url = f"http://{host}:{args.port}/?session=insecure-origin-probe"
@@ -272,7 +329,9 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 print(extract_app_div(control_dom), file=sys.stderr)
-                return 1
+                # 「이번 결함이 실제로 있다」가 아니라 「확인 자체가 성립 안 했다」다.
+                # 1로 끝내면 검사한 적 없는 성질을 실패로 단정하는 셈이라 2로 끝낸다.
+                return 2
 
             if probe_ok:
                 print(f"통과 — {host}에서 '{CREATION_TITLE}'가 실제로 그려졌다.")
