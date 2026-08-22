@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
-current_phase_name: 캐릭터 만들기 화면 (INSERTED)
+current_phase_name: 캐릭터 만들기 화면
 status: executing
-stopped_at: Completed 12.3-11-PLAN.md (secure-context gap 닫음 — crypto.randomUUID 안전한 맥락 의존 제거, 루프백 아닌 주소 확인 스크립트 신설, 앱 최상단 오류 경계, WR-02 닫힘. Phase 12.3 전 11개 계획 실행 완료 — 화면 끝-끝 사람 확인·동의 교차 전파·WR-01은 backstop으로 남음, /gsd-verify-work 필요)
-last_updated: "2026-08-22T01:19:01.498Z"
+stopped_at: Completed 12.3-12-PLAN.md
+last_updated: "2026-08-22T07:13:22.134Z"
 last_activity: 2026-08-22
 last_activity_desc: Phase 12.3 execution started
-state_head: 7b24b4e5f007263d6eefc7bf3fa058cd8574b187
+state_head: 7f1cd22ae01831f75244139a3df5b829eb1ca8ff
 progress:
   total_phases: 14
   completed_phases: 6
-  total_plans: 49
-  completed_plans: 49
+  total_plans: 52
+  completed_plans: 50
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 12.3 — 캐릭터 만들기 화면 (INSERTED)
+**Current focus:** Phase 12.3 — 캐릭터 만들기 화면
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 12.3 (캐릭터 만들기 화면 (INSERTED)) — 11 of 11 계획 실행 완료
-Plan: 11 of 11 (12.3-11, gap_closure — secure-context 닫음)
-Status: Executing complete — /gsd-verify-work 대기 (CHAR-06은 사람 backstop 확인 남아 Pending)
-Last activity: 2026-08-22 — 12.3-11-PLAN.md 완료
+Phase: 12.3 (캐릭터 만들기 화면) — EXECUTING
+Plan: 2 of 14
+Status: Ready to execute
+Last activity: 2026-08-22 — Phase 12.3 execution started
 
 > 계획 번호 참고: `Plan: N of 11`의 카운터는 phase 초기 계획 수(10개)에
 > gap-closure로 추가된 12.3-11 한 건이 더해진 실제 파일 개수(11)를 따른다 —
@@ -146,6 +146,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P09 | 미측정 | 2 tasks | 3 files |
 | Phase 12.3 P10 | 약 30분 | 2 tasks | 3 files |
 | Phase 12.3 P11 | 46min | 3 tasks | 9 files |
+| Phase 12.3 P12 | 12min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -337,6 +338,7 @@ Progress: [██████████] 100%
 - [Phase 12.3]: [Phase 12.3] 12.3-10: forfeited_nomination_mark를 "지금 흘려보낸 상태인가"(이진, 뒤로 돌아감)에서 "이 세션에서 마지막으로 판정된 흘려보냄"(단조, 앞으로만 감)으로 재정의 — 회복 뒤 재호출이 리듀서가 영구 보관한 옛 지목 기록으로 되돌아가던 5차 검증 CR-01을 닫았다. 검증 보고서가 제안한 "지목이 있으면 늘 순번을 표시에 싣는다"는 D-12(같은 시점 재호출은 AI를 다시 안 부른다)를 깨는 것을 CALL1/2/3 추적으로 확인해 안 따르고, 표시를 출력(지목 순번)이 아니라 입력(마지막 판정된 흘려보냄)으로 바꾸는 대안을 택했다. routes_creation.py의 실행 코드 줄은 무변경(주석만 교체). 요구사항 마감 노트: CHAR-06은 이번에도 Complete로 안 찍었다 — 5차 검증 자신이 "완료로 표시할 수 없다"고 명시했고 사람 확인 항목(동의 교차 전파 화면, 5분 UX 체감, 화면 끝-끝 통과)이 여전히 남아 있어, requirements.ready-ids의 구조적 "ready" 판정(모든 형제 계획에 SUMMARY 존재)과 실제 검증 완료를 혼동하지 않기 위해 mark-complete를 의도적으로 건너뛰었다 — 다음 /gsd-verify-work가 최종 판단한다.
 - [Phase 12.3]: crypto.randomUUID() 대신 crypto.getRandomValues 기반 생성으로 교체(갈래 추가 아닌 호출 교체) — 실측(크로미움 151)으로 안전한 맥락 아닌 곳에서도 getRandomValues는 있다는 것을 확인 — 갈래를 두면 이번 결함과 같은 함정을 한 자리 더 만든다
 - [Phase 12.3]: 확인 스크립트는 확인-불가 경로마다 sys.exit(2)를 명시적으로 호출한다 — 확인 불가를 통과(0)로 절대 안 섞는 것이 이번 gap이 다섯 라운드를 살아남은 원인을 막는 핵심 성질
+- [Phase 12.3]: 12.3-12: 능력치 배치 잠금 판정을 값의 집합에서 개수 기반으로 바꿈 — 서로 다른 값의 중복 배정 방지는 개수 1의 특수 경우로 유지, 같은 값을 두 번 보여주는 표시는 접지 않음(Phase 16 경계)
 
 ### Pending Todos
 
@@ -394,8 +396,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-22T01:19:01.160Z
-Stopped at: Completed 12.3-11-PLAN.md (secure-context gap 닫음 — crypto.randomUUID 안전한 맥락 의존 제거, 루프백 아닌 주소 확인 스크립트 신설, 앱 최상단 오류 경계, WR-02 닫힘. Phase 12.3 전 11개 계획 실행 완료 — 화면 끝-끝 사람 확인·동의 교차 전파·WR-01은 backstop으로 남음, /gsd-verify-work 필요)
+Last session: 2026-08-22T07:13:21.748Z
+Stopped at: Completed 12.3-12-PLAN.md
 이어받아 Task 2·Task 3 커밋까지 완료
 Resume file: None
 
