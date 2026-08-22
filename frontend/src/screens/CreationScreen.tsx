@@ -109,12 +109,22 @@ function PartySizeControl({
         min={1}
         value={count}
         disabled={busy}
-        onChange={(event) => setCount(Number(event.target.value))}
+        // 값을 지우거나(→ Number("") === 0) 음수·비숫자를 넣어도 1 미만으로
+        // 못 내려가게 여기서 보정한다(WR-02, 12.3-REVIEW.md). 서버의
+        // Field(ge=1)는 이 입력을 라우트 핸들러에 닿기 전에 걸러 422의
+        // detail이 문자열이 아닌 오류 객체 배열로 오고, postJsonWithDetail이
+        // 그 모양을 못 읽어 D-15가 정한 「서버가 보낸 이유를 그대로
+        // 보여준다」가 이 한 경우에만 성립하지 않는다 — 그래서 이 값
+        // 하나만 화면이 막는다. 룰북 범위·절대 상한 검사는 여전히 서버
+        // 몫이고 화면으로 안 옮긴다.
+        onChange={(event) => setCount(Math.max(1, Math.trunc(Number(event.target.value)) || 1))}
       />
       <button
         type="button"
         className="btn btn--primary btn--wide"
-        disabled={busy}
+        // count가 1 미만이면 값 자체를 보고 잠근다(WR-02) — 위 onChange
+        // 보정과 이중으로 막아, 어떤 경로로든 「0명」 요청이 서버에 안 간다.
+        disabled={busy || count < 1}
         onClick={() => void confirm()}
       >
         {COPY.creationPartySizeConfirm}
