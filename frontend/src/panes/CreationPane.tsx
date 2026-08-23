@@ -609,11 +609,6 @@ export function CreationPane({
     }
   }
 
-  function sayMore(): void {
-    setFollowUp({ kind: "idle" });
-    setEditingStepId(null);
-  }
-
   /** 「진행자에게 정리를 부탁하기」(Task 2 ①) — 넷이 동시에 눌러도
    * `wrap_up`의 `_gm_dedupe_key`가 AI를 한 번만 부른다(D-12). 화면이
    * 따로 잠그지 않는다. */
@@ -762,9 +757,7 @@ export function CreationPane({
                   ) : (
                     <p className="t-label">{COPY.creationGmSilent}</p>
                   )}
-                  <button type="button" className="btn btn--ghost btn--wide" disabled={busy} onClick={sayMore}>
-                    {COPY.creationSayMore}
-                  </button>
+                  <p className="t-label">{COPY.creationAnswerBelow}</p>
                   <button
                     type="button"
                     className="btn btn--primary btn--wide"

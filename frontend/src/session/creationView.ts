@@ -219,6 +219,20 @@ export function consentGate(state: GameStateView, wrappedUp: boolean): ConsentGa
   if (state.creation_characters.length === 0 || state.creation_unfinished_character_ids.length > 0) {
     return "not_ready";
   }
+  // G-12.3-11 — `creation_unfinished_character_ids`는 **항목을 하나라도 낸
+  // 사람**만 담는다(서버 `creation_state.unfinished_candidates`의 doc).
+  // 들어와서 아직 아무것도 안 누른 참가자는 그 목록에 원리적으로 못
+  // 들어가므로, 먼저 끝낸 한 사람에게 「이대로 시작」이 떠서 나머지가
+  // 영구히 배제됐다(D-08은 잠금을 되돌리는 사건을 두지 않는다).
+  // 방장이 정한 인원이 이 세션이 몇 명짜리인지 아는 유일한 닫힌 숫자다.
+  // 서버도 같은 검사를 한다(`actor._party_size_shortfall`) — 여기서는
+  // 「서버가 거절할 단추를 애초에 안 그린다」를 맡는다(D-15).
+  if (
+    state.party_size_fixed !== null &&
+    state.creation_characters.length < state.party_size_fixed
+  ) {
+    return "not_ready";
+  }
   return wrappedUp ? "open" : "needs_wrap_up";
 }
 

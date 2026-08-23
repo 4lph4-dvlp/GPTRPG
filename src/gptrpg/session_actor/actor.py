@@ -770,6 +770,24 @@ class SessionActor:
                 seen.append(character_id)
         return tuple(seen)
 
+    def _party_size_shortfall(self) -> int:
+        """이번 판 인원으로 정한 수에서 아직 모자란 완성 캐릭터 수(G-12.3-11).
+
+        `_unfinished_creation_candidates()`가 원리적으로 못 보는 것을 본다 —
+        그 목록은 **항목을 하나라도 낸 사람**만 담으므로(그 함수의 doc 참조),
+        들어와서 아직 아무것도 안 누른 참가자는 어느 검사에도 안 걸린다.
+        그래서 먼저 끝낸 한 사람이 혼자 명단을 잠그고 판을 시작해 버릴 수
+        있었다. 방장이 정한 `party_size_fixed`는 이 세션이 **몇 명짜리인지
+        아는 유일한 닫힌 숫자**다 — 명단 잠금은 그 수만큼 실제로 완성된
+        뒤에만 일어난다.
+
+        인원이 아직 안 정해졌으면(`None`) 0을 낸다 — 그때는 이 검사가
+        말할 수 있는 것이 없다.
+        """
+        if self.state.party_size_fixed is None:
+            return 0
+        return max(0, self.state.party_size_fixed - len(self.state.created_characters))
+
     def _all_created_characters_consented(self) -> bool:
         """완성된 캐릭터 전원이 동의했는가(D-10) — 빈 세션(아직 아무도
         안 만들었다)은 「전원 동의」로 세지 않는다.
@@ -790,6 +808,8 @@ class SessionActor:
         바뀌었다 — 서버 재시작에도 살아남는다.
         """
         if self._unfinished_creation_candidates():
+            return False
+        if self._party_size_shortfall():
             return False
         return bool(self.state.created_characters) and all(
             self.state.creation_consents.get(character_id, False)
@@ -1801,6 +1821,13 @@ class SessionActor:
             raise CommandRejected(
                 "아직 한창 만드는 중인 사람이 있어 파티 명단을 잠글 수 없다"
                 f"(CR-02): {unfinished!r}"
+            )
+        shortfall = self._party_size_shortfall()
+        if shortfall:
+            raise CommandRejected(
+                f"이번 판은 {self.state.party_size_fixed}명인데 아직"
+                f" {len(self.state.created_characters)}명만 캐릭터를 끝냈다 —"
+                f" {shortfall}명이 더 끝내야 시작할 수 있다"
             )
         return (
             "party_roster_locked",

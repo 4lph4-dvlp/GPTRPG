@@ -48,12 +48,18 @@ def _complete_step(client, *, session_id: str = SESSION_ID, **overrides):
     return client.post(f"/api/sessions/{session_id}/creation/step", json=body)
 
 
-def _complete_creation(client, *, character_id: str = CHARACTER_ID, session_id: str = SESSION_ID):
+def _complete_creation(
+    client,
+    *,
+    character_id: str = CHARACTER_ID,
+    browser_id: str = BROWSER_ID,
+    session_id: str = SESSION_ID,
+):
     return client.post(
         f"/api/sessions/{session_id}/creation/complete",
         json={
             "character_id": character_id,
-            "browser_id": BROWSER_ID,
+            "browser_id": browser_id,
             "rulebook_id": "dungeonworld_like",
             "one_line_intro": f"{character_id}는 조용한 마을을 떠나온 모험가다.",
         },
@@ -125,20 +131,69 @@ def test_creation_end_to_end_through_lock_and_rejection_after_lock(web_client) -
     raw_cookie = client.cookies.get("gptrpg_character")
     assert raw_cookie is not None
 
-    # ⑤ 명단 잠금(D-08) — 12.1-04부터 동의 표시가 잠금의 전제다(D-10).
-    # `/creation/lock-roster` 직접 호출은 동의 없이는 이제 409다(아래
-    # `test_lock_roster_directly_without_consent_is_rejected` 참조) —
-    # 이 트레이서는 실제 동의 경로(`/creation/consent`)를 지나 잠근다.
-    consent_response = client.post(
-        f"/api/sessions/{SESSION_ID}/creation/consent",
-        json={"character_id": CHARACTER_ID, "browser_id": BROWSER_ID, "agree": True},
-    )
-    assert consent_response.status_code == 200
+    hero1_cookie = raw_cookie
+
+    # ⑤ 명단 잠금(D-08) — 12.1-04부터 동의 표시가 잠금의 전제고(D-10),
+    # G-12.3-11 뒤로는 방장이 정한 인원이 **전부** 완성하고 그 전원이
+    # 동의해야 잠긴다. 그래서 나머지 둘도 여기서 끝낸다 — 이 트레이서가
+    # 좇는 것은 hero-1의 여정이고, 둘은 잠금을 성립시키는 배경이다.
+    # (`/creation/lock-roster` 직접 호출은 동의 없이는 여전히 409다 —
+    # 아래 `test_lock_roster_directly_without_consent_is_rejected` 참조.)
+    party_cookies = {CHARACTER_ID: hero1_cookie}
+    for character_id, browser_id, name in (
+        ("hero-2", "b-hero-2", "나리"),
+        ("hero-3", "b-hero-3", "다래"),
+    ):
+        client.cookies.clear()
+        for step_id, extra in (
+            ("archetype", {"picked": ["몸으로 먼저 막아선다"], "text_value": None}),
+            ("backstory", {"text_value": "우물 마을에서 함께 자랐다"}),
+            (
+                "ability_array",
+                {
+                    "text_value": None,
+                    "axis_values": [
+                        {"axis_name": "STR", "value": 2},
+                        {"axis_name": "DEX", "value": 1},
+                        {"axis_name": "CON", "value": 1},
+                        {"axis_name": "INT", "value": 0},
+                        {"axis_name": "WIS", "value": 0},
+                        {"axis_name": "CHA", "value": -1},
+                    ],
+                },
+            ),
+            ("hp", {"text_value": None}),
+            ("name", {"text_value": name}),
+        ):
+            step = _complete_step(
+                client, character_id=character_id, browser_id=browser_id, step_id=step_id, **extra
+            )
+            assert step.status_code == 200, step.text
+        assert (
+            _complete_creation(
+                client, character_id=character_id, browser_id=browser_id
+            ).status_code
+            == 200
+        )
+        party_cookies[character_id] = client.cookies.get("gptrpg_character")
+
+    for character_id, browser_id in (
+        (CHARACTER_ID, BROWSER_ID),
+        ("hero-2", "b-hero-2"),
+        ("hero-3", "b-hero-3"),
+    ):
+        client.cookies.clear()
+        client.cookies.set("gptrpg_character", party_cookies[character_id])
+        consent_response = client.post(
+            f"/api/sessions/{SESSION_ID}/creation/consent",
+            json={"character_id": character_id, "browser_id": browser_id, "agree": True},
+        )
+        assert consent_response.status_code == 200, consent_response.text
     assert consent_response.json()["locked"] is True
 
     locked_events = _events_of_type(client, "party_roster_locked")
     assert len(locked_events) == 1
-    assert locked_events[0]["character_ids"] == [CHARACTER_ID]
+    assert set(locked_events[0]["character_ids"]) == {CHARACTER_ID, "hero-2", "hero-3"}
 
     # ⑥ 잠긴 뒤 새 캐릭터 완성 시도는 409다(D-08 — 중간에 추가 없음).
     # 이 클라이언트는 이미 hero-1 쿠키를 들고 있으므로(위 자동 점유), 그
@@ -149,16 +204,18 @@ def test_creation_end_to_end_through_lock_and_rejection_after_lock(web_client) -
     second_step_response = client.post(
         f"/api/sessions/{SESSION_ID}/creation/step",
         json={
-            "character_id": "hero-2",
-            "browser_id": "b-hero-2",
+            "character_id": "hero-4",
+            "browser_id": "b-hero-4",
             "step_id": "name",
             "rulebook_id": "dungeonworld_like",
-            "text_value": "나리",
+            "text_value": "라온",
         },
     )
     assert second_step_response.status_code == 409
 
-    second_complete_response = _complete_creation(client, character_id="hero-2")
+    second_complete_response = _complete_creation(
+        client, character_id="hero-4", browser_id="b-hero-4"
+    )
     assert second_complete_response.status_code == 409
 
 

@@ -671,3 +671,86 @@ def web_client_with_fake_provider(
         return TestClient(app)
 
     return _make
+
+
+def lock_creation_roster(
+    client,
+    session_id: str,
+    *,
+    size: int = 3,
+    rulebook_id: str = "dungeonworld_like",
+) -> dict[str, str]:
+    """정원만큼 캐릭터를 만들어 전원 동의로 명단을 잠근다.
+
+    G-12.3-11 (12.3-UAT.md) 뒤로 명단은 **방장이 정한 인원만큼 실제로
+    완성되고 그 전원이 동의해야** 잠긴다. 「잠긴 뒤에 무엇이 409인가」만
+    확인하려는 시험들이 예전에는 한 사람만 만들고 잠글 수 있었는데, 그
+    지름길이 사라졌다 — 그 조립을 여기 한 번만 적어 세 시험 파일이
+    같이 쓴다.
+
+    캐릭터별 서명 쿠키를 돌려준다(`hero-1` … `hero-{size}`).
+    """
+    steps = (
+        ("archetype", {"picked": ["몸으로 먼저 막아선다"]}),
+        ("backstory", {"text_value": "우물 마을 순찰대에 뒤늦게 합류한 떠돌이 검객"}),
+        (
+            "ability_array",
+            {
+                "axis_values": [
+                    {"axis_name": "STR", "value": 2},
+                    {"axis_name": "DEX", "value": 1},
+                    {"axis_name": "CON", "value": 1},
+                    {"axis_name": "INT", "value": 0},
+                    {"axis_name": "WIS", "value": 0},
+                    {"axis_name": "CHA", "value": -1},
+                ]
+            },
+        ),
+        ("hp", {}),
+    )
+    party = [(f"hero-{n}", f"b-hero-{n}", f"이름{n}") for n in range(1, size + 1)]
+    cookies: dict[str, str] = {}
+
+    response = client.post(
+        f"/api/sessions/{session_id}/creation/party-size",
+        json={"player_character_count": size, "rulebook_id": rulebook_id},
+    )
+    assert response.status_code == 200, response.text
+
+    for character_id, browser_id, name in party:
+        client.cookies.clear()
+        for step_id, payload in (*steps, ("name", {"text_value": name})):
+            body = {
+                "character_id": character_id,
+                "browser_id": browser_id,
+                "step_id": step_id,
+                "rulebook_id": rulebook_id,
+                "text_value": None,
+            }
+            body.update(payload)
+            step_response = client.post(
+                f"/api/sessions/{session_id}/creation/step", json=body
+            )
+            assert step_response.status_code == 200, step_response.text
+        complete_response = client.post(
+            f"/api/sessions/{session_id}/creation/complete",
+            json={
+                "character_id": character_id,
+                "browser_id": browser_id,
+                "rulebook_id": rulebook_id,
+                "one_line_intro": f"{name}는 조용한 마을을 떠나온 모험가다.",
+            },
+        )
+        assert complete_response.status_code == 200, complete_response.text
+        cookies[character_id] = client.cookies.get("gptrpg_character")
+
+    for character_id, browser_id, _name in party:
+        client.cookies.clear()
+        client.cookies.set("gptrpg_character", cookies[character_id])
+        consent_response = client.post(
+            f"/api/sessions/{session_id}/creation/consent",
+            json={"character_id": character_id, "browser_id": browser_id, "agree": True},
+        )
+        assert consent_response.status_code == 200, consent_response.text
+    assert consent_response.json()["locked"] is True, "정원 전원 동의에서 잠겨야 한다"
+    return cookies

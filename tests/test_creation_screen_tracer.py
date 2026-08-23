@@ -11,6 +11,9 @@ from conftest import FakeProvider
 SESSION_ID = "creation-screen-tracer-s1"
 
 
+from tests.conftest import lock_creation_roster
+
+
 def _fix_party_size(client, *, count: int = 3, session_id: str = SESSION_ID):
     return client.post(
         f"/api/sessions/{session_id}/creation/party-size",
@@ -94,65 +97,9 @@ def test_announce_returns_409_after_roster_is_locked(web_client_with_fake_provid
     provider = FakeProvider(complete_value="[]")
     session_id = SESSION_ID + "-locked"
     with web_client_with_fake_provider(action_classifier=provider) as client:
-        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
-        step_response = client.post(
-            f"/api/sessions/{session_id}/creation/step",
-            json={
-                "character_id": "hero-1",
-                "browser_id": "b-hero-1",
-                "step_id": "name",
-                "rulebook_id": "dungeonworld_like",
-                "text_value": "브람",
-            },
-        )
-        assert step_response.status_code == 200
-        for step_id, payload in (
-            ("archetype", {"picked": ["몸으로 먼저 막아선다"]}),
-            ("backstory", {"text_value": "우물 마을 순찰대에 뒤늦게 합류한 떠돌이 검객"}),
-            (
-                "ability_array",
-                {
-                    "axis_values": [
-                        {"axis_name": "STR", "value": 2},
-                        {"axis_name": "DEX", "value": 1},
-                        {"axis_name": "CON", "value": 1},
-                        {"axis_name": "INT", "value": 0},
-                        {"axis_name": "WIS", "value": 0},
-                        {"axis_name": "CHA", "value": -1},
-                    ]
-                },
-            ),
-            ("hp", {}),
-        ):
-            response = client.post(
-                f"/api/sessions/{session_id}/creation/step",
-                json={
-                    "character_id": "hero-1",
-                    "browser_id": "b-hero-1",
-                    "step_id": step_id,
-                    "rulebook_id": "dungeonworld_like",
-                    **payload,
-                },
-            )
-            assert response.status_code == 200, response.text
-
-        complete_response = client.post(
-            f"/api/sessions/{session_id}/creation/complete",
-            json={
-                "character_id": "hero-1",
-                "browser_id": "b-hero-1",
-                "rulebook_id": "dungeonworld_like",
-                "one_line_intro": "브람은 조용한 마을을 떠나온 모험가다.",
-            },
-        )
-        assert complete_response.status_code == 200
-
-        consent_response = client.post(
-            f"/api/sessions/{session_id}/creation/consent",
-            json={"character_id": "hero-1", "browser_id": "b-hero-1", "agree": True},
-        )
-        assert consent_response.status_code == 200
-        assert consent_response.json()["locked"] is True
+        # G-12.3-11 뒤로는 정한 인원이 전부 완성하고 동의해야 잠긴다 —
+        # 그 조립은 conftest에 한 번만 적혀 있다.
+        lock_creation_roster(client, session_id)
 
         response = _announce(client, session_id=session_id)
         assert response.status_code == 409

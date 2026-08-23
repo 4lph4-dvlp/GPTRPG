@@ -18,6 +18,8 @@ CHARACTER_ID = "hero-1"
 BROWSER_ID = "b-hero-1"
 SECOND_CHARACTER_ID = "hero-2"
 SECOND_BROWSER_ID = "b-hero-2"
+THIRD_CHARACTER_ID = "hero-3"
+THIRD_BROWSER_ID = "b-hero-3"
 
 
 def _fix_party_size(client, *, count: int = 3, session_id: str = SESSION_ID):
@@ -160,6 +162,63 @@ def _wrap_up(client, *, session_id: str = SESSION_ID):
         f"/api/sessions/{session_id}/creation/wrap-up",
         json={"rulebook_id": "dungeonworld_like"},
     )
+
+
+def _full_party(session_id: str) -> tuple[tuple[str, str, str], ...]:
+    """이번 판이 3명짜리(던전월드류 최소)일 때의 참가자 셋 — (캐릭터, 브라우저, 이름).
+
+    G-12.3-11 뒤로는 **방장이 정한 인원만큼 실제로 완성돼야** 명단이
+    잠긴다. 예전 시험들은 인원을 3으로 정해 놓고 하나·둘만 완성한 채
+    잠금을 기대했는데, 그것은 던전월드류가 스스로 금지하는 인원
+    (`dungeonworld_like.py` 최소 3)이기도 했다.
+    """
+    del session_id
+    return (
+        (CHARACTER_ID, BROWSER_ID, "브람"),
+        (SECOND_CHARACTER_ID, SECOND_BROWSER_ID, "나리"),
+        (THIRD_CHARACTER_ID, THIRD_BROWSER_ID, "다래"),
+    )
+
+
+def _create_full_party(client, *, session_id: str = SESSION_ID) -> dict[str, str]:
+    """정원만큼 전원이 항목을 채우고 완성한다. 캐릭터별 서명 쿠키를 돌려준다."""
+    cookies: dict[str, str] = {}
+    for character_id, browser_id, name in _full_party(session_id):
+        client.cookies.clear()
+        _complete_all_required_steps(
+            client,
+            character_id=character_id,
+            browser_id=browser_id,
+            session_id=session_id,
+            name=name,
+        )
+        assert (
+            _complete_creation(
+                client,
+                character_id=character_id,
+                browser_id=browser_id,
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+        cookies[character_id] = client.cookies.get("gptrpg_character")
+    return cookies
+
+
+def _consent_full_party(client, cookies: dict[str, str], *, session_id: str = SESSION_ID):
+    """전원이 동의를 누른다 — 마지막 응답을 돌려준다(그 요청 안에서 잠긴다)."""
+    response = None
+    for character_id, browser_id, _name in _full_party(session_id):
+        _act_as(client, cookies[character_id])
+        response = _consent(
+            client,
+            session_id=session_id,
+            character_id=character_id,
+            browser_id=browser_id,
+            agree=True,
+        )
+        assert response.status_code == 200, response.text
+    return response
 
 
 def _events_of_type(client, event_type: str, session_id: str = SESSION_ID) -> list[dict]:
@@ -430,15 +489,13 @@ def test_interject_and_complete_after_roster_locked_are_both_rejected(web_client
     client = web_client
     session_id = SESSION_ID + "-interject-locked"
     assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
-    _complete_all_required_steps(client, session_id=session_id)
-    assert _complete_creation(client, session_id=session_id).status_code == 200
-    assert (
-        _consent(client, session_id=session_id, character_id=CHARACTER_ID, agree=True).status_code
-        == 200
-    )
+    cookies = _create_full_party(client, session_id=session_id)
+    _consent_full_party(client, cookies, session_id=session_id)
     assert _events_of_type(client, "party_roster_locked", session_id=session_id)
 
-    client.cookies.clear()
+    # 명단이 잠긴 뒤라 신원은 멀쩡하다 — 거절 사유가 「신원」이 아니라
+    # 「잠김」이어야 이 시험이 의미가 있다(그래서 hero-2의 진짜 쿠키를 쓴다).
+    _act_as(client, cookies[SECOND_CHARACTER_ID])
     interject_response = _interject(
         client,
         session_id=session_id,
@@ -604,43 +661,19 @@ def test_wrap_up_falls_back_to_a_nonempty_intro_when_provider_fails_twice(web_cl
 
 def test_consent_locks_only_once_everyone_created_has_agreed(web_client_with_fake_provider):
     """전원 동의에서만 명단이 잠긴다(D-10) — 한 사람이라도 미동의면
-    `party_roster_locked`가 없다."""
+    `party_roster_locked`가 없다.
+
+    G-12.3-11 뒤로 「전원」은 **방장이 정한 인원**만큼이다 — 먼저 끝낸
+    사람들끼리 동의해 봐야 나머지가 남아 있으면 안 잠긴다.
+    """
     provider = _WrapUpStub(fail_times=99)
     with web_client_with_fake_provider(action_classifier=provider) as client:
         session_id = SESSION_ID + "-consent-partial"
         assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
-        _complete_all_required_steps(
-            client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
-        )
-        assert (
-            _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
-            == 200
-        )
-        # hero-1의 서명 쿠키를 저장해 둔다(CR-01 뒤에는 consent가 신원을
-        # 반드시 요구하므로, 뒤에서 다시 hero-1 행세를 하려면 진짜 이
-        # 쿠키가 있어야 한다) — 그 다음 두 번째 사람을 흉내내려면 지운다.
-        hero1_cookie = client.cookies.get("gptrpg_character")
-        client.cookies.clear()
-        _complete_all_required_steps(
-            client,
-            character_id=SECOND_CHARACTER_ID,
-            browser_id=SECOND_BROWSER_ID,
-            session_id=session_id,
-            name="나리",
-        )
-        assert (
-            _complete_creation(
-                client, character_id=SECOND_CHARACTER_ID, browser_id=SECOND_BROWSER_ID,
-                session_id=session_id,
-            ).status_code
-            == 200
-        )
-        hero2_cookie = client.cookies.get("gptrpg_character")
+        cookies = _create_full_party(client, session_id=session_id)
 
-        # hero-1의 동의를 보내려면 hero-1의 진짜 쿠키로 돌아간다(진짜로는
-        # 서로 다른 브라우저다 — CR-01 뒤에는 `cookies.clear()`만으로는
-        # 더 이상 이 캐릭터 행세를 할 수 없다).
-        _act_as(client, hero1_cookie)
+        # 첫 사람만 동의 — 안 잠긴다.
+        _act_as(client, cookies[CHARACTER_ID])
         first_consent = _consent(
             client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
             agree=True,
@@ -659,16 +692,31 @@ def test_consent_locks_only_once_everyone_created_has_agreed(web_client_with_fak
         assert repeat_consent.json()["locked"] is False
         assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
 
-        _act_as(client, hero2_cookie)
+        # 둘째까지 동의해도 셋째가 남아 있으면 안 잠긴다.
+        _act_as(client, cookies[SECOND_CHARACTER_ID])
         second_consent = _consent(
             client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
             browser_id=SECOND_BROWSER_ID, agree=True,
         )
         assert second_consent.status_code == 200
-        assert second_consent.json()["locked"] is True
+        assert second_consent.json()["locked"] is False
+        assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
+        # 마지막 한 사람의 동의에서 잠긴다.
+        _act_as(client, cookies[THIRD_CHARACTER_ID])
+        third_consent = _consent(
+            client, session_id=session_id, character_id=THIRD_CHARACTER_ID,
+            browser_id=THIRD_BROWSER_ID, agree=True,
+        )
+        assert third_consent.status_code == 200
+        assert third_consent.json()["locked"] is True
         locked_events = _events_of_type(client, "party_roster_locked", session_id=session_id)
         assert len(locked_events) == 1
-        assert set(locked_events[0]["character_ids"]) == {CHARACTER_ID, SECOND_CHARACTER_ID}
+        assert set(locked_events[0]["character_ids"]) == {
+            CHARACTER_ID,
+            SECOND_CHARACTER_ID,
+            THIRD_CHARACTER_ID,
+        }
 
 
 def test_consent_with_someone_elses_character_id_is_rejected(web_client_with_fake_provider):
@@ -801,32 +849,11 @@ def test_disagreeing_reopens_only_that_step_and_invalidates_prior_consent(
     with web_client_with_fake_provider(action_classifier=provider) as client:
         session_id = SESSION_ID + "-consent-reopen"
         assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
-        _complete_all_required_steps(
-            client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
-        )
-        assert (
-            _complete_creation(client, character_id=CHARACTER_ID, session_id=session_id).status_code
-            == 200
-        )
-        # hero-1의 서명 쿠키를 저장해 둔다(CR-01 뒤에는 consent가 신원을
-        # 반드시 요구한다) — 그 다음 두 번째 사람을 흉내내려면 지운다.
-        hero1_cookie = client.cookies.get("gptrpg_character")
-        client.cookies.clear()
-        _complete_all_required_steps(
-            client,
-            character_id=SECOND_CHARACTER_ID,
-            browser_id=SECOND_BROWSER_ID,
-            session_id=session_id,
-            name="나리",
-        )
-        assert (
-            _complete_creation(
-                client, character_id=SECOND_CHARACTER_ID, browser_id=SECOND_BROWSER_ID,
-                session_id=session_id,
-            ).status_code
-            == 200
-        )
-        hero2_cookie = client.cookies.get("gptrpg_character")
+        # 정원(셋)이 전부 완성한다 — G-12.3-11 뒤로는 정한 인원만큼
+        # 끝나야 잠금 판정 자체가 열린다.
+        cookies = _create_full_party(client, session_id=session_id)
+        hero1_cookie = cookies[CHARACTER_ID]
+        hero2_cookie = cookies[SECOND_CHARACTER_ID]
 
         # hero-1이 먼저 동의한다 — hero-1의 진짜 쿠키로 돌아간다.
         _act_as(client, hero1_cookie)
@@ -886,8 +913,18 @@ def test_disagreeing_reopens_only_that_step_and_invalidates_prior_consent(
         assert hero2_reconsent.json()["locked"] is False
         assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
 
+        # hero-3까지 동의해도 hero-1이 남아 있으면 여전히 안 잠긴다.
+        _act_as(client, cookies[THIRD_CHARACTER_ID])
+        hero3_consent = _consent(
+            client, session_id=session_id, character_id=THIRD_CHARACTER_ID,
+            browser_id=THIRD_BROWSER_ID, agree=True,
+        )
+        assert hero3_consent.status_code == 200
+        assert hero3_consent.json()["locked"] is False
+        assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
         # hero-1이 다시 동의하면 그제서야 전원 동의로 잠긴다 — hero-1의
-        # 진짜 쿠키로 돌아간다(지금 쿠키는 hero-2다, 방금 재완성).
+        # 진짜 쿠키로 돌아간다.
         _act_as(client, hero1_cookie)
         hero1_reconsent = _consent(
             client, session_id=session_id, character_id=CHARACTER_ID, browser_id=BROWSER_ID,
@@ -975,7 +1012,7 @@ class _CreationGmRoleAwareStub:
         raise NotImplementedError("이 이중체는 complete()만 시험한다")
 
 
-def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_fake_provider):
+def test_the_whole_creation_flow_passes_for_a_full_party_in_order(web_client_with_fake_provider):
     """사장님 흐름도 아홉 마디 — 인원 확정 → 필수 항목 안내 → 지목 →
     서사·값 → (되돌리기) → (끼어들기) → 되묻기 → 완성 → 정리 → 동의 →
     잠금 — 이 두 사람 기준으로 순서대로 통과한다(12.1-CONTEXT.md
@@ -986,8 +1023,17 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
     with web_client_with_fake_provider(action_classifier=provider) as client:
         session_id = SESSION_ID + "-full-flow"
 
-        # ① 인원 확정(D-01) — 룰북 권장 범위(3~5) 안에서, 실제 참가자는
-        # 둘뿐이다(출석과 명단은 다르다, D-08).
+        # ① 인원 확정(D-01) — 룰북 권장 범위(3~5) 안에서 셋으로 정하고,
+        # 셋이 전부 참여한다.
+        #
+        # **이 시험은 예전에 「셋으로 정하고 둘만 참여해도 잠긴다」를
+        # D-08(출석≠명단)을 근거로 일부러 못 박고 있었다.** 그 규칙은
+        # 2026-08-23 UAT에서 실제 피해로 드러나 사장님이 바꿨다
+        # (G-12.3-11): 먼저 끝낸 한 사람이 혼자 명단을 잠가 아직 아무것도
+        # 안 누른 참가자들이 영구히 배제됐다(D-08은 잠금을 되돌리는 사건을
+        # 두지 않는다). 새 규칙은 「정한 인원이 다 끝내고 그 전원이 동의해야
+        # 시작」이다. D-08의 출석≠명단은 **이미 만들어진 명단으로 노는 날**의
+        # 얘기로 남는다 — 명단을 만드는 이 자리와 다른 층이다.
         assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
 
         # ② 필수 항목 안내(D-03)
@@ -1126,6 +1172,21 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
             == 200
         )
         hero2_cookie = client.cookies.get("gptrpg_character")
+        client.cookies.clear()  # 셋째 차례 — 또 다른 브라우저.
+
+        # hero-3도 같은 절차를 따른다.
+        _complete_all_required_steps(
+            client, character_id=THIRD_CHARACTER_ID, browser_id=THIRD_BROWSER_ID,
+            session_id=session_id, name="다래",
+        )
+        assert (
+            _complete_creation(
+                client, character_id=THIRD_CHARACTER_ID, browser_id=THIRD_BROWSER_ID,
+                session_id=session_id,
+            ).status_code
+            == 200
+        )
+        hero3_cookie = client.cookies.get("gptrpg_character")
 
         # ⑦ 정리와 한 줄 소개(CHAR-03/D-10)
         wrap_up_response = _wrap_up(client, session_id=session_id)
@@ -1135,6 +1196,7 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
         assert {intro["character_id"] for intro in wrap_up_body["intros"]} == {
             CHARACTER_ID,
             SECOND_CHARACTER_ID,
+            THIRD_CHARACTER_ID,
         }
 
         # ⑧ 동의(D-10) — 전원 동의에서만 잠긴다. 각자 자기 쿠키로 보낸다
@@ -1153,7 +1215,15 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
             browser_id=SECOND_BROWSER_ID, agree=True,
         )
         assert second_consent.status_code == 200
-        assert second_consent.json()["locked"] is True
+        assert second_consent.json()["locked"] is False
+
+        _act_as(client, hero3_cookie)
+        third_consent = _consent(
+            client, session_id=session_id, character_id=THIRD_CHARACTER_ID,
+            browser_id=THIRD_BROWSER_ID, agree=True,
+        )
+        assert third_consent.status_code == 200
+        assert third_consent.json()["locked"] is True
 
         # ⑨ 잠금 — 전원 점유 상태로 잠금을 맞는다(CHAR-05가 여러 사람에서도
         # 성립하는지). `client.app`은 이 세션의 살아 있는 액터를 그대로
@@ -1162,11 +1232,13 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
         live_state = client.app.state.registry.get_or_create(session_id).state
 
         assert live_state.party_roster is not None
-        assert set(live_state.party_roster) == {CHARACTER_ID, SECOND_CHARACTER_ID}
-        assert set(live_state.created_characters) == {CHARACTER_ID, SECOND_CHARACTER_ID}
+        expected_party = {CHARACTER_ID, SECOND_CHARACTER_ID, THIRD_CHARACTER_ID}
+        assert set(live_state.party_roster) == expected_party
+        assert set(live_state.created_characters) == expected_party
         assert live_state.occupied_by == {
             CHARACTER_ID: BROWSER_ID,
             SECOND_CHARACTER_ID: SECOND_BROWSER_ID,
+            THIRD_CHARACTER_ID: THIRD_BROWSER_ID,
         }
 
         # 재시작 생존 — 사건 기록만 저장소에서 다시 읽어 접어도(새 액터를
@@ -1221,6 +1293,6 @@ def test_the_whole_creation_flow_passes_for_two_people_in_order(web_client_with_
         )
         lock_again_response = client.post(
             f"/api/sessions/{session_id}/creation/lock-roster",
-            json={"character_ids": [CHARACTER_ID, SECOND_CHARACTER_ID]},
+            json={"character_ids": [CHARACTER_ID, SECOND_CHARACTER_ID, THIRD_CHARACTER_ID]},
         )
         assert lock_again_response.status_code == 409

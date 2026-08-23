@@ -8,6 +8,8 @@
 
 import json
 
+from tests.conftest import lock_creation_roster
+
 from gptrpg.agents.creation_gm import (
     CreationGmContractViolation,
     CreationGmFollowUp,
@@ -454,28 +456,14 @@ def test_all_three_routes_return_409_after_roster_is_locked(web_client_with_fake
     provider = _CreationGmStub(complete_value=json.dumps([{"needs_more": False, "question": None}]))
     with web_client_with_fake_provider(action_classifier=provider) as client:
         session_id = SESSION_ID + "-locked"
-        assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
-        _complete_all_required_steps(client, session_id=session_id)
-        complete_response = client.post(
-            f"/api/sessions/{session_id}/creation/complete",
-            json={
-                "character_id": CHARACTER_ID,
-                "browser_id": BROWSER_ID,
-                "rulebook_id": "dungeonworld_like",
-                "one_line_intro": "브람은 조용한 마을을 떠나온 모험가다.",
-            },
-        )
-        assert complete_response.status_code == 200
-        # 12.1-04부터 동의 표시가 잠금의 전제다(D-10) — `/creation/consent`를
-        # 지나 잠근다(`/creation/lock-roster` 직접 호출은 동의 없이 이제
-        # 409다, `tests/test_creation_tracer.py`의
-        # `test_lock_roster_directly_without_consent_is_rejected` 참조).
-        consent_response = client.post(
-            f"/api/sessions/{session_id}/creation/consent",
-            json={"character_id": CHARACTER_ID, "browser_id": BROWSER_ID, "agree": True},
-        )
-        assert consent_response.status_code == 200
-        assert consent_response.json()["locked"] is True
+        # 12.1-04부터 동의 표시가 잠금의 전제고(D-10), G-12.3-11 뒤로는
+        # 정한 인원이 전부 완성돼야 한다 — 그 조립은 conftest에 한 번만
+        # 적혀 있다.
+        cookies = lock_creation_roster(client, session_id)
+        # 거절 사유가 「신원」이 아니라 「잠김」이어야 이 시험이 의미가
+        # 있다 — hero-1의 진짜 쿠키로 돌아간다(지금은 마지막 동의자의 것).
+        client.cookies.clear()
+        client.cookies.set("gptrpg_character", cookies[CHARACTER_ID])
 
         assert _announce(client, session_id=session_id).status_code == 409
         assert _nominate(client, session_id=session_id).status_code == 409

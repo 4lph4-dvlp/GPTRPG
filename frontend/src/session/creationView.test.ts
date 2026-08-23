@@ -427,18 +427,44 @@ describe("consentGate", () => {
     expect(consentGate(state, true)).toBe("not_ready");
   });
 
-  it("전원 완성됐지만 GM 정리가 아직 없으면 needs_wrap_up이다", () => {
+  it("정한 인원만큼 완성됐지만 GM 정리가 아직 없으면 needs_wrap_up이다", () => {
     const state = baseState({
       party_roster: null,
+      party_size_fixed: 1,
       creation_characters: [{ character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true }],
       creation_unfinished_character_ids: [],
     });
     expect(consentGate(state, false)).toBe("needs_wrap_up");
   });
 
-  it("전원 완성되고 GM 정리도 있으면 open이다", () => {
+  it("정한 인원만큼 완성되고 GM 정리도 있으면 open이다", () => {
     const state = baseState({
       party_roster: null,
+      party_size_fixed: 1,
+      creation_characters: [{ character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true }],
+      creation_unfinished_character_ids: [],
+    });
+    expect(consentGate(state, true)).toBe("open");
+  });
+
+  // G-12.3-11 — 아직 아무것도 안 누른 참가자는
+  // `creation_unfinished_character_ids`에 원리적으로 못 들어간다. 그래서
+  // 먼저 끝낸 한 사람에게 「이대로 시작」이 떠서 나머지가 영구히
+  // 배제됐다. 방장이 정한 인원이 유일하게 그것을 아는 숫자다.
+  it("정한 인원보다 적게 완성됐으면 not_ready다 — 아직 아무것도 안 누른 사람이 남아 있다", () => {
+    const state = baseState({
+      party_roster: null,
+      party_size_fixed: 3,
+      creation_characters: [{ character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true }],
+      creation_unfinished_character_ids: [],
+    });
+    expect(consentGate(state, true)).toBe("not_ready");
+  });
+
+  it("인원이 아직 안 정해졌으면 이 검사는 아무 말도 안 한다", () => {
+    const state = baseState({
+      party_roster: null,
+      party_size_fixed: null,
       creation_characters: [{ character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true }],
       creation_unfinished_character_ids: [],
     });

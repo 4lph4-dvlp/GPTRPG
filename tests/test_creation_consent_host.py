@@ -26,6 +26,8 @@ CHARACTER_ID = "hero-1"
 BROWSER_ID = "b-hero-1"
 SECOND_CHARACTER_ID = "hero-2"
 SECOND_BROWSER_ID = "b-hero-2"
+THIRD_CHARACTER_ID = "hero-3"
+THIRD_BROWSER_ID = "b-hero-3"
 
 
 def _fix_party_size(client, *, count: int = 3, session_id: str = SESSION_ID, browser_id: str = ""):
@@ -220,6 +222,28 @@ def test_consent_and_lock_survive_a_simulated_restart(web_client):
         == 200
     )
     hero2_cookie = client.cookies.get("gptrpg_character")
+    client.cookies.clear()
+
+    # 셋째까지 끝낸다 — 이번 판은 3명짜리로 정해졌고, 그 수만큼 실제로
+    # 완성돼야 명단을 잠글 수 있다(G-12.3-11). 던전월드류의 최소 인원도
+    # 3이므로 둘로 판을 여는 것은 룰북이 애초에 허락하지 않는다.
+    _complete_all_required_steps(
+        client,
+        character_id=THIRD_CHARACTER_ID,
+        browser_id=THIRD_BROWSER_ID,
+        session_id=session_id,
+        name="다래",
+    )
+    assert (
+        _complete_creation(
+            client,
+            character_id=THIRD_CHARACTER_ID,
+            browser_id=THIRD_BROWSER_ID,
+            session_id=session_id,
+        ).status_code
+        == 200
+    )
+    hero3_cookie = client.cookies.get("gptrpg_character")
 
     # 한 명(hero-1)만 동의한다 — creation_consent_recorded 사건이 하나
     # 생기고 agree가 true다.
@@ -242,23 +266,40 @@ def test_consent_and_lock_survive_a_simulated_restart(web_client):
     assert rebuilt.creation_consents == {CHARACTER_ID: True}
     assert rebuilt.party_roster is None
 
-    # 나머지 한 명(hero-2)도 동의하면 같은 요청 안에서 party_roster_locked
-    # 사건이 생기고 응답의 locked가 참이다.
+    # 둘째가 동의해도 아직 안 잠긴다 — 셋째가 남았다.
     _act_as(client, hero2_cookie)
     second = _consent(
         client, session_id=session_id, character_id=SECOND_CHARACTER_ID,
         browser_id=SECOND_BROWSER_ID, agree=True,
     )
     assert second.status_code == 200
-    assert second.json()["locked"] is True
+    assert second.json()["locked"] is False
+
+    # 마지막 한 명까지 동의하면 같은 요청 안에서 party_roster_locked
+    # 사건이 생기고 응답의 locked가 참이다.
+    _act_as(client, hero3_cookie)
+    third = _consent(
+        client, session_id=session_id, character_id=THIRD_CHARACTER_ID,
+        browser_id=THIRD_BROWSER_ID, agree=True,
+    )
+    assert third.status_code == 200
+    assert third.json()["locked"] is True
 
     locked_events = _events_of_type(client, "party_roster_locked", session_id=session_id)
     assert len(locked_events) == 1
-    assert set(locked_events[0]["character_ids"]) == {CHARACTER_ID, SECOND_CHARACTER_ID}
+    assert set(locked_events[0]["character_ids"]) == {
+        CHARACTER_ID,
+        SECOND_CHARACTER_ID,
+        THIRD_CHARACTER_ID,
+    }
 
     rebuilt_after_lock = _rebuild_state(client, session_id)
     assert rebuilt_after_lock.party_roster is not None
-    assert set(rebuilt_after_lock.party_roster) == {CHARACTER_ID, SECOND_CHARACTER_ID}
+    assert set(rebuilt_after_lock.party_roster) == {
+        CHARACTER_ID,
+        SECOND_CHARACTER_ID,
+        THIRD_CHARACTER_ID,
+    }
 
 
 def test_disagreeing_reopens_the_step_in_reconstructed_state_and_closes_on_refill(web_client):
@@ -736,3 +777,55 @@ def test_a_restart_of_the_liveness_table_does_not_let_a_stranger_ambush_the_host
     assert second_ambush.status_code == 200
     assert second_ambush.json()["you_are_host"] is False
     assert len(_events_of_type(client, "creation_host_claimed", session_id=session_id)) == 1
+
+
+# ---------------------------------------------------------------------------
+# G-12.3-11 (12.3-UAT.md) — 아직 아무것도 안 누른 참가자를 두고 판이
+# 시작되면 안 된다. 기존 검사들은 전부 `_unfinished_creation_candidates()`,
+# 즉 **항목을 하나라도 낸 사람**만 본다 — 들어와서 아직 아무것도 안 누른
+# 사람은 그 목록에 원리적으로 못 들어간다. 방장이 정한 인원수만이 이
+# 세션이 몇 명짜리인지 아는 닫힌 숫자다.
+# ---------------------------------------------------------------------------
+
+
+def test_one_finisher_cannot_lock_the_roster_when_the_party_was_fixed_at_three(web_client):
+    client = web_client
+    session_id = "creation-party-size-shortfall"
+
+    assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+
+    # 한 사람만 끝까지 간다. 나머지 둘은 아무것도 안 눌렀으므로 어떤
+    # 「미완성」 목록에도 안 잡힌다.
+    _complete_all_required_steps(
+        client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
+    )
+    assert (
+        _complete_creation(
+            client, character_id=CHARACTER_ID, browser_id=BROWSER_ID, session_id=session_id
+        ).status_code
+        == 200
+    )
+    assert (
+        _consent(
+            client,
+            session_id=session_id,
+            character_id=CHARACTER_ID,
+            browser_id=BROWSER_ID,
+            agree=True,
+        ).status_code
+        == 200
+    )
+
+    # 혼자 동의했다고 판이 시작되지 않는다.
+    assert _poll_state(client, session_id=session_id)["party_roster"] is None
+    assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
+    # 명단 잠금을 직접 불러도 거절당하고, 그 이유가 사람이 읽을 문장이다(D-15).
+    response = client.post(
+        f"/api/sessions/{session_id}/creation/lock-roster",
+        json={"character_ids": [CHARACTER_ID]},
+    )
+    assert response.status_code == 409, response.text
+    detail = response.json()["detail"]
+    assert "3명" in detail and "1명" in detail
+    assert "(" not in detail  # 파이썬 내부 표현이 안 샌다

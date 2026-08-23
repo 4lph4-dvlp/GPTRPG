@@ -279,7 +279,12 @@ export const COPY = {
    * 항상 이 문구를 얹는다(「폴백을 조용히 정상처럼 보여주지 않는다」).
    */
   creationGmSilent: "진행자가 잠시 말을 잃었지만 계속합니다",
-  creationSayMore: "더 말하기",
+  /** 되물음을 받았을 때 「어디에 답하는가」를 가리키는 한 줄. 답을 적는
+   * 칸은 판 맨 아래에 **항상** 있는데(D-08 「말은 항상 열려 있다」,
+   * `InterjectBox`), 되물음 관문만 보고 있으면 그것이 안 보인다 —
+   * 예전 「더 말하기」 단추는 상태만 되돌려 아무 일도 안 한 것처럼
+   * 보였다(G-12.3-12). */
+  creationAnswerBelow: "아래 입력칸에 답을 적을 수 있어요.",
   creationDoneTalking: "이걸로 끝",
   creationAskGm: "진행자에게 물어보기",
   creationEdit: "고치기",
