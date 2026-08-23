@@ -1822,6 +1822,20 @@ class SessionActor:
                 "아직 한창 만드는 중인 사람이 있어 파티 명단을 잠글 수 없다"
                 f"(CR-02): {unfinished!r}"
             )
+        if self.state.reopened_creation_steps:
+            # G-12.3-22 — 「고칠 게 있어요」로 다시 연 항목이 아직 안
+            # 채워진 채로 잠그면, 고치는 중이던 값 대신 **옛 값으로** 판이
+            # 시작된다. 화면도 이 상태에서 「이대로 시작」을 안 그리지만
+            # (`consentGate`), 이 명령을 직접 부르는 경로는 그 화면을
+            # 안 지나므로 여기서도 막는다 — 위 CR-02 검사와 같은 이유다.
+            still_open = sorted(
+                f"{character_id}:{step_id}"
+                for character_id, step_id in self.state.reopened_creation_steps
+            )
+            raise CommandRejected(
+                "아직 다시 채우지 않은 항목이 있어 파티 명단을 잠글 수 없다"
+                f": {still_open!r}"
+            )
         shortfall = self._party_size_shortfall()
         if shortfall:
             raise CommandRejected(

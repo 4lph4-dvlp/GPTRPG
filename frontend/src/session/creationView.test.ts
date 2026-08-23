@@ -17,6 +17,7 @@ import type {
 import {
   canEdit,
   consentGate,
+  wrapUpIsCurrent,
   type CreationStepRow,
   creationErrorMessage,
   creationRollsFrom,
@@ -690,5 +691,64 @@ describe("남은 개수로 배정 가능한 값을 고른다 (G-12.3-6)", () => 
     };
     const remaining = remainingFixedValues(POOL, assignment);
     expect(remaining.get(2)).toBe(0);
+  });
+});
+
+describe("wrapUpIsCurrent", () => {
+  // G-12.3-23 — 실제 시험(2026-08-23)에서 곽철용을 김철용으로 고쳤는데
+  // 게임에는 곽철용으로 들어갔다. `wrap_up`이 캐릭터를 다시 만들어
+  // 표시 이름을 그 시점 값으로 조립하는데, 화면이 「정리 사건이 하나라도
+  // 있나」만 보고 있어서 고치기 전의 정리가 그대로 세어졌다.
+  const wrapUpLine = (seq: number): GameEvent =>
+    ({
+      event_type: "creation_gm_spoke",
+      seq,
+      kind: "wrap_up",
+      say: "이렇게 진행할까요?",
+      target_character_id: null,
+      dedupe_key: `wrap_up:${seq}`,
+    }) as unknown as GameEvent;
+
+  const stateWithLatestStepSeq = (seq: number) =>
+    baseState({
+      creation_step_values: [
+        {
+          character_id: "hero-1",
+          step_id: "name",
+          kind: "free_text",
+          text_value: "김철용",
+          picked: null,
+          axis_values: null,
+          rolls: null,
+          seq,
+        },
+      ],
+    });
+
+  it("정리가 하나도 없으면 거짓이다", () => {
+    expect(wrapUpIsCurrent(stateWithLatestStepSeq(5), [])).toBe(false);
+  });
+
+  it("정리가 마지막 항목 값보다 나중이면 참이다", () => {
+    expect(wrapUpIsCurrent(stateWithLatestStepSeq(5), [wrapUpLine(9)])).toBe(true);
+  });
+
+  it("정리 뒤에 항목을 고쳤으면 거짓이다 — 정리를 다시 받아야 한다", () => {
+    expect(wrapUpIsCurrent(stateWithLatestStepSeq(12), [wrapUpLine(9)])).toBe(false);
+  });
+});
+
+describe("consentGate — 다시 연 항목", () => {
+  it("아직 안 채운 항목이 남아 있으면 not_ready다 (G-12.3-22)", () => {
+    const state = baseState({
+      party_roster: null,
+      party_size_fixed: 1,
+      creation_characters: [
+        { character_id: "hero-1", display_name: "브람", consented: false, required_steps_filled: true },
+      ],
+      creation_unfinished_character_ids: [],
+      creation_reopened_step_ids: [{ character_id: "hero-1", step_id: "name" }],
+    });
+    expect(consentGate(state, true)).toBe("not_ready");
   });
 });

@@ -138,6 +138,25 @@ def _fallback_requirements_text(step_labels: tuple[tuple[str, bool], ...]) -> st
     return f"캐릭터를 만들려면 다음이 필요합니다:\n{lines}"
 
 
+CREATION_GM_MAX_TOKENS = 2048
+"""만들기 GM 네 호출의 응답 토큰 상한(G-12.3-21).
+
+**예전에는 되묻기·지목이 512였다.** 이 저장소의 다른 모든 AI 호출은
+1024 이상이고, 만들기 GM은 그중에서도 가장 큰 모델(550B)을 쓴다.
+그 모델은 답을 내기 전에 **생각을 글로 늘어놓을 때가 있는데**, 512는
+그 생각만으로 다 차서 정작 JSON에 도달하지 못한다.
+
+2026-08-23 시험에서 잡은 실제 잘린 응답:
+    'The player has shared:\n1. They were a 2014 boxer, national team
+     qualifier finals... \nKey narrative ho'          ← 여기서 끊김
+파서는 `needs_more`를 못 찾아 계약 위반으로 떨어지고, 화면에는
+"진행자가 잠시 말을 잃었지만 계속합니다"가 뜬다. `CREATION_GM_TIMEOUT_S`와
+**같은 종류의 실수**다 — 작은 작업용 값을 큰 모델의 창작 작업에 썼다.
+
+네 호출이 같은 값을 쓴다 — 실제 답(JSON)은 어느 쪽도 몇 백 토큰을 안
+넘으므로, 여유는 전부 생각할 자리다."""
+
+
 def announce_requirements(
     rulebook: Rulebook,
     provider: Provider,
@@ -161,7 +180,7 @@ def announce_requirements(
 
     def _call_once() -> AgentResult:
         return provider.complete(
-            model=model, system=system, messages=messages, max_tokens=1024, timeout_s=timeout_s
+            model=model, system=system, messages=messages, max_tokens=CREATION_GM_MAX_TOKENS, timeout_s=timeout_s
         )
 
     result, _last_error_text = call_with_one_retry(_call_once, timeout_s=timeout_s)
@@ -197,7 +216,7 @@ def nominate_speaker(
 
     def _call_once() -> AgentResult:
         return provider.complete(
-            model=model, system=system, messages=messages, max_tokens=512, timeout_s=timeout_s
+            model=model, system=system, messages=messages, max_tokens=CREATION_GM_MAX_TOKENS, timeout_s=timeout_s
         )
 
     result, _last_error_text = call_with_one_retry(_call_once, timeout_s=timeout_s)
@@ -242,7 +261,7 @@ def judge_hooks(
 
     def _call_once() -> AgentResult:
         return provider.complete(
-            model=model, system=system, messages=messages, max_tokens=512, timeout_s=timeout_s
+            model=model, system=system, messages=messages, max_tokens=CREATION_GM_MAX_TOKENS, timeout_s=timeout_s
         )
 
     result, _last_error_text = call_with_one_retry(_call_once, timeout_s=timeout_s)
@@ -305,7 +324,7 @@ def wrap_up(
 
     def _call_once() -> AgentResult:
         return provider.complete(
-            model=model, system=system, messages=messages, max_tokens=1536, timeout_s=timeout_s
+            model=model, system=system, messages=messages, max_tokens=CREATION_GM_MAX_TOKENS, timeout_s=timeout_s
         )
 
     result, _last_error_text = call_with_one_retry(_call_once, timeout_s=timeout_s)

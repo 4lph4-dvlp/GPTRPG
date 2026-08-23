@@ -63,6 +63,7 @@ import { MAX_RAW_TEXT_LEN } from "../config.ts";
 import {
   canEdit,
   consentGate,
+  wrapUpIsCurrent,
   type CreationStepRow,
   creationErrorMessage,
   creationTurn,
@@ -554,7 +555,10 @@ export function CreationPane({
   // 「kind: "wrap_up"」인 GM 말이 기록에 있는가 — 존재 여부만 본다(진행
   // 상태를 다시 계산하지 않는다, D-04). consentGate가 이 값과 state를
   // 조합해 네 갈래를 고른다.
-  const wrappedUp = gmLines.some((line) => line.kind === "wrap_up");
+  // 「정리 사건이 하나라도 있나」가 아니라 「지금 값 기준의 정리인가」다
+  // (G-12.3-23) — 누가 항목을 고쳤으면 정리를 다시 받아야 그 값이
+  // 캐릭터에 반영된다.
+  const wrappedUp = wrapUpIsCurrent(state, events);
   // 「kind: "announce"」인 GM 말이 기록에 있는가 — shouldNominateNext가
   // 요구하는 값이다(CHAR-06의 흐름이 안내부터 시작한다).
   const announced = gmLines.some((line) => line.kind === "announce");
@@ -882,11 +886,16 @@ export function CreationPane({
               받고 D-12가 AI를 한 번으로 접지만, 모두에게 같은 단추가 뜨면
               「전원이 눌러야 하나」로 읽힌다 — 한 사람의 일이라는 것이
               화면에 드러나야 한다. */}
-          {youAreHost ? (
+          {busy ? (
+            // 정리는 전원의 이야기를 한 번에 읽는 일이라 가장 오래
+            // 걸린다 — 여기 표시가 없으면 새로고침할 위험이 제일 크다.
+            // 방장이 아닌 사람도 이때는 같은 표시를 본다(같은 일을
+            // 기다리고 있다).
+            <Waiting label={COPY.creationWrapUpWaiting2} />
+          ) : youAreHost ? (
             <button
               type="button"
               className="btn btn--primary btn--wide"
-              disabled={busy}
               onClick={() => void askWrapUp()}
             >
               {COPY.creationAskWrapUp}

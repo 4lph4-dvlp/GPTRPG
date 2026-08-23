@@ -216,6 +216,13 @@ export function consentGate(state: GameStateView, wrappedUp: boolean): ConsentGa
   if (state.party_roster !== null) {
     return "locked";
   }
+  // G-12.3-22 — 누군가 「고칠 게 있어요」로 항목을 다시 열어 놓고 아직
+  // 안 채웠으면 시작할 수 없다. 예전에는 이 값을 아무도 안 봐서
+  // 「이대로 시작」이 그대로 눌렸고, 고치는 중이던 값 대신 **옛 값으로**
+  // 판이 시작됐다.
+  if (state.creation_reopened_step_ids.length > 0) {
+    return "not_ready";
+  }
   if (state.creation_characters.length === 0 || state.creation_unfinished_character_ids.length > 0) {
     return "not_ready";
   }
@@ -234,6 +241,36 @@ export function consentGate(state: GameStateView, wrappedUp: boolean): ConsentGa
     return "not_ready";
   }
   return wrappedUp ? "open" : "needs_wrap_up";
+}
+
+/**
+ * GM의 정리가 **지금 값 기준**인가(G-12.3-23).
+ *
+ * `wrap_up`은 캐릭터를 다시 만들어(`CreateCharacter` 재제출) 표시 이름과
+ * 능력치를 그 시점의 항목 값으로 다시 조립한다. 그래서 누가 항목을
+ * 고친 뒤에는 **정리를 다시 받아야** 고친 값이 캐릭터에 반영된다.
+ *
+ * 예전에는 화면이 「wrap_up 사건이 하나라도 있나」만 봤다. 고치기 전에
+ * 받은 정리가 그대로 「정리됨」으로 세어져, 고친 뒤에도 동의 관문이
+ * 곧바로 열리고 **옛 이름 그대로 판이 시작됐다** — 실제 시험에서
+ * 곽철용을 김철용으로 고쳤는데 게임에는 곽철용으로 들어갔다.
+ *
+ * 서버는 이미 같은 규율을 갖고 있다: `wrap_up`의 중복방지 키가 항목
+ * 값의 최대 순번을 담으므로, 값이 바뀌면 새 키가 되어 AI를 다시 부르고
+ * 캐릭터를 다시 만든다. 화면이 그 사실을 안 보고 있었을 뿐이다.
+ */
+export function wrapUpIsCurrent(state: GameStateView, events: GameEvent[]): boolean {
+  const latestWrapUpSeq = gmLinesFrom(events)
+    .filter((line) => line.kind === "wrap_up")
+    .reduce((newest, line) => Math.max(newest, line.seq), -1);
+  if (latestWrapUpSeq < 0) {
+    return false;
+  }
+  const latestStepSeq = state.creation_step_values.reduce(
+    (newest, value) => Math.max(newest, value.seq),
+    -1,
+  );
+  return latestWrapUpSeq > latestStepSeq;
 }
 
 /**
