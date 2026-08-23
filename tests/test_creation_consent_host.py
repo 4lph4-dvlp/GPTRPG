@@ -829,3 +829,88 @@ def test_one_finisher_cannot_lock_the_roster_when_the_party_was_fixed_at_three(w
     detail = response.json()["detail"]
     assert "3명" in detail and "1명" in detail
     assert "(" not in detail  # 파이썬 내부 표현이 안 샌다
+
+
+# ---------------------------------------------------------------------------
+# G-12.3-22 (12.3-UAT.md) — 다시 열어 놓고 아직 안 채운 항목이 있으면 잠글
+# 수 없다. 화면(`consentGate`)도 이 상태에서 「이대로 시작」을 안 그리지만,
+# 그 화면을 안 지나는 경로(API 직접 호출)가 남으므로 서버도 막아야 한다.
+# ---------------------------------------------------------------------------
+
+
+def test_roster_cannot_be_locked_while_a_step_is_reopened_and_unfilled(web_client):
+    client = web_client
+    session_id = "creation-reopened-lock-guard"
+
+    assert _fix_party_size(client, count=1, session_id=session_id).status_code == 409, (
+        "던전월드류 최소는 3이다 — 이 시험의 전제를 먼저 확인한다"
+    )
+    assert _fix_party_size(client, count=3, session_id=session_id).status_code == 200
+
+    cookies = {}
+    for character_id, browser_id, name in (
+        (CHARACTER_ID, BROWSER_ID, "브람"),
+        (SECOND_CHARACTER_ID, SECOND_BROWSER_ID, "나리"),
+        (THIRD_CHARACTER_ID, THIRD_BROWSER_ID, "다래"),
+    ):
+        client.cookies.clear()
+        _complete_all_required_steps(
+            client,
+            character_id=character_id,
+            browser_id=browser_id,
+            session_id=session_id,
+            name=name,
+        )
+        assert (
+            _complete_creation(
+                client, character_id=character_id, browser_id=browser_id, session_id=session_id
+            ).status_code
+            == 200
+        )
+        cookies[character_id] = client.cookies.get("gptrpg_character")
+
+    # 한 사람이 「고칠 게 있어요」로 항목 하나를 다시 연다.
+    _act_as(client, cookies[SECOND_CHARACTER_ID])
+    reopened = _consent(
+        client,
+        session_id=session_id,
+        character_id=SECOND_CHARACTER_ID,
+        browser_id=SECOND_BROWSER_ID,
+        agree=False,
+        step_id="backstory",
+    )
+    assert reopened.status_code == 200
+    assert reopened.json()["reopened_step_id"] == "backstory"
+
+    # 다시 채우지 **않은** 채로 전원이 (다시) 동의한다 — 되돌아본 사람이
+    # 마음을 바꿔 그냥 동의를 눌러 버리는 자리다. 이때 동의 검사는 통과하고,
+    # 막을 것은 「아직 안 채운 항목이 있다」 하나뿐이다.
+    for character_id, browser_id in (
+        (CHARACTER_ID, BROWSER_ID),
+        (SECOND_CHARACTER_ID, SECOND_BROWSER_ID),
+        (THIRD_CHARACTER_ID, THIRD_BROWSER_ID),
+    ):
+        _act_as(client, cookies[character_id])
+        again = _consent(
+            client,
+            session_id=session_id,
+            character_id=character_id,
+            browser_id=browser_id,
+            agree=True,
+        )
+        assert again.status_code == 200, again.text
+        assert again.json()["locked"] is False, (
+            "아직 안 채운 항목이 있는데 잠기면 안 된다 — 고치던 값 대신 옛 값으로 시작된다"
+        )
+    assert not _events_of_type(client, "party_roster_locked", session_id=session_id)
+
+    # 화면을 건너뛰고 명단 잠금을 직접 불러도 거절된다.
+    response = client.post(
+        f"/api/sessions/{session_id}/creation/lock-roster",
+        json={
+            "character_ids": [CHARACTER_ID, SECOND_CHARACTER_ID, THIRD_CHARACTER_ID]
+        },
+    )
+    assert response.status_code == 409, response.text
+    assert "다시 채우지 않은 항목" in response.json()["detail"]
+    assert not _events_of_type(client, "party_roster_locked", session_id=session_id)

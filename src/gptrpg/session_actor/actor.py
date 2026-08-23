@@ -811,6 +811,14 @@ class SessionActor:
             return False
         if self._party_size_shortfall():
             return False
+        if self.state.reopened_creation_steps:
+            # G-12.3-22 — 다시 열어 놓고 아직 안 채운 항목이 있으면 「전원
+            # 동의」로 세지 않는다. 이 검사가 여기 **없으면** 자동 진행이
+            # 잠금을 시도하고 `_prepare_lock_roster`의 같은 검사가 거절해,
+            # 그 거절이 동의 요청의 409로 튀어나온다 — 마지막에 동의한
+            # 사람이 아무 잘못 없이 오류를 받는다. CR-02가 미완성자에게
+            # 이미 쓰는 것과 같은 이중 배치다.
+            return False
         return bool(self.state.created_characters) and all(
             self.state.creation_consents.get(character_id, False)
             for character_id in self.state.created_characters

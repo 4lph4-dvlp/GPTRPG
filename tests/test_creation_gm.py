@@ -640,3 +640,30 @@ def test_follow_up_asks_again_when_the_model_returns_broken_json(
         assert body["needs_more"] is True, "두 번째 호출의 정상 응답이 살아야 한다"
         assert body["question"] == "그 빚은 누구에게 진 건가요?"
         assert len(calls) >= 2, "깨진 응답 뒤에 한 번 더 물어야 한다"
+
+
+def test_creation_gm_calls_leave_room_for_the_model_to_think():
+    """네 호출이 전부 `CREATION_GM_MAX_TOKENS`를 쓰고, 그 값이 넉넉하다.
+
+    예전에는 되묻기·지목이 512였다 — 이 저장소의 다른 모든 AI 호출은
+    1024 이상인데 하필 가장 큰 모델(550B)을 쓰는 둘만 그랬다. 그 모델은
+    답을 내기 전에 생각을 글로 늘어놓을 때가 있어서, 512는 생각만으로
+    다 차고 JSON에 도달하지 못한다. 2026-08-23 시험에서 잡은 잘린 응답:
+        'The player has shared:\n1. They were a 2014 boxer... Key narrative ho'
+
+    **가짜 제공자로는 이 결함이 원리적으로 안 잡힌다** — 즉시·짧게
+    답하므로 상한에 닿는 경로가 실행되지 않는다. 그래서 값 자체를 고정한다.
+    """
+    import inspect
+
+    from gptrpg.agents import creation_gm
+
+    assert creation_gm.CREATION_GM_MAX_TOKENS >= 1024, (
+        "다른 모든 AI 호출이 1024 이상이다 — 가장 큰 모델을 쓰는 이쪽이 더 적으면 안 된다"
+    )
+    source = inspect.getsource(creation_gm)
+    assert "max_tokens=512" not in source, "되묻기·지목이 다시 512로 돌아갔다"
+    assert source.count("max_tokens=CREATION_GM_MAX_TOKENS") == 4, (
+        "네 호출(안내·지목·되묻기·정리)이 전부 같은 상한을 써야 한다"
+    )
+
