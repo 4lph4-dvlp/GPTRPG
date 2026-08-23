@@ -485,7 +485,16 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
               {error !== null ? (
                 <>
                   <p className="t-label">{error}</p>
-                  <button type="button" disabled={pending} onClick={() => void announce()}>
+                  {/* 이 화면의 다른 모든 단추와 같은 클래스를 쓴다 — 예전에는
+                      className이 아예 없어 브라우저 기본 회색 사각형으로 떴다.
+                      하필 GM 안내가 실패했을 때 사람이 쥘 수 있는 유일한
+                      복구 경로다(D-13 ①/②). */}
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={pending}
+                    onClick={() => void announce()}
+                  >
                     {COPY.creationAnnounceRetry}
                   </button>
                 </>

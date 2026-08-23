@@ -92,6 +92,9 @@ interface CreationPaneProps {
 
 interface ConversationLine {
   seq: number;
+  /** 이 줄을 말한 사람의 `character_id` — GM이면 `null`. 놀이 화면과 같은
+   * 방식으로 내 줄을 시각적으로 갈라 주기 위해 싣는다(UI 감사). */
+  speakerCharacterId: string | null;
   speaker: string;
   text: string;
 }
@@ -107,7 +110,7 @@ function conversationLines(
   const nameById = new Map(characters.map((character) => [character.character_id, character.display_name]));
   const lines: ConversationLine[] = [];
   for (const line of gmLinesFrom(events)) {
-    lines.push({ seq: line.seq, speaker: "진행자", text: line.say });
+    lines.push({ seq: line.seq, speakerCharacterId: null, speaker: "진행자", text: line.say });
   }
   for (const event of events) {
     if (event.event_type !== "creation_interjection") {
@@ -115,6 +118,7 @@ function conversationLines(
     }
     lines.push({
       seq: event.seq,
+      speakerCharacterId: event.speaker_character_id,
       speaker: nameById.get(event.speaker_character_id) ?? event.speaker_character_id,
       text: event.text,
     });
@@ -772,7 +776,17 @@ export function CreationPane({
           <p className="t-label">{COPY.loading}</p>
         ) : (
           conversation.map((line) => (
-            <div className="chat-line" key={line.seq}>
+            // 놀이 화면(`ChatPane.tsx`)과 같은 규칙 — 내 줄에만
+            // `chat-line--mine`이 붙어 놋쇠색으로 갈린다. 넷이 섞인
+            // 대화에서 이름표를 한 줄씩 읽지 않아도 화자가 보인다.
+            <div
+              className={
+                line.speakerCharacterId === myCharacterId
+                  ? "chat-line chat-line--mine"
+                  : "chat-line"
+              }
+              key={line.seq}
+            >
               <div className="chat-line__who">{line.speaker}</div>
               <div className="chat-line__text">{line.text}</div>
             </div>
