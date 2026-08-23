@@ -82,6 +82,9 @@ interface CreationPaneProps {
   state: GameStateView;
   events: GameEvent[];
   steps: CreationStepView[];
+  /** 이 브라우저가 방을 연 사람인가(D-11) — 「진행자에게 정리를
+   * 부탁하기」를 누가 보는지 정한다(G-12.3-16). */
+  youAreHost: boolean;
   pollNow: () => void;
 }
 
@@ -151,10 +154,20 @@ interface ControlProps {
   row: CreationStepRow;
   busy: boolean;
   onSubmit: (payload: StepSubmitPayload) => void;
+  /** 쓰다 만 글을 판이 대신 들고 있는다(G-12.3-18).
+   *
+   * 자유 서술 입력칸은 `activeRow`가 사라지면 통째로 언마운트된다 —
+   * 회복 시간(D-13)이 돌아 차례가 넘어가면 그 순간 일어난다. 지역
+   * `useState`에 있던 글은 그때 사라지고, 차례가 돌아와도 빈 칸으로
+   * 다시 뜬다. 실제 시험에서 마지막 참가자가 서사를 쓰는 도중 이걸
+   * 당했다. 판이 항목별로 들고 있으면 언마운트를 넘긴다. */
+  draft: string;
+  onDraftChange: (text: string) => void;
 }
 
-function FreeTextControl({ row, busy, onSubmit }: ControlProps) {
-  const [value, setValue] = useState(row.value?.text_value ?? "");
+function FreeTextControl({ row, busy, onSubmit, draft, onDraftChange }: ControlProps) {
+  const value = draft;
+  const setValue = onDraftChange;
   return (
     <div className="composer__row">
       <textarea
@@ -334,18 +347,58 @@ function RollToFillControl({ row, busy, onSubmit }: ControlProps) {
   );
 }
 
-function StepControl({ row, busy, onSubmit }: ControlProps) {
+function StepControl({ row, busy, onSubmit, draft, onDraftChange }: ControlProps) {
   switch (row.step.kind) {
     case "free_text":
-      return <FreeTextControl row={row} busy={busy} onSubmit={onSubmit} />;
+      return (
+        <FreeTextControl
+          row={row}
+          busy={busy}
+          onSubmit={onSubmit}
+          draft={draft}
+          onDraftChange={onDraftChange}
+        />
+      );
     case "pick_one":
-      return <PickOneControl row={row} busy={busy} onSubmit={onSubmit} />;
+      return (
+        <PickOneControl
+          row={row}
+          busy={busy}
+          onSubmit={onSubmit}
+          draft={draft}
+          onDraftChange={onDraftChange}
+        />
+      );
     case "place_fixed_values":
-      return <PlaceFixedValuesControl row={row} busy={busy} onSubmit={onSubmit} />;
+      return (
+        <PlaceFixedValuesControl
+          row={row}
+          busy={busy}
+          onSubmit={onSubmit}
+          draft={draft}
+          onDraftChange={onDraftChange}
+        />
+      );
     case "allocate_points":
-      return <AllocatePointsControl row={row} busy={busy} onSubmit={onSubmit} />;
+      return (
+        <AllocatePointsControl
+          row={row}
+          busy={busy}
+          onSubmit={onSubmit}
+          draft={draft}
+          onDraftChange={onDraftChange}
+        />
+      );
     case "roll_to_fill":
-      return <RollToFillControl row={row} busy={busy} onSubmit={onSubmit} />;
+      return (
+        <RollToFillControl
+          row={row}
+          busy={busy}
+          onSubmit={onSubmit}
+          draft={draft}
+          onDraftChange={onDraftChange}
+        />
+      );
     case "derive":
       // 조작이 없다 — 부모의 자동 확정 effect가 depends_on 충족 시
       // completeCreationStep을 스스로 부른다. 부모가 kind==="derive"인
@@ -462,6 +515,7 @@ export function CreationPane({
   state,
   events,
   steps,
+  youAreHost,
   pollNow,
 }: CreationPaneProps) {
   const myTurn = isMyTurn(state, myCharacterId);
@@ -486,6 +540,8 @@ export function CreationPane({
   // 같은 줄이 그대로 보였다.
   const chatRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
+  // 항목별로 쓰다 만 글(G-12.3-18). 확정하면 그 항목 것만 지운다.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [reopenPickerOpen, setReopenPickerOpen] = useState(false);
   const [consentMessage, setConsentMessage] = useState<string | null>(null);
   const submittedDeriveRef = useRef<Set<string>>(new Set());
@@ -516,6 +572,12 @@ export function CreationPane({
         ...payload,
       });
       setEditingStepId(null);
+      // 확정된 항목의 초안은 지운다 — 안 지우면 「고치기」로 다시 열
+      // 때 서버에 확정된 값이 아니라 옛 초안이 뜬다(G-12.3-18).
+      setDrafts((previous) => {
+        const { [stepId]: _submitted, ...rest } = previous;
+        return rest;
+      });
       pollNow();
     } catch (submitError) {
       setError(creationErrorMessage(submitError));
@@ -753,6 +815,12 @@ export function CreationPane({
                 row={activeRow}
                 busy={busy}
                 onSubmit={(payload) => void submitStep(activeRow.step.step_id, payload)}
+                draft={
+                  drafts[activeRow.step.step_id] ?? activeRow.value?.text_value ?? ""
+                }
+                onDraftChange={(text) =>
+                  setDrafts((previous) => ({ ...previous, [activeRow.step.step_id]: text }))
+                }
               />
             </div>
           ) : null}
@@ -793,14 +861,22 @@ export function CreationPane({
 
       {consentPhase === "needs_wrap_up" ? (
         <div className="proposal">
-          <button
-            type="button"
-            className="btn btn--primary btn--wide"
-            disabled={busy}
-            onClick={() => void askWrapUp()}
-          >
-            {COPY.creationAskWrapUp}
-          </button>
+          {/* 방을 연 사람에게만 단추를 준다(G-12.3-16). 서버는 누가 불러도
+              받고 D-12가 AI를 한 번으로 접지만, 모두에게 같은 단추가 뜨면
+              「전원이 눌러야 하나」로 읽힌다 — 한 사람의 일이라는 것이
+              화면에 드러나야 한다. */}
+          {youAreHost ? (
+            <button
+              type="button"
+              className="btn btn--primary btn--wide"
+              disabled={busy}
+              onClick={() => void askWrapUp()}
+            >
+              {COPY.creationAskWrapUp}
+            </button>
+          ) : (
+            <p className="t-label">{COPY.creationWrapUpWaiting}</p>
+          )}
         </div>
       ) : null}
 
@@ -836,13 +912,17 @@ export function CreationPane({
                   </div>
                 ) : (
                   <div className="composer__row">
+                    {/* 이미 동의했으면 다시 눌리지 않는다(G-12.3-17) —
+                        예전에는 눌러도 같은 모양이라 「계속 눌러야 하나」로
+                        헷갈렸다. 「아니요」는 살려 둔다: 마음이 바뀌면
+                        항목을 다시 열 수 있어야 한다(D-11). */}
                     <button
                       type="button"
                       className="btn btn--primary"
-                      disabled={busy}
+                      disabled={busy || character.consented}
                       onClick={() => void sendConsent(true)}
                     >
-                      {COPY.creationConsentYes}
+                      {character.consented ? COPY.creationConsentDone : COPY.creationConsentYes}
                     </button>
                     <button
                       type="button"

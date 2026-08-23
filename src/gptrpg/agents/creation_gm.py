@@ -38,7 +38,7 @@ CompleteCreationStep`만 한다 — 이 모듈은 그 경로에 닿을 방법이
 from dataclasses import dataclass
 
 from gptrpg.agents.envelope import AgentResult
-from gptrpg.agents.invoke import SCENE_ENTITY_TIMEOUT_S, call_with_one_retry
+from gptrpg.agents.invoke import CREATION_GM_TIMEOUT_S, call_with_one_retry
 from gptrpg.agents.json_parsing import try_parse_json_array
 from gptrpg.agents.prompt_assembly import (
     build_creation_announce_prompt,
@@ -143,7 +143,7 @@ def announce_requirements(
     provider: Provider,
     model: str,
     *,
-    timeout_s: float = SCENE_ENTITY_TIMEOUT_S,
+    timeout_s: float = CREATION_GM_TIMEOUT_S,
 ) -> str:
     """필수 항목을 안내하는 산문을 만든다(D-03).
 
@@ -178,7 +178,7 @@ def nominate_speaker(
     provider: Provider,
     model: str,
     *,
-    timeout_s: float = SCENE_ENTITY_TIMEOUT_S,
+    timeout_s: float = CREATION_GM_TIMEOUT_S,
 ) -> CreationGmNomination:
     """아직 자기소개를 안 끝낸 사람 중에서 다음 차례를 지목한다(D-06).
 
@@ -224,7 +224,7 @@ def judge_hooks(
     provider: Provider,
     model: str,
     *,
-    timeout_s: float = SCENE_ENTITY_TIMEOUT_S,
+    timeout_s: float = CREATION_GM_TIMEOUT_S,
 ) -> CreationGmFollowUp:
     """방금 나온 이야기에 더 물을 것이 있는지 판단한다(D-05 위층).
 
@@ -272,7 +272,7 @@ def wrap_up(
     provider: Provider,
     model: str,
     *,
-    timeout_s: float = SCENE_ENTITY_TIMEOUT_S,
+    timeout_s: float = CREATION_GM_TIMEOUT_S,
 ) -> CreationGmWrapUp:
     """전원 완성 뒤 GM이 정리하고 캐릭터마다 한 줄 소개를 낸다(CHAR-03/D-10).
 

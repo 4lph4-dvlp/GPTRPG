@@ -501,6 +501,7 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
               state={feed.state}
               events={feed.events}
               steps={steps}
+              youAreHost={youAreHost}
               pollNow={feed.pollNow}
             />
           ) : (

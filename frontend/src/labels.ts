@@ -332,6 +332,9 @@ export const COPY = {
   creationHostTookOver: "방을 연 사람이 자리를 비워 당신이 이어받았어요",
   /** 동의 관문(Phase 12.3-05 Task 2, D-03/D-11) 문구. */
   creationAskWrapUp: "진행자에게 정리를 부탁하기",
+  /** 방장이 아닌 사람에게 — 단추 대신 이 줄을 본다. 예전에는 모두에게
+   * 같은 단추가 떠서 「이걸 다 눌러야 하나」로 헷갈렸다(G-12.3-16). */
+  creationWrapUpWaiting: "방을 연 분이 진행자에게 정리를 부탁하면 이어져요.",
   creationConsentTitle: "이대로 시작해도 될까요?",
   creationConsentYes: "이대로 시작",
   creationConsentNo: "고칠 게 있어요",

@@ -534,3 +534,30 @@ def test_follow_up_says_the_gm_did_not_answer_when_the_provider_fails(
         body = response.json()
         assert body["needs_more"] is False
         assert body["gm_answered"] is False, "AI가 죽었는데 정상인 척하면 안 된다"
+
+
+# ---------------------------------------------------------------------------
+# G-12.3-15 (12.3-UAT.md) — 만들기 GM에게 말할 시간을 준다.
+# ---------------------------------------------------------------------------
+
+
+def test_creation_gm_calls_do_not_borrow_the_lightweight_classifier_timeout():
+    """네 호출이 전부 `CREATION_GM_TIMEOUT_S`를 쓴다.
+
+    예전에는 `SCENE_ENTITY_TIMEOUT_S`(5초)를 빌려 썼는데, 만들기 GM은
+    닫힌 목록에서 하나 고르는 경량 판단이 아니라 가장 큰 모델로 사람에게
+    할 말을 짓는 일이다. 2026-08-23 실측은 12.3~29.3초였다 — 네 번 다
+    5초를 넘겨, 실제 시험 내내 거의 모든 호출이 시간 초과로 떨어졌다.
+    """
+    import inspect
+
+    from gptrpg.agents import creation_gm
+    from gptrpg.agents.invoke import CREATION_GM_TIMEOUT_S, SCENE_ENTITY_TIMEOUT_S
+
+    assert CREATION_GM_TIMEOUT_S >= 30.0, (
+        "실측 최대가 29.3초였다 — 그보다 넉넉해야 한다"
+    )
+    for name in ("announce_requirements", "nominate_speaker", "judge_hooks", "wrap_up"):
+        default = inspect.signature(getattr(creation_gm, name)).parameters["timeout_s"].default
+        assert default == CREATION_GM_TIMEOUT_S, f"{name}의 제한이 어긋난다: {default}"
+        assert default != SCENE_ENTITY_TIMEOUT_S, f"{name}이 경량 분류용 제한을 쓴다"
