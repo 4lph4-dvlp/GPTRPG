@@ -88,6 +88,14 @@ class CreationGmFollowUp:
 
     needs_more: bool
     question: str | None
+    gm_answered: bool = True
+    """GM이 실제로 판단했는가(G-12.3-14).
+
+    `needs_more=False`는 두 가지 서로 다른 일에서 나온다 — 「GM이 더 물을
+    것이 없다고 했다」와 「제공자 호출이 두 번 다 실패해 폴백했다」
+    (ARCH-05). 값만으로는 안 갈리므로 화면이 둘 다 「진행자가 잠시 말을
+    잃었지만 계속합니다」로 적었고, 그러면 멀쩡히 돌아간 판이 고장난 것처럼
+    보인다. 이 칸이 그 둘을 가른다."""
 
 
 @dataclass(frozen=True)
@@ -239,7 +247,12 @@ def judge_hooks(
 
     result, _last_error_text = call_with_one_retry(_call_once, timeout_s=timeout_s)
     if not result.ok:
-        return CreationGmFollowUp(needs_more=False, question=None)
+        # 제공자가 두 번 다 실패했다 — 이것은 **GM의 판단이 아니다**.
+        # 되묻지 않는 것으로 폴백하되(ARCH-05, 500을 안 낸다) 그 사실을
+        # 숨기지 않는다(G-12.3-14). 예전에는 이 자리가 「GM이 더 물을 게
+        # 없다」와 똑같은 값을 돌려줘서, 실제로 AI가 죽어 있는데도 화면이
+        # 정상인 척할 수 있었다.
+        return CreationGmFollowUp(needs_more=False, question=None, gm_answered=False)
 
     parsed = _parse_single_object(str(result.value))
     needs_more = parsed.get("needs_more")

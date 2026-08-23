@@ -622,6 +622,11 @@ export interface CreationFollowUpResponse {
   needs_more: boolean;
   question: string | null;
   required_steps_filled: boolean;
+  /** GM이 실제로 판단했는가 — 거짓이면 AI가 물러나 폴백으로 떨어진
+   * 것이다. `needs_more: false` 하나로는 「더 물을 게 없다」와 「AI가
+   * 물러났다」가 안 갈려서 화면이 둘 다 「말을 잃었다」로 적고 있었다
+   * (G-12.3-14). */
+  gm_answered: boolean;
   seq: number | null;
 }
 

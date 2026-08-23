@@ -948,6 +948,15 @@ class CreationFollowUpResponse(BaseModel):
     needs_more: bool
     question: str | None
     required_steps_filled: bool
+    gm_answered: bool = True
+    """GM이 실제로 판단했는가 — 거짓이면 AI 호출이 계약을 어겨 폴백으로
+    떨어진 것이다(ARCH-05).
+
+    `needs_more=False` 하나로는 「GM이 더 물을 게 없다고 했다」와 「AI가
+    물러났다」가 구분되지 않아, 화면이 **둘 다** "진행자가 잠시 말을
+    잃었지만 계속합니다"로 적고 있었다 — 멀쩡히 돌아간 판을 고장난 것처럼
+    보이게 한다(G-12.3-14). 서버는 그 둘을 이미 알고 있으므로 여기서
+    갈라 알려준다."""
     seq: int | None = None
     """되물을 것이 있을 때만 채워진다(D-02 ④) — GM이 아무 말도 안 했으면
     사건을 남기지 않으므로 짝지어질 `seq`가 없다."""
@@ -1029,9 +1038,13 @@ async def creation_follow_up(
 
     try:
         follow_up = await asyncio.to_thread(judge_hooks, step_labels, transcript, provider, model)
+        # `judge_hooks`는 제공자가 두 번 다 실패해도 예외를 안 던지고
+        # 되묻지 않는 것으로 폴백한다(ARCH-05) — 그 경우를 이 칸이 알린다.
+        gm_answered = follow_up.gm_answered
     except CreationGmContractViolation as exc:
         print(f"경고: creation_gm 되묻기가 계약을 어겼다 — {exc}", file=sys.stderr)
         follow_up = CreationGmFollowUp(needs_more=False, question=None)
+        gm_answered = False
 
     if not follow_up.needs_more:
         # 되물을 것이 없으면 GM이 아무 말도 안 한 것이다(D-02 ④) — 대화
@@ -1040,7 +1053,11 @@ async def creation_follow_up(
         # 바뀐 동안 다시 눌러도 같은 판정(needs_more=False)이 나오므로
         # 비용은 AI를 한 번 더 부르는 것뿐이다.
         return CreationFollowUpResponse(
-            needs_more=False, question=None, required_steps_filled=required_steps_filled, seq=None
+            needs_more=False,
+            question=None,
+            required_steps_filled=required_steps_filled,
+            gm_answered=gm_answered,
+            seq=None,
         )
 
     try:

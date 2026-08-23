@@ -446,7 +446,13 @@ type FollowUpPhase =
    * `null`이면 GM이 물러난 것(`needs_more: false`)이다 — 두 경우에 서로
    * 다른 문구를 쓴다. 어느 쪽이든 「더 말하기」와 「이걸로 끝」이 함께
    * 남는다: 갈래마다 길이 갈리면 한쪽이 막다른 골목이 된다(G-12.3-8). */
-  | { kind: "asked"; question: string | null; requiredStepsFilled: boolean };
+  | {
+      kind: "asked";
+      question: string | null;
+      requiredStepsFilled: boolean;
+      /** GM이 실제로 판단했는가 — 거짓이면 AI가 물러난 것이다. */
+      gmAnswered: boolean;
+    };
 
 export function CreationPane({
   sessionId,
@@ -589,6 +595,7 @@ export function CreationPane({
         kind: "asked",
         question: response.needs_more ? response.question : null,
         requiredStepsFilled: response.required_steps_filled,
+        gmAnswered: response.gm_answered,
       });
       pollNow();
     } catch (askError) {
@@ -760,11 +767,15 @@ export function CreationPane({
               {followUp.kind === "asked" ? (
                 <>
                   {followUp.question !== null ? (
-                    <p className="t-body">{followUp.question}</p>
+                    <>
+                      <p className="t-body">{followUp.question}</p>
+                      <p className="t-label">{COPY.creationAnswerBelow}</p>
+                    </>
                   ) : (
-                    <p className="t-label">{COPY.creationGmSilent}</p>
+                    <p className="t-label">
+                      {followUp.gmAnswered ? COPY.creationGmNothingMore : COPY.creationGmSilent}
+                    </p>
                   )}
-                  <p className="t-label">{COPY.creationAnswerBelow}</p>
                   <button
                     type="button"
                     className="btn btn--primary btn--wide"

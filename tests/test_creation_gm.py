@@ -468,3 +468,69 @@ def test_all_three_routes_return_409_after_roster_is_locked(web_client_with_fake
         assert _announce(client, session_id=session_id).status_code == 409
         assert _nominate(client, session_id=session_id).status_code == 409
         assert _follow_up(client, session_id=session_id).status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# G-12.3-14 (12.3-UAT.md) — 「GM이 더 물을 게 없다」와 「AI가 물러났다」는
+# 다른 일이다. 예전에는 응답이 둘 다 `needs_more: false` 하나로만 왔고,
+# 화면이 양쪽에 "진행자가 잠시 말을 잃었지만 계속합니다"를 붙여 멀쩡히
+# 돌아간 판을 고장난 것처럼 보이게 했다.
+# ---------------------------------------------------------------------------
+
+
+def test_follow_up_says_the_gm_answered_when_it_had_nothing_more_to_ask(
+    web_client_with_fake_provider,
+):
+    provider = _CreationGmStub(
+        complete_value=json.dumps([{"needs_more": False, "question": None}])
+    )
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-followup-answered"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+
+        body = _follow_up(client, session_id=session_id).json()
+        assert body["needs_more"] is False
+        assert body["gm_answered"] is True, "GM이 판단했으면 「말을 잃었다」가 아니다"
+
+
+def test_follow_up_says_the_gm_did_not_answer_when_the_call_breaks_the_contract(
+    web_client_with_fake_provider,
+):
+    """계약 위반은 `needs_more=False`로 폴백하되(ARCH-05, 500을 안 낸다),
+    그것이 GM의 판단이 아니었음을 응답이 밝힌다."""
+    provider = _CreationGmStub(complete_value="이건 JSON이 아니다")
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-followup-fallback"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+
+        response = _follow_up(client, session_id=session_id)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["needs_more"] is False
+        assert body["gm_answered"] is False
+
+
+def test_follow_up_says_the_gm_did_not_answer_when_the_provider_fails(
+    web_client_with_fake_provider,
+):
+    """제공자가 두 번 다 실패한 경우도 「GM이 답했다」가 아니다(G-12.3-14).
+
+    `judge_hooks`는 이 경우 `CreationGmContractViolation`을 **안 던지고**
+    조용히 `needs_more=False`로 폴백한다(ARCH-05) — 계약 위반과 다른
+    경로다. 그래서 계약 위반만 잡는 검사로는 이 자리가 안 걸린다.
+    실제로 2026-08-23 시험 중 NVIDIA 쪽이 503(Service temporarily
+    overloaded)을 내는 동안 여덟 번 전부 이 경로로 떨어졌다.
+    """
+    provider = _CreationGmStub(fail_times=99)
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-followup-provider-down"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+
+        response = _follow_up(client, session_id=session_id)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["needs_more"] is False
+        assert body["gm_answered"] is False, "AI가 죽었는데 정상인 척하면 안 된다"
