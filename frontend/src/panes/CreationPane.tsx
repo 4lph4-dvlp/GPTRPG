@@ -58,6 +58,7 @@ import type {
   GameStateView,
 } from "../api/types.ts";
 import { COPY, creationTurnLabel, statLabel } from "../labels.ts";
+import { Waiting } from "../components/Waiting.tsx";
 import { MAX_RAW_TEXT_LEN } from "../config.ts";
 import {
   canEdit,
@@ -828,13 +829,29 @@ export function CreationPane({
           {followUpGateVisible ? (
             <div className="proposal">
               {followUp.kind === "idle" ? (
-                <button type="button" className="btn btn--primary btn--wide" disabled={busy} onClick={() => void askGm()}>
-                  {COPY.creationAskGm}
-                </button>
+                busy ? (
+                  // 실측 12~30초다 — 문구 없는 정지 화면이면 사람이
+                  // 새로고침으로 판을 끊는다(G-12.3-9).
+                  <Waiting label={COPY.creationAskGmWaiting} />
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn--primary btn--wide"
+                    onClick={() => void askGm()}
+                  >
+                    {COPY.creationAskGm}
+                  </button>
+                )
               ) : null}
               {followUp.kind === "asked" ? (
                 <>
-                  {followUp.question !== null ? (
+                  {busy ? (
+                    // 답을 보낸 뒤 진행자가 다시 읽는 구간(G-12.3-9) —
+                    // 여기가 가장 길다(실측 12~30초). 예전에는 이 동안
+                    // 직전 질문이 그대로 떠 있어서, 사람이 답을 보낸
+                    // 것이 먹혔는지조차 알 수 없었다.
+                    <Waiting label={COPY.creationAskGmWaiting} />
+                  ) : followUp.question !== null ? (
                     <>
                       <p className="t-body">{followUp.question}</p>
                       <p className="t-label">{COPY.creationAnswerBelow}</p>

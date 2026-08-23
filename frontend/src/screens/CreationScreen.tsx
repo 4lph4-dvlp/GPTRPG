@@ -47,6 +47,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { announceCreation, claimCreationHost, fetchCreationDeclaration, fixPartySize } from "../api/client.ts";
 import type { CreationStepView, GameEvent, PartySizeRangeView } from "../api/types.ts";
 import { DiceModal } from "../components/DiceModal.tsx";
+import { Waiting } from "../components/Waiting.tsx";
 import { HOST_BEACON_MS } from "../config.ts";
 import { COPY } from "../labels.ts";
 import { CreationPane } from "../panes/CreationPane.tsx";
@@ -489,7 +490,7 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
                   </button>
                 </>
               ) : (
-                <p className="t-label">{COPY.creationAnnouncing}</p>
+                <Waiting label={COPY.creationAnnouncing} />
               )}
             </div>
           ) : feed.state !== null && rulebookId !== null && stepsLoaded ? (

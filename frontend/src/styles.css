@@ -1724,3 +1724,43 @@ details.record > summary::-webkit-details-marker {
   color: var(--text-faint);
   font-style: italic;
 }
+
+/* 진행자를 기다리는 동안의 표시(G-12.3-9). 만들기 GM 호출은 실측
+   12~30초 걸린다 — 아무 변화가 없으면 사람이 새로고침으로 판을
+   끊는다. 점 셋이 차례로 밝아진다. 이미 있는 `pulse`를 늦춤만 달리
+   해서 쓴다 — 새 애니메이션을 만들지 않는다. */
+.waiting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.waiting__dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.waiting__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.waiting__dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.waiting__dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 움직임을 줄여 달라고 한 사람에게는 깜빡이지 않는다 — 표시 자체는
+     남는다(그것이 「지금 기다리는 중」을 말하는 유일한 신호다). */
+  .waiting__dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}

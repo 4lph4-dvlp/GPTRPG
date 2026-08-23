@@ -290,7 +290,11 @@ export const COPY = {
    * 보였다(G-12.3-12). */
   creationAnswerBelow: "아래 입력칸에 답을 적을 수 있어요.",
   creationDoneTalking: "이걸로 끝",
-  creationAskGm: "진행자에게 물어보기",
+  /** 「물어보기」가 아니다 — 사람이 하는 일은 자기 이야기를 진행자에게
+   * 내는 것이고, 되물을지는 진행자가 정한다(G-12.3-19). */
+  creationAskGm: "진행자에게 제출하기",
+  /** 「제출하기」를 누른 뒤 기다리는 동안(G-12.3-9). */
+  creationAskGmWaiting: "진행자가 읽고 있어요",
   creationEdit: "고치기",
   creationRoll: "굴리기",
   creationMyTurn: "내 차례예요",

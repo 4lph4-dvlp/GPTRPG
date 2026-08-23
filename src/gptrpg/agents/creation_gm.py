@@ -254,10 +254,17 @@ def judge_hooks(
         # 정상인 척할 수 있었다.
         return CreationGmFollowUp(needs_more=False, question=None, gm_answered=False)
 
-    parsed = _parse_single_object(str(result.value))
+    raw = str(result.value)
+    parsed = _parse_single_object(raw)
     needs_more = parsed.get("needs_more")
     if not isinstance(needs_more, bool):
-        raise CreationGmContractViolation(f"needs_more가 bool이 아니다: {needs_more!r}")
+        # 원문을 함께 남긴다(G-12.3-20) — 이 위반이 실제 시험에서 세 번
+        # 났는데(2026-08-23) 무엇을 뱉었는지가 안 남아서 고칠 근거가
+        # 없었다. 「추측해서 파서를 느슨하게」 대신 다음 번에 잡히게 한다.
+        # 사람 화면에는 안 간다(D-15) — 이 문자열은 stderr 로그 전용이다.
+        raise CreationGmContractViolation(
+            f"needs_more가 bool이 아니다: {needs_more!r} — 받은 원문(앞 400자): {raw[:400]!r}"
+        )
     if not needs_more:
         return CreationGmFollowUp(needs_more=False, question=None)
     question = parsed.get("question")
