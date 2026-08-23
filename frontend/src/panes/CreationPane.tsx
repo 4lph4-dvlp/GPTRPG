@@ -430,10 +430,16 @@ function InterjectBox({
   );
 }
 
+/** ChatPane/StoryPane과 같은 값 — 바닥에서 이만큼 안이면 「따라가는 중」으로 본다. */
+const NEAR_BOTTOM_PX = 48;
+
 type FollowUpPhase =
   | { kind: "idle" }
-  | { kind: "asked_more" }
-  | { kind: "ready_to_finish"; requiredStepsFilled: boolean };
+  /** 되물음을 한 번 받은 뒤. `question`은 GM이 실제로 물은 문장이고,
+   * `null`이면 GM이 물러난 것(`needs_more: false`)이다 — 두 경우에 서로
+   * 다른 문구를 쓴다. 어느 쪽이든 「더 말하기」와 「이걸로 끝」이 함께
+   * 남는다: 갈래마다 길이 갈리면 한쪽이 막다른 골목이 된다(G-12.3-8). */
+  | { kind: "asked"; question: string | null; requiredStepsFilled: boolean };
 
 export function CreationPane({
   sessionId,
@@ -458,6 +464,15 @@ export function CreationPane({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [followUp, setFollowUp] = useState<FollowUpPhase>({ kind: "idle" });
+
+  // 대화판이 새 줄로 자동으로 내려간다 — `ChatPane.tsx`/`StoryPane.tsx`가
+  // 이미 쓰는 것과 같은 배선이다. 여기 없어서 **자기 차례인 사람만** GM의
+  // 되물음을 못 보는 결함이 났다(G-12.3-8): 자기 차례면 대화판 아래에
+  // 항목 줄·입력칸·되물음 관문이 함께 그려져 `.chat`(flex:1)이 눌리고,
+  // 가장 새 줄이 접힌 자리로 밀린다. 남의 차례인 사람은 그 블록이 없어
+  // 같은 줄이 그대로 보였다.
+  const chatRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
   const [reopenPickerOpen, setReopenPickerOpen] = useState(false);
   const [consentMessage, setConsentMessage] = useState<string | null>(null);
   const submittedDeriveRef = useRef<Set<string>>(new Set());
@@ -563,11 +578,11 @@ export function CreationPane({
     setConsentMessage(null);
     try {
       const response = await creationFollowUp(sessionId, myCharacterId, rulebookId);
-      setFollowUp(
-        response.needs_more
-          ? { kind: "asked_more" }
-          : { kind: "ready_to_finish", requiredStepsFilled: response.required_steps_filled },
-      );
+      setFollowUp({
+        kind: "asked",
+        question: response.needs_more ? response.question : null,
+        requiredStepsFilled: response.required_steps_filled,
+      });
       pollNow();
     } catch (askError) {
       setError(creationErrorMessage(askError));
@@ -645,6 +660,15 @@ export function CreationPane({
       ? (rows.find((row) => row.step.step_id === editingStepId) ?? null)
       : (myReopenedRow ?? (myTurn ? nextUnfilledStep(rows) : null));
 
+  // 사람이 위로 올려 읽는 중이면 끌어내리지 않는다(near-bottom 가드) —
+  // ChatPane과 같은 규율.
+  useEffect(() => {
+    const node = chatRef.current;
+    if (node !== null && pinnedRef.current) {
+      node.scrollTop = node.scrollHeight;
+    }
+  }, [conversation.length]);
+
   const followUpGateVisible = myTurn && editingStepId === null && nextUnfilledStep(rows) === null;
 
   // 대화판 첫 줄의 차례 문구(G-12.3-7) — 오늘은 아무도 지목되지 않은
@@ -657,7 +681,17 @@ export function CreationPane({
     <section className="pane pane--chat">
       {turnLabel !== null ? <p className="t-label">{turnLabel}</p> : null}
 
-      <div className="chat">
+      <div
+        className="chat"
+        ref={chatRef}
+        onScroll={() => {
+          const node = chatRef.current;
+          if (node !== null) {
+            pinnedRef.current =
+              node.scrollHeight - node.scrollTop - node.clientHeight <= NEAR_BOTTOM_PX;
+          }
+        }}
+      >
         {conversation.length === 0 ? (
           <p className="t-label">{COPY.loading}</p>
         ) : (
@@ -721,10 +755,13 @@ export function CreationPane({
                   {COPY.creationAskGm}
                 </button>
               ) : null}
-              {followUp.kind === "asked_more" ? <p className="t-label">{COPY.creationGmSilent}</p> : null}
-              {followUp.kind === "ready_to_finish" ? (
+              {followUp.kind === "asked" ? (
                 <>
-                  <p className="t-label">{COPY.creationGmSilent}</p>
+                  {followUp.question !== null ? (
+                    <p className="t-body">{followUp.question}</p>
+                  ) : (
+                    <p className="t-label">{COPY.creationGmSilent}</p>
+                  )}
                   <button type="button" className="btn btn--ghost btn--wide" disabled={busy} onClick={sayMore}>
                     {COPY.creationSayMore}
                   </button>
