@@ -131,6 +131,42 @@ def latest_nomination(state: GameState) -> tuple[str, int] | None:
     return (latest_target, latest_seq)
 
 
+UNNAMED_SUBJECT = "아직 이름을 안 정한 분"
+"""이름을 아직 안 정한 사람을 GM이 부르는 말(G-12.3-10).
+
+화면의 `labels.ts::creationUnknownNameSubject`와 같은 문구다 — 같은 사람을
+두 자리에서 다르게 부르면 안 된다."""
+
+
+def display_label(state: GameState, rulebook: Rulebook, character_id: str) -> str:
+    """GM이 이 사람을 부를 때 쓸 **사람이 읽는 이름**(G-12.3-10).
+
+    출처는 둘이고 순서가 있다:
+    ① 이미 완성된 캐릭터의 `display_name`
+    ② 아직 완성 전이라면 `provides_display_name` 항목에 넣어 둔 값
+    둘 다 없으면 `UNNAMED_SUBJECT` — **내부 식별자를 절대 안 쓴다.**
+
+    12.3-14가 화면의 차례 표시에 넣은 규율(`creationView.ts::creationTurn`)을
+    서버 쪽에도 둔 것이다. 그때는 화면 절반만 덮여서, GM이 하는 말에는
+    `pc-ca9b917c` 같은 값이 그대로 실려 나갔다 — 2026-08-23 시험 기록에서
+    지목 문장 52개 중 47개가 그랬다.
+    """
+    entity = state.created_characters.get(character_id)
+    if entity is not None and entity.display_name:
+        return entity.display_name
+    for step in rulebook.creation_steps:
+        if not step.provides_display_name:
+            continue
+        fold = state.creation_step_values.get((character_id, step.step_id))
+        if fold is None:
+            continue
+        if fold.text_value:
+            return fold.text_value
+        if fold.picked:
+            return ", ".join(fold.picked)
+    return UNNAMED_SUBJECT
+
+
 def nomination_progress_seq(state: GameState, character_id: str) -> int:
     """`character_id`가 자기 차례에 **무언가 한** 가장 앞선 순번 — 하나도
     없으면 `0`. 회복 시간(D-13)이 「이 사람이 가만히 있나」를 이 값으로 본다.

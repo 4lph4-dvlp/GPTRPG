@@ -36,6 +36,7 @@ CompleteCreationStep`만 한다 — 이 모듈은 그 경로에 닿을 방법이
 """
 
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from gptrpg.agents.envelope import AgentResult
@@ -192,12 +193,28 @@ def announce_requirements(
     return text if text else _fallback_requirements_text(step_labels)
 
 
+def _humanize(say: str, labels: Mapping[str, str]) -> str:
+    """GM이 쓴 말에서 내부 식별자를 사람이 읽는 이름으로 바꾼다(G-12.3-10).
+
+    프롬프트가 이미 「`say`에서는 부르는 이름만 쓴다」고 지시하지만, 그
+    준수에 기대지 않는다 — 2026-08-23 시험에서 지목 문장 52개 중 47개가
+    `pc-ca9b917c` 같은 값을 그대로 실어 냈다. 여기서 한 번 더 지우면
+    모델이 지시를 어겨도 사람 화면에는 안 닿는다(D-15).
+
+    긴 식별자부터 바꾼다 — 짧은 것이 긴 것의 앞부분이면 먼저 잘려 남는
+    꼬리가 생긴다."""
+    for character_id in sorted(labels, key=len, reverse=True):
+        say = say.replace(character_id, labels[character_id])
+    return say
+
+
 def nominate_speaker(
     candidates: tuple[str, ...],
     transcript: tuple[str, ...],
     provider: Provider,
     model: str,
     *,
+    labels: Mapping[str, str] | None = None,
     timeout_s: float = CREATION_GM_TIMEOUT_S,
 ) -> CreationGmNomination:
     """아직 자기소개를 안 끝낸 사람 중에서 다음 차례를 지목한다(D-06).
@@ -213,7 +230,10 @@ def nominate_speaker(
     if not candidates:
         raise CreationGmContractViolation("아직 안 끝난 사람이 없는데 지목을 요청했다")
 
-    system, messages = build_creation_nominate_prompt(candidates=candidates, transcript=transcript)
+    label_of = dict(labels or {})
+    system, messages = build_creation_nominate_prompt(
+        candidates=candidates, transcript=transcript, labels=label_of
+    )
 
     def _call_once() -> AgentResult:
         return provider.complete(
@@ -223,9 +243,12 @@ def nominate_speaker(
     result, _last_error_text = call_with_one_retry(_call_once, timeout_s=timeout_s)
     if not result.ok:
         # 실패해도 진행을 막지 않는다 — 후보 첫 번째로 떨어진다(D-06, ARCH-05).
+        # 폴백 문장도 사람이 읽는 이름을 쓴다(G-12.3-10) — 여기가 예전에
+        # 내부 식별자를 그대로 뱉던 자리 중 하나다.
         first = candidates[0]
         return CreationGmNomination(
-            character_id=first, say=f"{first} 님, 이야기를 들려주시겠어요?"
+            character_id=first,
+            say=f"{label_of.get(first, first)} 님, 이야기를 들려주시겠어요?",
         )
 
     parsed = _parse_single_object(str(result.value))
@@ -235,7 +258,7 @@ def nominate_speaker(
         raise CreationGmContractViolation(f"지목 대상이 후보 목록 밖이다: {character_id!r}")
     if not isinstance(say, str) or not say.strip():
         raise CreationGmContractViolation("지목하며 할 말이 비어 있다")
-    return CreationGmNomination(character_id=character_id, say=say)
+    return CreationGmNomination(character_id=character_id, say=_humanize(say, label_of))
 
 
 def judge_hooks(

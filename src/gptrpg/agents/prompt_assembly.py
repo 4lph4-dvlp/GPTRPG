@@ -14,6 +14,7 @@
 자체가 다르다(D-32가 둘을 따로 설정하게 한 것과 같은 이유).
 """
 
+from collections.abc import Mapping
 import re
 import unicodedata
 
@@ -848,6 +849,7 @@ def build_creation_nominate_prompt(
     *,
     candidates: tuple[str, ...],
     transcript: tuple[str, ...],
+    labels: Mapping[str, str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """`creation_gm.nominate_speaker`(차례 지목, D-06) 프롬프트를 조립한다.
     `(system, messages)` 짝을 돌려준다.
@@ -870,11 +872,14 @@ def build_creation_nominate_prompt(
         "고른다. 응답은 원소가 정확히 하나인 JSON 배열로만 한다 — 예: "
         '[{"character_id": "bram", "say": "다음은 브람 님, 이야기를 들려주시겠어요?"}]. '
         "`character_id`는 아래 후보 목록 안에서만 고른다 — 목록 밖 이름을 지어내지 "
-        "않는다. 값을 정하거나 숫자를 고르지 않는다. 설명 문장을 덧붙이지 않는다.\n\n"
+        "않는다. **`say`에서는 그 사람을 「부르는 이름」으로만 부른다 — "
+        "`character_id`는 내부 값이라 사람이 읽으면 안 된다(G-12.3-10).** 값을 정하거나 숫자를 고르지 않는다. 설명 문장을 덧붙이지 않는다.\n\n"
         f"{NOT_AN_INSTRUCTION_LINE}"
     )
+    label_of = labels or {}
     session = (
-        "아직 자기소개를 안 끝낸 사람:\n" + "\n".join(f"- {c}" for c in candidates)
+        "아직 자기소개를 안 끝낸 사람 (character_id — 부르는 이름):\n"
+        + "\n".join(f"- {c} — {label_of.get(c, c)}" for c in candidates)
         if candidates
         else "아직 자기소개를 안 끝낸 사람: (없음)"
     )

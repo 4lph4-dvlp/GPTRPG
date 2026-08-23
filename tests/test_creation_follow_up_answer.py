@@ -120,3 +120,55 @@ def test_someone_elses_words_are_not_my_progress():
         (CreationInterjectionFold(seq=42, speaker_character_id="hero-2", text="남의 말"),)
     )
     assert nomination_progress_seq(state, CHARACTER_ID) == 10
+
+
+# ---------------------------------------------------------------------------
+# G-12.3-10 — GM이 사람에게 말할 때 내부 식별자를 안 쓴다(D-15).
+# ---------------------------------------------------------------------------
+
+
+def test_the_gm_never_reads_an_internal_id_out_loud():
+    """모델이 지시를 어기고 `character_id`를 써도 코드가 지운다.
+
+    2026-08-23 시험 기록에서 지목 문장 52개 중 **47개**가
+    `pc-ca9b917c` 같은 값을 그대로 실어 냈다. 프롬프트로 「이름만 써라」를
+    지시하는 것만으로는 부족하다 — 모델의 준수에 기대지 않는다.
+    """
+    from gptrpg.agents.creation_gm import _humanize
+
+    said = "다음은 pc-ca9b917c 님, 이야기를 들려주시겠어요?"
+    assert _humanize(said, {"pc-ca9b917c": "브람"}) == "다음은 브람 님, 이야기를 들려주시겠어요?"
+
+
+def test_humanize_replaces_the_longest_id_first():
+    """짧은 식별자가 긴 것의 앞부분이면, 짧은 것부터 바꿀 때 꼬리가 남는다."""
+    from gptrpg.agents.creation_gm import _humanize
+
+    labels = {"pc-1": "브람", "pc-12": "나리"}
+    assert _humanize("pc-12 님", labels) == "나리 님"
+
+
+def test_display_label_never_falls_back_to_the_internal_id():
+    """이름을 아직 안 정한 사람도 식별자로 부르지 않는다."""
+    from gptrpg.rulebooks import get_rulebook
+    from gptrpg.web.creation_state import UNNAMED_SUBJECT, display_label
+
+    rulebook = get_rulebook("dungeonworld_like")
+    empty = GameState(session_id="s1")
+    assert display_label(empty, rulebook, "pc-abc123") == UNNAMED_SUBJECT
+
+    named = GameState(
+        session_id="s1",
+        creation_step_values={
+            ("pc-abc123", "name"): CreationStepFold(
+                seq=3,
+                kind="free_text",
+                text_value="브람",
+                picked=None,
+                axis_values=None,
+                rolls=None,
+                browser_id="b1",
+            )
+        },
+    )
+    assert display_label(named, rulebook, "pc-abc123") == "브람"

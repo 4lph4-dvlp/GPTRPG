@@ -33,6 +33,7 @@ AI가 하는 것은 안내 산문 · 닫힌 후보 목록에서 다음 차례 �
 """
 
 import asyncio
+from functools import partial
 import os
 import sys
 import time
@@ -896,6 +897,16 @@ async def nominate_creation_speaker(
         )
 
     transcript = _transcript_for(state, candidates)
+    try:
+        rulebook = get_rulebook(body.rulebook_id)
+    except UnknownRulebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # GM이 사람을 부를 때 쓸 이름(G-12.3-10) — 내부 식별자가 사람 화면까지
+    # 새어 나가던 자리다(D-15).
+    labels = {
+        candidate: creation_state.display_label(state, rulebook, candidate)
+        for candidate in candidates
+    }
 
     try:
         provider, model = _resolve_creation_gm_provider(request)
@@ -904,13 +915,20 @@ async def nominate_creation_speaker(
 
     try:
         nomination = await asyncio.to_thread(
-            nominate_speaker, candidates, transcript, provider, model
+            partial(
+                nominate_speaker,
+                candidates,
+                transcript,
+                provider,
+                model,
+                labels=labels,
+            )
         )
         character_id, say = nomination.character_id, nomination.say
     except CreationGmContractViolation as exc:
         print(f"경고: creation_gm 지목이 계약을 어겼다 — {exc}", file=sys.stderr)
         character_id = candidates[0]
-        say = f"{character_id} 님, 이야기를 들려주시겠어요?"
+        say = f"{labels.get(character_id, character_id)} 님, 이야기를 들려주시겠어요?"
 
     try:
         seq = await actor.submit(
