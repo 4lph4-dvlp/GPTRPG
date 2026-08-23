@@ -876,10 +876,18 @@ def build_creation_nominate_prompt(
         "`character_id`는 내부 값이라 사람이 읽으면 안 된다(G-12.3-10).** 값을 정하거나 숫자를 고르지 않는다. 설명 문장을 덧붙이지 않는다.\n\n"
         f"{NOT_AN_INSTRUCTION_LINE}"
     )
+    # 이름은 **사람이 직접 입력한 자유 서술**이다(`creation_state.display_label()`
+    # → `provides_display_name` 항목의 `text_value`). 울타리 없이 프롬프트에
+    # 박으면 이름 칸이 그대로 프롬프트 주입 통로가 된다(T-12.3-66과 같은
+    # 회차에 잡힌 T-12.3-65) — `_transcript_for`가 이미 쓰는 규율을 여기도
+    # 그대로 적용한다. `character_id`는 서버가 만든 값이라 울타리 대상이 아니다.
     label_of = labels or {}
     session = (
         "아직 자기소개를 안 끝낸 사람 (character_id — 부르는 이름):\n"
-        + "\n".join(f"- {c} — {label_of.get(c, c)}" for c in candidates)
+        + "\n".join(
+            f"- {c} — {fence_player_text(label_of[c]) if c in label_of else c}"
+            for c in candidates
+        )
         if candidates
         else "아직 자기소개를 안 끝낸 사람: (없음)"
     )

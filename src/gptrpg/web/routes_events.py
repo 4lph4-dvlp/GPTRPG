@@ -26,7 +26,13 @@
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
-from gptrpg.event_log.schema import CreationHostClaimed, GameEvent
+from gptrpg.event_log.schema import (
+    CharacterCreated,
+    CreationHostClaimed,
+    CreationInterjection,
+    CreationStepCompleted,
+    GameEvent,
+)
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rules_core.reducer import GameState
 from gptrpg.rules_core.rulebook import Rulebook
@@ -217,9 +223,25 @@ def _creation_step_value_views(game_state: GameState) -> list[CreationStepValueV
     ]
 
 
-def _redact_host_claimed(event: GameEvent) -> GameEvent:
-    """`creation_host_claimed`의 `browser_id`/`previous_browser_id`를
-    폴링 `events` 목록에서 가린다(T-12.3-05, 12.3-REVIEW.md CR-03).
+def _redact_browser_ids(event: GameEvent) -> GameEvent:
+    """폴링 `events` 목록에서 남의 `browser_id`를 가린다(T-12.3-05 · T-12.3-66).
+
+    **T-12.3-66 (12.3-SECURITY.md) — 이 함수가 예전에는 `creation_host_claimed`
+    하나만 가렸다.** `creation_step_completed`·`creation_interjection`·
+    `character_created` 셋도 `browser_id` 칸을 갖고 있고 그대로 방송됐다.
+    그 값이 바로 `_prepare_create_character`(`actor.py`)의 하이재킹 방지
+    관문이 쓰는 유일한 판정 재료다 — 「그 캐릭터의 항목을 실제로 낸
+    브라우저인가」. 서버가 그것을 스스로 방송하니 관문이 무력화됐다.
+
+    2026-08-23 실증: 쿠키 없는 요청이 `GET /events`에서 남의 `browser_id`를
+    읽고, 그 값으로 `POST /creation/complete`를 불러 **그 캐릭터의 서명
+    쿠키를 발급받았다**(HTTP 200). 세션 끝까지 남의 캐릭터를 조종할 수 있었다.
+
+    12.1이 `/creation/step`의 `browser_id` 위조를 「범위 밖」으로 받아들인
+    것은 **「추측하거나 스니핑해야 한다」**는 전제 위에 있었다 — 정상 폴링이
+    그 값을 내주면 그 전제가 성립하지 않는다.
+
+    아래는 원래의 CR-03 설명이다:
 
     `GameStateView`(`state` 칸)는 이미 여부만 싣도록 지켜졌지만, 같은
     보호가 `events` 목록에는 없었다 — 이 사건은 `visibility: "public"`
@@ -244,6 +266,8 @@ def _redact_host_claimed(event: GameEvent) -> GameEvent:
     """
     if isinstance(event, CreationHostClaimed):
         return event.model_copy(update={"browser_id": "", "previous_browser_id": None})
+    if isinstance(event, (CreationStepCompleted, CreationInterjection, CharacterCreated)):
+        return event.model_copy(update={"browser_id": ""})
     return event
 
 
@@ -283,7 +307,7 @@ async def poll_events(
     game_state = rebuild_state_from_events(session_id, all_events)
     # 상태 재구성(위 줄)은 저장소의 원본 사건을 그대로 쓴다 — redaction은
     # 응답에 실을 목록에만 적용한다(T-12.3-05, CR-03).
-    events = [_redact_host_claimed(event) for event in all_events if event.seq >= from_seq]
+    events = [_redact_browser_ids(event) for event in all_events if event.seq >= from_seq]
     check_calculations = [
         view
         for event in events
