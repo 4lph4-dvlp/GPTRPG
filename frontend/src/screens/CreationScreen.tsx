@@ -343,16 +343,35 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
   const announced = gmLines.some((line) => line.kind === "announce");
   const gate = feed.state !== null ? partySizeGate(feed.state, youAreHost) : null;
 
+  // 언마운트 뒤 상태 갱신을 막는 가드 — 이 파일의 다른 두 effect(방장
+  // 재실 신호의 `alive`, 항목 선언 조회)가 이미 지키는 관례를
+  // `announce()`에도 맞춘다(WR-01). 명단이 잠기는 순간 325-329행 effect가
+  // `onEntered`를 불러 이 컴포넌트를 언마운트할 수 있고, 그 사이
+  // `announceCreation`이 아직 도는 AI 호출일 수 있다.
+  const announceAliveRef = useRef(true);
+  useEffect(() => {
+    announceAliveRef.current = true;
+    return () => {
+      announceAliveRef.current = false;
+    };
+  }, []);
+
   const announce = useCallback(async (): Promise<void> => {
     setPending(true);
     setError(null);
     try {
       await announceCreation(sessionId, rulebookId ?? DEFAULT_RULEBOOK_ID);
-      feed.pollNow();
+      if (announceAliveRef.current) {
+        feed.pollNow();
+      }
     } catch (err) {
-      setError(creationErrorMessage(err));
+      if (announceAliveRef.current) {
+        setError(creationErrorMessage(err));
+      }
     } finally {
-      setPending(false);
+      if (announceAliveRef.current) {
+        setPending(false);
+      }
     }
   }, [sessionId, rulebookId, feed.pollNow]);
 
