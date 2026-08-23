@@ -939,6 +939,23 @@ async def nominate_creation_speaker(
     return NominateSpeakerResponse(character_id=character_id, say=say, seq=seq)
 
 
+CREATION_FOLLOW_UP_MAX = 4
+"""한 사람에게 되물을 수 있는 최대 횟수(G-12.3-25).
+
+되묻기는 갈고리를 두어 개 얻으려는 것이지 취조가 아니다. 상한이 없으면
+GM은 서사가 풍부한 사람일수록 계속 캔다 — 2026-08-23 시험에서 한 사람은
+한 번, 다른 사람은 다섯 번, 또 다른 사람은 **일곱 번**을 받았다. 사장님
+판단: *"2~5개 정도로, 평균 3개 정도의 질문을 하는게 딱 맞는 것 같다"*.
+
+상한에 닿으면 GM을 부르지 않고 「더 물을 것이 없다」로 끝낸다 — 이것은
+**판단이지 실패가 아니므로** `gm_answered=True`다(G-12.3-14). 그래서
+마무리 문구도 사람마다 같아진다(예전에는 어떤 사람은 마무리 문구를 보고
+어떤 사람은 못 봤다).
+
+넷인 이유: GM이 스스로 그만두는 경우가 섞이므로 실제 평균은 상한보다
+낮게 앉는다. 다섯으로 두면 평균이 사장님이 말한 자리보다 위로 간다."""
+
+
 class CreationFollowUpRequest(BaseModel):
     character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
     rulebook_id: str = Field(default=DUNGEONWORLD_LIKE_ID, max_length=MAX_ID_LEN)
@@ -1017,8 +1034,25 @@ async def creation_follow_up(
         state, rulebook, body.character_id
     )
 
+    asked_so_far = sum(
+        1
+        for fold in state.creation_gm_said.values()
+        if fold.kind == "follow_up" and fold.target_character_id == body.character_id
+    )
+
     key = _gm_dedupe_key("follow_up", state, body.character_id)
     already_said = state.creation_gm_said.get(key)
+    if already_said is None and asked_so_far >= CREATION_FOLLOW_UP_MAX:
+        # 상한에 닿았다 — GM을 부르지 않고 끝낸다(G-12.3-25). 이미 낸
+        # 질문을 다시 돌려주는 위 캐시 경로보다 **뒤**에 두면 안 된다:
+        # 캐시가 있으면 그것은 이 사람이 아직 안 본 질문일 수 있다.
+        return CreationFollowUpResponse(
+            needs_more=False,
+            question=None,
+            required_steps_filled=required_steps_filled,
+            gm_answered=True,
+            seq=None,
+        )
     if already_said is not None:
         needs_more = bool(already_said.say.strip())
         return CreationFollowUpResponse(

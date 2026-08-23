@@ -35,6 +35,7 @@ CompleteCreationStep`만 한다 — 이 모듈은 그 경로에 닿을 방법이
 그대로 따른다.
 """
 
+import sys
 from dataclasses import dataclass
 
 from gptrpg.agents.envelope import AgentResult
@@ -264,32 +265,51 @@ def judge_hooks(
             model=model, system=system, messages=messages, max_tokens=CREATION_GM_MAX_TOKENS, timeout_s=timeout_s
         )
 
-    result, _last_error_text = call_with_one_retry(_call_once, timeout_s=timeout_s)
-    if not result.ok:
-        # 제공자가 두 번 다 실패했다 — 이것은 **GM의 판단이 아니다**.
-        # 되묻지 않는 것으로 폴백하되(ARCH-05, 500을 안 낸다) 그 사실을
-        # 숨기지 않는다(G-12.3-14). 예전에는 이 자리가 「GM이 더 물을 게
-        # 없다」와 똑같은 값을 돌려줘서, 실제로 AI가 죽어 있는데도 화면이
-        # 정상인 척할 수 있었다.
-        return CreationGmFollowUp(needs_more=False, question=None, gm_answered=False)
+    def _ask_once() -> CreationGmFollowUp | None:
+        """한 번 부르고 계약대로면 결과, 아니면 `None`.
 
-    raw = str(result.value)
-    parsed = _parse_single_object(raw)
-    needs_more = parsed.get("needs_more")
-    if not isinstance(needs_more, bool):
-        # 원문을 함께 남긴다(G-12.3-20) — 이 위반이 실제 시험에서 세 번
-        # 났는데(2026-08-23) 무엇을 뱉었는지가 안 남아서 고칠 근거가
-        # 없었다. 「추측해서 파서를 느슨하게」 대신 다음 번에 잡히게 한다.
-        # 사람 화면에는 안 간다(D-15) — 이 문자열은 stderr 로그 전용이다.
-        raise CreationGmContractViolation(
-            f"needs_more가 bool이 아니다: {needs_more!r} — 받은 원문(앞 400자): {raw[:400]!r}"
-        )
-    if not needs_more:
-        return CreationGmFollowUp(needs_more=False, question=None)
-    question = parsed.get("question")
-    if not isinstance(question, str) or not question.strip():
-        raise CreationGmContractViolation("needs_more=True인데 question이 비어 있다")
-    return CreationGmFollowUp(needs_more=True, question=question)
+        모델이 문법이 깨진 JSON을 뱉는 일이 있다(G-12.3-26). 2026-08-23
+        시험에서 잡은 실제 응답:
+            '[{"needs_more": true, "question": "…?"]}'   ← 닫는 괄호가 거꾸로
+        잘린 것이 아니라 문법이 틀린 것이라, 다시 부르면 대개 풀린다.
+        파서를 추측으로 느슨하게 만드는 것보다 한 번 더 묻는 쪽이 옳다 —
+        느슨한 파서는 「무엇을 받아들일지」를 조용히 넓혀서 나중에 엉뚱한
+        값을 통과시킨다."""
+        result, _error = call_with_one_retry(_call_once, timeout_s=timeout_s)
+        if not result.ok:
+            return CreationGmFollowUp(needs_more=False, question=None, gm_answered=False)
+        raw_text = str(result.value)
+        obj = _parse_single_object(raw_text)
+        flag = obj.get("needs_more")
+        if not isinstance(flag, bool):
+            print(
+                "경고: creation_gm 되묻기 응답이 계약을 어겼다 — needs_more가 bool이"
+                f" 아니다: {flag!r} — 받은 원문(앞 400자): {raw_text[:400]!r}",
+                file=sys.stderr,
+            )
+            return None
+        if not flag:
+            return CreationGmFollowUp(needs_more=False, question=None)
+        text = obj.get("question")
+        if not isinstance(text, str) or not text.strip():
+            print(
+                "경고: creation_gm 되묻기 응답이 계약을 어겼다 — needs_more=True인데"
+                f" question이 비어 있다 — 받은 원문(앞 400자): {raw_text[:400]!r}",
+                file=sys.stderr,
+            )
+            return None
+        return CreationGmFollowUp(needs_more=True, question=text)
+
+    first = _ask_once()
+    if first is not None:
+        return first
+    second = _ask_once()
+    if second is not None:
+        return second
+    # 두 번 다 계약을 어겼다 — 되묻지 않는 것으로 폴백하되(ARCH-05) 그것이
+    # GM의 판단이 아니었음을 밝힌다(G-12.3-14).
+    raise CreationGmContractViolation("되묻기 응답이 두 번 다 계약을 어겼다")
+
 
 
 def wrap_up(

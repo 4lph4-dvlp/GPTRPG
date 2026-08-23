@@ -132,12 +132,27 @@ def latest_nomination(state: GameState) -> tuple[str, int] | None:
 
 
 def nomination_progress_seq(state: GameState, character_id: str) -> int:
-    """`character_id`가 만들기 항목에 낸 값 중 가장 앞선 순번
-    (`CreationStepFold.seq`) — 하나도 없으면 `0`."""
+    """`character_id`가 자기 차례에 **무언가 한** 가장 앞선 순번 — 하나도
+    없으면 `0`. 회복 시간(D-13)이 「이 사람이 가만히 있나」를 이 값으로 본다.
+
+    항목 값(`CreationStepFold.seq`)과 **그 사람이 한 말**
+    (`CreationInterjectionFold.seq`)을 함께 본다.
+
+    **말을 빼면 안 되는 이유(G-12.3-24).** 항목을 다 채운 사람은 GM의
+    되물음에 **말로** 답한다(G-12.3-13) — 그동안 항목 값은 하나도 안
+    늘어난다. 말을 안 세면 열심히 대화 중인 사람이 「가만히 있다」로
+    판정되어 차례를 회수당한다. 2026-08-23 시험에서 실제로 그렇게 됐다:
+    되묻기 일곱 번을 주고받는 동안 회복 시간이 돌아, GM이 그 사람을
+    흘려보낸 것으로 보고 다른 사람을 새로 지목했다. 지목 문장은 남들
+    대화판에만 뜨고 당사자는 자기 되묻기 화면을 보고 있어서, 「나한테
+    안 보이는 질문이 남에게 보인다」로 나타났다."""
     max_seq = 0
     for (fold_character_id, _step_id), fold in state.creation_step_values.items():
         if fold_character_id == character_id and fold.seq > max_seq:
             max_seq = fold.seq
+    for interjection in state.creation_interjections:
+        if interjection.speaker_character_id == character_id and interjection.seq > max_seq:
+            max_seq = interjection.seq
     return max_seq
 
 

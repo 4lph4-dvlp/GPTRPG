@@ -84,3 +84,39 @@ def test_someone_elses_words_do_not_reopen_my_follow_up():
     assert _gm_dedupe_key("follow_up", before, CHARACTER_ID) == _gm_dedupe_key(
         "follow_up", after, CHARACTER_ID
     )
+
+
+# ---------------------------------------------------------------------------
+# G-12.3-24 — 되묻기에 말로 답하는 사람을 「가만히 있다」로 보면 안 된다.
+# ---------------------------------------------------------------------------
+
+
+def test_speaking_counts_as_progress_so_an_answering_player_is_not_forfeited():
+    """회복 시간(D-13)이 보는 진척에 **그 사람이 한 말**도 들어간다.
+
+    항목을 다 채운 사람은 GM의 되물음에 말로 답한다 — 그동안 항목 값은
+    하나도 안 늘어난다. 말을 안 세면 열심히 대화 중인 사람이 「가만히
+    있다」로 판정되어 차례를 회수당한다. 2026-08-23 시험에서 실제로
+    그렇게 됐고, 지목 문장이 남들 대화판에만 뜨고 당사자는 못 보는
+    모양으로 나타났다.
+    """
+    from gptrpg.web.creation_state import nomination_progress_seq
+
+    steps_only = _state_with_a_backstory_and(())
+    assert nomination_progress_seq(steps_only, CHARACTER_ID) == 10
+
+    after_speaking = _state_with_a_backstory_and(
+        (CreationInterjectionFold(seq=42, speaker_character_id=CHARACTER_ID, text="답"),)
+    )
+    assert nomination_progress_seq(after_speaking, CHARACTER_ID) == 42, (
+        "말이 진척으로 안 세어지면 대화 중인 사람이 흘려보낸 것으로 판정된다"
+    )
+
+
+def test_someone_elses_words_are_not_my_progress():
+    from gptrpg.web.creation_state import nomination_progress_seq
+
+    state = _state_with_a_backstory_and(
+        (CreationInterjectionFold(seq=42, speaker_character_id="hero-2", text="남의 말"),)
+    )
+    assert nomination_progress_seq(state, CHARACTER_ID) == 10

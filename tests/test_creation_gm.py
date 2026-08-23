@@ -561,3 +561,82 @@ def test_creation_gm_calls_do_not_borrow_the_lightweight_classifier_timeout():
         default = inspect.signature(getattr(creation_gm, name)).parameters["timeout_s"].default
         assert default == CREATION_GM_TIMEOUT_S, f"{name}의 제한이 어긋난다: {default}"
         assert default != SCENE_ENTITY_TIMEOUT_S, f"{name}이 경량 분류용 제한을 쓴다"
+
+
+# ---------------------------------------------------------------------------
+# G-12.3-25 — 되묻기에 상한을 둔다. G-12.3-26 — 문법 깨진 응답은 한 번 더 묻는다.
+# ---------------------------------------------------------------------------
+
+
+def test_follow_up_stops_asking_after_the_cap(web_client_with_fake_provider):
+    """상한에 닿으면 GM을 부르지 않고 「더 물을 것이 없다」로 끝낸다.
+
+    상한이 없으면 서사가 풍부한 사람일수록 계속 캔다 — 2026-08-23
+    시험에서 한 사람은 한 번, 다른 사람은 **일곱 번**을 받았다.
+    상한 도달은 **판단이지 실패가 아니므로** `gm_answered`는 참이다.
+    """
+    from gptrpg.web.routes_creation import CREATION_FOLLOW_UP_MAX
+
+    provider = _CreationGmStub(
+        complete_value=json.dumps([{"needs_more": True, "question": "더 말해 줄래요?"}])
+    )
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-followup-cap"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+
+        asked = 0
+        for round_index in range(CREATION_FOLLOW_UP_MAX + 2):
+            # 매 판 값을 하나 더 내야 중복방지 키가 바뀌어 새로 묻는다.
+            assert (
+                _submit_name_step(
+                    client, session_id=session_id, text_value=f"이름{round_index}"
+                ).status_code
+                == 200
+            )
+            body = _follow_up(client, session_id=session_id).json()
+            if body["needs_more"]:
+                asked += 1
+            else:
+                assert body["gm_answered"] is True, "상한 도달은 실패가 아니다"
+                break
+        assert asked == CREATION_FOLLOW_UP_MAX, (
+            f"상한만큼만 물어야 한다 — 실제로 {asked}번 물었다"
+        )
+
+
+def test_follow_up_asks_again_when_the_model_returns_broken_json(
+    web_client_with_fake_provider,
+):
+    """문법이 깨진 응답에는 한 번 더 묻는다(G-12.3-26).
+
+    2026-08-23 시험에서 잡은 실제 응답:
+        '[{"needs_more": true, "question": "…?"]}'   ← 닫는 괄호가 거꾸로
+    잘린 것이 아니라 문법이 틀린 것이라 다시 부르면 대개 풀린다.
+    파서를 추측으로 느슨하게 만드는 것보다 한 번 더 묻는 쪽이 옳다.
+    """
+    good = json.dumps([{"needs_more": True, "question": "그 빚은 누구에게 진 건가요?"}])
+    provider = _CreationGmStub(complete_value=good, fail_times=0)
+    broken = '[{"needs_more": true, "question": "닫는 괄호가 거꾸로다"]}'
+    calls: list[str] = []
+
+    original_complete = provider.complete
+
+    def _complete(**kwargs):
+        calls.append("x")
+        if len(calls) == 1:
+            return AgentResult(
+                ok=True, value=broken, elapsed_ms=1, prompt_tokens=1, completion_tokens=1
+            )
+        return original_complete(**kwargs)
+
+    provider.complete = _complete  # type: ignore[method-assign]
+
+    with web_client_with_fake_provider(action_classifier=provider) as client:
+        session_id = SESSION_ID + "-followup-broken-json"
+        assert _fix_party_size(client, session_id=session_id).status_code == 200
+        assert _submit_name_step(client, session_id=session_id).status_code == 200
+
+        body = _follow_up(client, session_id=session_id).json()
+        assert body["needs_more"] is True, "두 번째 호출의 정상 응답이 살아야 한다"
+        assert body["question"] == "그 빚은 누구에게 진 건가요?"
+        assert len(calls) >= 2, "깨진 응답 뒤에 한 번 더 물어야 한다"
