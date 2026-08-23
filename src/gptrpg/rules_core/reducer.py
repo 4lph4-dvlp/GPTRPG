@@ -56,6 +56,21 @@ class CreationStepFold:
 
 
 @dataclass(frozen=True)
+class CreationInterjectionFold:
+    """만들기 중에 사람이 한 말 한 줄 — 접힌 결과(D-09).
+
+    예전에는 `creation_interjection`이 `last_seq`만 갱신하고 아무것도 안
+    남겼다. 그래서 되묻기가 읽는 대화록(`_transcript_for`, `GameState`에서
+    만든다)에 사람이 한 말이 **원리적으로 못 들어갔고**, GM의 되물음에
+    말로 답할 방법이 없었다(G-12.3-13). 이제 여기 쌓여 GM이 읽는다.
+    """
+
+    seq: int
+    speaker_character_id: str
+    text: str
+
+
+@dataclass(frozen=True)
 class CreationGmLineFold:
     """GM이 만들기 중에 한 말 한 줄 — 접힌 결과(판 11+, Phase 12.3, D-02).
     `CreationStepFold`와 같은 자리·같은 형식이다.
@@ -189,6 +204,10 @@ class GameState:
     잠겼다」이고, 빈 튜플은 나오지 않는다(잠금 명령이 빈 명단을 거절한다,
     `LockPartyRoster`). 한 번 채워지면 다시 `None`으로 돌아가지 않는다 —
     푸는 사건이 없다(D-08)."""
+    creation_interjections: tuple[CreationInterjectionFold, ...] = ()
+    """만들기 중에 사람들이 한 말, 순번 오름차순(D-09). `creation_interjection`
+    사건에서만 채워진다. 되묻기의 대화록과 중복방지 키가 이 값을 읽는다 —
+    그래야 GM이 사람의 답을 보고 이어서 물을 수 있다(G-12.3-13)."""
     creation_gm_said: dict[str, CreationGmLineFold] = field(default_factory=dict)
     """dedupe_key -> 그 시점 GM이 한 말(판 11+, Phase 12.3, D-02/D-12).
     `creation_gm_spoke` 사건에서만 채워진다. 같은 키로 다시 오면 나중
@@ -491,12 +510,22 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
             reopened_creation_steps=reopened_creation_steps,
         )
     if event_type == "creation_interjection":
-        # 끼어든 말(판 9, D-09)은 어느 캐릭터의 구조화된 데이터도 바꾸지
-        # 않는다 — `scene_illustrated`/`safety_flagged`와 같은 최소 모양
-        # (last_seq만 갱신). **그래도 분기가 있어야 한다** — 없으면 이
-        # 종류가 하나라도 있는 세션이 폴링마다 UnknownEventType을 맞고
-        # 영구히 안 열린다.
-        return replace(state, last_seq=seq)
+        # 끼어든 말(판 9, D-09)은 어느 캐릭터의 **구조화된** 데이터도 바꾸지
+        # 않는다 — 능력치도 항목 값도 건드리지 않는다. 다만 그 말 자체는
+        # 남긴다(G-12.3-13): 되묻기가 읽는 대화록이 `GameState`에서 만들어
+        # 지므로, 여기 안 쌓으면 사람이 한 말이 GM에게 닿을 길이 없다.
+        return replace(
+            state,
+            last_seq=seq,
+            creation_interjections=(
+                *state.creation_interjections,
+                CreationInterjectionFold(
+                    seq=seq,
+                    speaker_character_id=payload["speaker_character_id"],
+                    text=payload["text"],
+                ),
+            ),
+        )
     if event_type == "character_created":
         # 캐릭터 완성(판 9, D-03/CHAR-04) — 페이로드의 stats를
         # StatEntry(...)로 되살려 Entity(...)를 만든다. StatEntry의

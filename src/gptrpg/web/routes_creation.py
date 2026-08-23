@@ -665,13 +665,25 @@ def _transcript_for(state: GameState, character_ids: tuple[str, ...]) -> tuple[s
     쓴 원문이므로 `fence_player_text()`를 지난다(SAFE-03) — 새 방어 로직을
     발명하지 않는다.
     """
-    lines: list[str] = []
+    numbered: list[tuple[int, str]] = []
     for (character_id, _step_id), fold in state.creation_step_values.items():
         if character_id not in character_ids:
             continue
         if fold.text_value:
-            lines.append(f"{character_id}: {fence_player_text(fold.text_value)}")
-    return tuple(lines)
+            numbered.append((fold.seq, f"{character_id}: {fence_player_text(fold.text_value)}"))
+    # 사람이 그냥 한 말도 대화록에 싣는다(G-12.3-13) — 이게 없으면 GM의
+    # 되물음에 말로 답할 방법이 없다. 항목 값과 섞어 **순번 순서**로 편다:
+    # 되물음에 대한 답은 질문 뒤에 오므로 순서가 뜻을 가진다.
+    for interjection in state.creation_interjections:
+        if interjection.speaker_character_id not in character_ids:
+            continue
+        numbered.append(
+            (
+                interjection.seq,
+                f"{interjection.speaker_character_id}: {fence_player_text(interjection.text)}",
+            )
+        )
+    return tuple(line for _seq, line in sorted(numbered, key=lambda pair: pair[0]))
 
 
 def _fallback_intro_for(state: GameState, rulebook: Rulebook, character_id: str) -> str:
@@ -741,6 +753,12 @@ def _gm_dedupe_key(
         for (fold_character_id, _step_id), fold in state.creation_step_values.items():
             if fold_character_id == character_id:
                 max_seq = max(max_seq, fold.seq)
+        # 그 사람이 **말을 하나 더 해도** 새 되묻기가 가능해진다
+        # (G-12.3-13) — 안 그러면 답을 적어도 키가 그대로라 GM이 같은
+        # 질문만 되돌려줘서, 되물음에 답할 길이 구조적으로 막힌다.
+        for interjection in state.creation_interjections:
+            if interjection.speaker_character_id == character_id:
+                max_seq = max(max_seq, interjection.seq)
         return f"follow_up:{character_id}:{max_seq}"
     if kind == "wrap_up":
         # 동의 관문에서 「아니요」로 항목이 다시 채워지면 값이 바뀌어

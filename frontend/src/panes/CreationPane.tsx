@@ -369,18 +369,24 @@ function InterjectBox({
   browserId,
   myCharacterId,
   duringCharacterId,
+  myTurn,
   pollNow,
+  onSent,
   onError,
 }: {
   sessionId: string;
   browserId: string;
   myCharacterId: string;
   duringCharacterId: string;
+  myTurn: boolean;
   pollNow: () => void;
+  onSent: () => void;
   onError: (message: string) => void;
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  // 같은 입력칸이지만 자기 차례에는 「끼어들기」가 아니다(G-12.3-13).
+  const placeholder = myTurn ? COPY.creationSpeakPlaceholder : COPY.creationInterjectPlaceholder;
 
   async function send(): Promise<void> {
     const trimmed = text.trim();
@@ -398,6 +404,7 @@ function InterjectBox({
       });
       setText("");
       pollNow();
+      onSent();
     } catch (error) {
       onError(creationErrorMessage(error));
     } finally {
@@ -419,8 +426,8 @@ function InterjectBox({
         value={text}
         maxLength={MAX_RAW_TEXT_LEN}
         disabled={sending}
-        placeholder={COPY.creationInterjectPlaceholder}
-        aria-label={COPY.creationInterjectPlaceholder}
+        placeholder={placeholder}
+        aria-label={placeholder}
         onChange={(event) => setText(event.target.value)}
       />
       <button type="submit" className="btn btn--ghost" disabled={sending || text.trim().length === 0}>
@@ -850,7 +857,16 @@ export function CreationPane({
         browserId={browserId}
         myCharacterId={myCharacterId}
         duringCharacterId={state.creation_current_speaker_id ?? myCharacterId}
+        myTurn={myTurn}
         pollNow={pollNow}
+        onSent={() => {
+          // 되물음을 받은 상태에서 말을 하나 했으면 그 답을 GM에게
+          // 전한다(G-12.3-13) — 서버의 중복방지 키가 이 말로 이미
+          // 바뀌었으므로 같은 질문이 아니라 새 판단이 온다.
+          if (myTurn && followUp.kind === "asked") {
+            void askGm();
+          }
+        }}
         onError={setError}
       />
     </section>

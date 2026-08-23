@@ -1842,12 +1842,25 @@ class SessionActor:
         """끼어든 말 하나를 사건으로 남긴다(D-09) — 검증 순서가 중요하다.
 
         ①본문이 비었으면 거절 ②명단이 잠겼으면 `RosterAlreadyLocked`
-        ③화자가 지금 차례인 사람(`during_character_id`)과 같으면 거절 —
-        자기 차례에는 끼어드는 것이 아니라 말하는 것이다 ④`during_character_id`
+        ③`during_character_id`
         자신이 이 세션에 실재하는 `character_id`인지 확인한다(WR-01,
         12.1-REVIEW.md) ⑤언급 대상이 전부 이 세션에 존재하는 `character_id`인지
         확인한다 — 없는 사람을 가리키는 기록을 남기면 Phase 14가 그 색인을
         못 푼다.
+
+        **G-12.3-13 (12.3-UAT.md) — 자기 차례에 하는 말을 더 이상 막지
+        않는다.** 예전에는 화자가 지금 차례인 사람과 같으면 거절하며
+        "자기 차례에는 끼어드는 것이 아니라 말하는 것이다"라고 냈다. 그
+        규칙은 「자기 차례에 하는 말은 전부 만들기 항목으로 낸다」를
+        전제했는데, **GM의 되물음이 그 전제를 깬다** — 되물음이 왔을 때는
+        항목이 이미 전부 차 있어서 어떤 항목으로도 답할 수 없다. 실제
+        시험(2026-08-23)에서 사람이 답을 적을 때마다 이 문구가 화면에
+        떴고, 되물음에 답할 길이 아예 없었다.
+
+        `speaker_character_id == during_character_id`는 이제 「자기 차례에
+        말했다」는 뜻이다 — 오류가 아니다. 이 값을 읽는 곳(대화록·Phase 14
+        관계 장부)에 자기 자신이 들어가도 가리키는 대상이 실재하므로
+        WR-01이 막으려던 종류의 문제가 아니다.
 
         **WR-01 (12.1-REVIEW.md):** 예전에는 `mentioned_character_ids`만
         `known_character_ids`와 대조하고 `during_character_id`(누구의
@@ -1866,8 +1879,6 @@ class SessionActor:
             raise CommandRejected("text는 비어 있을 수 없다")
         if self.state.party_roster is not None:
             raise RosterAlreadyLocked("파티 명단이 이미 잠겨 끼어들 수 없다")
-        if command.speaker_character_id == command.during_character_id:
-            raise CommandRejected("자기 차례에는 끼어드는 것이 아니라 말하는 것이다")
 
         known_character_ids = set(self.state.created_characters) | {
             character_id for character_id, _step_id in self.state.creation_step_values

@@ -2082,21 +2082,40 @@ async def test_interjection_is_rejected_when_text_is_empty(tmp_db_path):
         store.close()
 
 
-async def test_interjection_during_own_turn_is_rejected(tmp_db_path):
-    """자기 차례에는 끼어드는 것이 아니라 말하는 것이다."""
+async def test_speaking_during_your_own_turn_is_recorded(tmp_db_path):
+    """자기 차례에 하는 말도 기록된다(G-12.3-13).
+
+    예전에는 화자와 「지금 차례인 사람」이 같으면 거절했다 — 자기 차례에
+    하는 말은 전부 만들기 항목으로 낸다는 전제였다. GM의 되물음이 그
+    전제를 깬다: 되물음이 올 때는 항목이 이미 전부 차 있어서 어떤
+    항목으로도 답할 수 없다. 이제 그 말이 기록되고, 되묻기가 읽는
+    대화록에 실린다(`tests/test_creation_follow_up_answer.py`).
+    """
     store, actor = _make_actor(tmp_db_path)
     try:
         await actor.submit(FixPartySize(player_character_count=3, rulebook_id=DUNGEONWORLD_LIKE_ID))
-        with pytest.raises(CommandRejected):
-            await actor.submit(
-                RecordInterjection(
-                    speaker_character_id="bram",
-                    browser_id="B1",
-                    during_character_id="bram",
-                    mentioned_character_ids=(),
-                    text="제 이야기입니다",
-                )
+        await actor.submit(
+            CompleteCreationStep(
+                character_id="bram",
+                browser_id="B1",
+                step_id="name",
+                rulebook_id=DUNGEONWORLD_LIKE_ID,
+                text_value="브람",
             )
+        )
+        await actor.submit(
+            RecordInterjection(
+                speaker_character_id="bram",
+                browser_id="B1",
+                during_character_id="bram",
+                mentioned_character_ids=(),
+                text="제 이야기입니다",
+            )
+        )
+        spoken = actor.state.creation_interjections
+        assert len(spoken) == 1
+        assert spoken[0].speaker_character_id == "bram"
+        assert spoken[0].text == "제 이야기입니다"
     finally:
         await actor.stop()
         store.close()

@@ -307,6 +307,9 @@ export const COPY = {
    */
   creationUnknownNameSubject: "아직 이름을 안 정한 분",
   creationInterjectPlaceholder: "끼어들어 말하기…",
+  /** 자기 차례에는 「끼어드는」 것이 아니라 그냥 말하는 것이다 —
+   * 같은 입력칸이지만 상황이 다르다(G-12.3-13). */
+  creationSpeakPlaceholder: "말하기…",
   creationDerivedAuto: "자동 계산",
   creationStepKindUnsupported: "이 룰북 항목은 아직 화면에서 채울 수 없어요",
   creationBudgetLeft: "남은 배분",

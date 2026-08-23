@@ -280,6 +280,7 @@
   "creation_consents": {},
   "creation_gm_said": {},
   "creation_host_browser_id": null,
+  "creation_interjections": [],
   "creation_rulebook_id": null,
   "creation_step_values": {},
   "declare_no_check": {},

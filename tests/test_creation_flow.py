@@ -308,10 +308,16 @@ def test_interjection_is_recorded_with_speaker_and_mentioned(web_client):
     assert events[0]["mentioned_character_ids"] == [CHARACTER_ID]
 
 
-def test_interjection_during_own_turn_is_rejected(web_client):
-    """D-09 — 자기 차례에는 끼어드는 것이 아니라 말하는 것이다."""
+def test_speaking_during_your_own_turn_is_accepted(web_client):
+    """G-12.3-13 — 자기 차례에 하는 말도 받는다.
+
+    예전에는 409로 거절하며 "자기 차례에는 끼어드는 것이 아니라 말하는
+    것이다"를 냈다. 그 문구가 2026-08-23 실제 시험에서 **되물음에 답하려는
+    사람에게 매번** 떴다 — 되물음이 올 때는 항목이 전부 차 있어 어떤
+    항목으로도 답할 수 없으므로, 그 규칙은 답할 길 자체를 막고 있었다.
+    """
     client = web_client
-    session_id = SESSION_ID + "-interject-own-turn"
+    session_id = SESSION_ID + "-speak-own-turn"
     assert _fix_party_size(client, session_id=session_id).status_code == 200
     assert _complete_step(client, session_id=session_id, step_id="name").status_code == 200
 
@@ -321,8 +327,12 @@ def test_interjection_during_own_turn_is_rejected(web_client):
         speaker_character_id=CHARACTER_ID,
         browser_id=BROWSER_ID,
         during_character_id=CHARACTER_ID,
+        text="그냥 아무것도 없으니 잃을 것도 없지 않은가?",
     )
-    assert response.status_code == 409
+    assert response.status_code == 200, response.text
+    spoken = _events_of_type(client, "creation_interjection", session_id=session_id)
+    assert len(spoken) == 1
+    assert spoken[0]["text"] == "그냥 아무것도 없으니 잃을 것도 없지 않은가?"
 
 
 def test_interjection_mentioning_an_unknown_character_is_rejected(web_client):
