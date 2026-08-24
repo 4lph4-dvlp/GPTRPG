@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
-current_phase: 12.3
-current_phase_name: creation-screen
-status: executing
-stopped_at: Completed 12.3-20-PLAN.md — 그물을 뒤집어 확인하는 명령의 겨눈-단언 대조 gap 종료(20/20, phase 12.3 완료)
-last_updated: "2026-08-24T08:14:49.857Z"
+current_phase: 8
+current_phase_name: 신원 검증과 멱등성
+status: planning
+stopped_at: Phase 12.3 complete, ready to plan Phase 8
+last_updated: "2026-08-24T08:31:39.446Z"
 last_activity: 2026-08-24
-last_activity_desc: Phase 12.3 execution started
-state_head: b62c79e509e586f00809e9bd65f9c1ad2e99f815
+last_activity_desc: Phase 12.3 complete, transitioned to Phase 8
+state_head: d572ac01c7966352f9fb47089113879b8e6a427a
 progress:
   total_phases: 14
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 58
   completed_plans: 58
 ---
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 12.3 (creation-screen) — READY TO EXECUTE
-Plan: 20 of 20
-Status: Ready to execute (12.3-20 남음)
-Last activity: 2026-08-24 — 12.3-19 완료(조작 요소 「잴 것이 없었다」 종료 코드 2 gap 종료)
+Phase: 8 — 신원 검증과 멱등성
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-24 — Phase 12.3 complete, transitioned to Phase 8
 
 > 계획 번호 참고: `Plan: N of 11`의 카운터는 phase 초기 계획 수(10개)에
 > gap-closure로 추가된 12.3-11 한 건이 더해진 실제 파일 개수(11)를 따른다 —
@@ -70,7 +70,7 @@ Progress: [██████████] 100%
 
 **Velocity:**
 
-- Total plans completed: 56 (M0 누적)
+- Total plans completed: 76 (M0 누적)
 - Average duration: -
 - Total execution time: 0.0 hours (v1.1 기준 — 아직 실행 없음)
 
@@ -89,6 +89,7 @@ Progress: [██████████] 100%
 | 12 | 7 | - | - |
 | 12.1 | 6 | - | - |
 | 12.2 | 3 | - | - |
+| 12.3 | 20 | - | - |
 
 **Recent Trend:**
 
@@ -437,7 +438,7 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 ## Session Continuity
 
 Last session: 2026-08-24T08:14:49.464Z
-Stopped at: Completed 12.3-20-PLAN.md — 그물을 뒤집어 확인하는 명령의 겨눈-단언 대조 gap 종료(20/20, phase 12.3 완료)
+Stopped at: Phase 12.3 complete, ready to plan Phase 8
 Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
