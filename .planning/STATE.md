@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: creation-screen
 status: executing
-stopped_at: Completed 12.3-19-PLAN.md — 조작 요소 「잴 것이 없었다」를 종료 코드 2로 가르는 마지막 빈 값 경계 종료(19/20)
-last_updated: "2026-08-24T08:00:33.278Z"
+stopped_at: Completed 12.3-20-PLAN.md — 그물을 뒤집어 확인하는 명령의 겨눈-단언 대조 gap 종료(20/20, phase 12.3 완료)
+last_updated: "2026-08-24T08:14:49.857Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 12.3 execution started
-state_head: af9f8c1524ec0c98338b69ce51736ddcd06863c8
+state_head: b62c79e509e586f00809e9bd65f9c1ad2e99f815
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 58
-  completed_plans: 57
+  completed_plans: 58
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.3 (creation-screen) — READY TO EXECUTE
-Plan: 19 of 20
+Plan: 20 of 20
 Status: Ready to execute (12.3-20 남음)
 Last activity: 2026-08-24 — 12.3-19 완료(조작 요소 「잴 것이 없었다」 종료 코드 2 gap 종료)
 
@@ -171,6 +171,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P17 | ~20min | 3 tasks | 2 files |
 | Phase 12.3 P18 | ~65min | 3 tasks | 3 files |
 | Phase 12.3 P19 | ~15min | 2 tasks | 1 files |
+| Phase 12.3 P20 | ~25min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -377,6 +378,7 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 12.3-18: check_narrow_viewport.py의 빈 문서 판정·키 누락·형태 이름 침묵·import 실패 다섯 자리를 종료 코드 2로 접었다. 넓은 창 대조군이 storyLeft/storyWidth로 3컬럼 붕괴를 실제로 잡고, 상태 칸 25dvh 상한을 단언으로 지킨다. 코드 검토 16건 전부의 처지를 deferred-items.md에 기록(접은 12건 + 안 접은 4건)
 - [Phase 12.3]: 12.3-19: 조작 요소(TOUCH_TARGETS) 선택자가 하나도 못 찾으면 extract_measurements()가 판정 없이 종료 코드 2로 끝나는 빈 값 경계 추가 — G-12.3-32 종료. 전0→후2→원복0 실증 완료
 - [Phase 12.3]: 12.3-19: 이름 감시 목록(REQUIRED_SOURCE_CLASS_NAMES)에 composer__row·composer__input·candidate·btn 추가 — 조작 요소 조합 선택자가 쓰는 낱말까지 감시. select·input[type=number]는 태그/속성 선택자라 목록에 못 넣음을 주석으로 명시
+- [Phase 12.3]: 12.3-20: --self-test가 함정마다 겨눈 단언의 표식을 사유 문장에서 대조 — 통과 여부만 보면 옆 단언이 대신 빨강을 내줘도 죽은 단언이 통과로 보이던 것을 닫음(TRAPS 넷째 칸 + _validate_trap_markers) — 12.3-REVIEW.md WR-01 실측 — pixel-floor/starved-story 두 함정이 겨눈 단언 말고 다른 단언과 함께 빨강을 내 겨눈 단언이 죽어도 통과를 찍을 수 있었다
 
 ### Pending Todos
 
@@ -434,8 +436,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-24T08:00:32.889Z
-Stopped at: Completed 12.3-19-PLAN.md — 조작 요소 「잴 것이 없었다」를 종료 코드 2로 가르는 마지막 빈 값 경계 종료(19/20)
+Last session: 2026-08-24T08:14:49.464Z
+Stopped at: Completed 12.3-20-PLAN.md — 그물을 뒤집어 확인하는 명령의 겨눈-단언 대조 gap 종료(20/20, phase 12.3 완료)
 Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
