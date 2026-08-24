@@ -34,13 +34,20 @@
 
 - `0` — 통과. 네 형태(1440×900 대조군 · 960×1080 · 390×844 · 844×390)
   전부에서 서사 칸이 뷰포트 높이의 4분의 1 이상이고, 골격이 안 넘치고,
-  조작 칸(`select`/`input[type="number"]`)이 44px 이상이다.
+  사람이 실제로 누르는 조작 요소 전부(`TOUCH_TARGETS` — 조작부 전체·말
+  쓰는 칸·보내기 단추·제안 카드 단추·GM 제안 후보 버튼·능력치 배치 칸·
+  점수 숫자칸)가 44px 이상이고 화면 안에 있거나 스크롤로 닿으며, 넓은
+  창(1440×900)에서 3컬럼이 그대로이고, 좁은 형태에서 상태 칸이 뷰포트의
+  25%를 안 넘는다.
 - `1` — 실패. 어느 형태에서 서사가 죽었거나, 골격 자신의 내용이 골격
   상자를 넘어 잘렸거나, 세 칸(상태·서사·대화) 중 하나의 아래끝이 화면
   밖으로 넘쳤거나, 조작부(`.composer`)의 조작 요소가 화면 밖으로 잘려
-  스크롤로도 못 닿거나, 조작 칸이 44px보다 얇다.
+  스크롤로도 못 닿거나 44px보다 얇거나, 넓은 창에서 3컬럼이 무너졌거나,
+  상태 칸이 25% 상한을 넘겼다.
 - `2` — **확인 불가.** 크로미움이 없음 · `styles.css`가 없음 · 크로미움
-  실행 자체가 실패함 · 측정값을 못 읽음 · **고정판이 실제 화면과 갈림**
+  실행 자체가 실패함 · 측정값을 못 읽음(키 누락·형태 이름/차례 어긋남
+  포함) · 고정판에 재야 할 요소가 없음 · 형태 조건부 단언이 도는 이름이
+  `SHAPES`에 없음 · import 실패 · **고정판이 실제 화면과 갈림**
   (아래 `check_fixture_still_mirrors_source` 참조). **`2`를 `0`으로 접지
   않는다** — 확인을 못 한 상황이 통과로 보이는 것이 정확히 이 결함군이
   1년 가까이 살아남은 이유다.
@@ -104,6 +111,12 @@ OVERFLOW_TOLERANCE_PX = 1
 # 내 줄과 남의 줄의 배경색이 갈리는지는 형태와 무관한 단언(G-12.3-27)이라
 # 네 형태 전부에서 반복할 필요가 없다 — 폰 세로 한 형태에서만 본다.
 MINE_LINE_COLOR_CHECK_SHAPE = "390x844"
+# 넓은 창 대조군의 이름 — 「3컬럼이 그대로인가」와 「좌우 폭과 무관한 상태
+# 칸 상한」을 이 형태 하나로 가른다(WR-02, IN-02).
+WIDE_SHAPE = "1440x900"
+# 상태 칸 높이 상한 — 12.3-15가 서사 칸을 살린 근거 자체가 이 상한이다.
+# 넓은 형태(WIDE_SHAPE)에서는 세로 3컬럼이 아니라 이 상한 규칙 자체가 없다.
+MAX_STATUS_HEIGHT_RATIO = 0.25
 
 # 네 형태. 1440×900은 넓은 창의 대조군(3컬럼이 그대로인지 본다). 960×1080은
 # 1920×1080 화면의 절반 폭(사장님이 실제로 보고한 형태). 390×844는 폰
@@ -131,6 +144,11 @@ def _validate_shape_name_constants() -> str | None:
         return (
             f"'{MINE_LINE_COLOR_CHECK_SHAPE}' 형태가 SHAPES에 없어 배경색 단언"
             "(내 줄/남의 줄 구분, G-12.3-27)이 한 번도 실행되지 않는다"
+        )
+    if WIDE_SHAPE not in shape_names:
+        return (
+            f"'{WIDE_SHAPE}' 형태가 SHAPES에 없어 넓은 창 3컬럼 단언이 "
+            "한 번도 실행되지 않는다"
         )
     return None
 
@@ -300,7 +318,12 @@ def build_host_html(css_uri: str, extra_css: str | None = None) -> str:
 
     `extra_css`는 그대로 `build_inner_html`에 전달된다(--self-test 함정용).
     """
-    inner_html_json = json.dumps(build_inner_html(css_uri, extra_css))
+    # json.dumps는 기본으로 `/`를 이스케이프하지 않는다 — 고정판 문자열에
+    # `</script>`가 들어가면 그 순간 호스트 문서의 <script> 블록이 조용히
+    # 끊긴다(IN-05). 지금은 고정판이 리터럴뿐이라 안전하고, 깨져도
+    # PENDING → 종료 코드 2로 안전한 쪽으로 실패하지만, 한 줄로 막아 두는
+    # 편이 싸다.
+    inner_html_json = json.dumps(build_inner_html(css_uri, extra_css)).replace("</", "<\\/")
     shapes_json = json.dumps(SHAPES)
     tolerance_json = json.dumps(OVERFLOW_TOLERANCE_PX)
     # 선택자만 넘긴다 — 44px 하한을 거는지(checkHeight)는 judge()가 대상
@@ -437,20 +460,30 @@ def build_host_html(css_uri: str, extra_css: str | None = None) -> str:
       var statusBottom = statusEl.getBoundingClientRect().bottom;
       var storyBottom = storyEl.getBoundingClientRect().bottom;
       var chatBottom = chatEl.getBoundingClientRect().bottom;
+      // 서사 칸의 왼쪽 위치와 폭 — 넓은 창(WIDE_SHAPE) 대조군이 3컬럼이
+      // 무너졌는지 직접 재는 유일한 값이다(WR-02). 왼쪽 상태 칸이 268px
+      // 고정 폭이므로, 서사 칸 왼쪽이 0이면 그 칸이 사라져 1컬럼으로
+      // 무너진 것이다.
+      var storyLeft = storyEl.getBoundingClientRect().left;
+      var storyWidth = storyEl.getBoundingClientRect().width;
 
       results.push({{
         name: shape.name,
         missingElements: [],
-        innerWidth: win.innerWidth,
         innerHeight: win.innerHeight,
         statusHeight: statusEl.getBoundingClientRect().height,
         storyHeight: storyEl.getBoundingClientRect().height,
+        // chatHeight는 판정에 안 쓴다 — 조작부 닿을 수 있음 단언(TOUCH_TARGETS)이
+        // 이미 실질(조작 요소가 실제로 화면 안에 있는가)을 보고 있어, 이
+        // 값은 사람이 출력 줄을 읽을 때 참고하는 용도로만 남긴다(IN-02).
         chatHeight: chatEl.getBoundingClientRect().height,
         shellScrollHeight: shellScrollHeight,
         shellClientHeight: shellClientHeight,
         statusBottom: statusBottom,
         storyBottom: storyBottom,
         chatBottom: chatBottom,
+        storyLeft: storyLeft,
+        storyWidth: storyWidth,
         otherLineBg: win.getComputedStyle(otherLineEl).backgroundColor,
         mineLineBg: win.getComputedStyle(mineLineEl).backgroundColor,
         targets: targets
@@ -490,6 +523,10 @@ def dump_dom(chromium: str, url: str) -> str | None:
                 chromium,
                 "--headless",
                 "--disable-gpu",
+                # no-sandbox 근거(check_insecure_origin.py의 선례를 그대로
+                # 따름) — 여는 대상이 저장소 안 고정 파일(file:// 임시
+                # host.html)뿐이고 네트워크를 안 탄다. 개발자 기계 밖으로
+                # 나가는 입력이 없어 샌드박스가 막을 위협 자체가 없다.
                 "--no-sandbox",
                 "--dump-dom",
                 f"--virtual-time-budget={VIRTUAL_TIME_BUDGET_MS}",
@@ -528,6 +565,8 @@ REQUIRED_MEASUREMENT_KEYS = (
     "statusBottom",
     "storyBottom",
     "chatBottom",
+    "storyLeft",
+    "storyWidth",
     "otherLineBg",
     "mineLineBg",
     "targets",
@@ -673,6 +712,31 @@ def judge(measurement: dict) -> tuple[bool, list[str]]:
                 f"({measurement['mineLineBg']}) — 누가 말했는지 한눈에 안 갈린다"
             )
 
+    # ⑤ 넓은 창(WIDE_SHAPE) 대조군이 실제로 3컬럼을 잰다(WR-02). 왼쪽
+    # 상태 칸이 268px 고정 폭이므로, 서사 칸이 왼쪽 끝(0)에 붙어 있으면
+    # 그 칸이 사라져 세로 1컬럼으로 무너진 것이다 — 폭을 하나도 안 재면
+    # 서사 칸이 35dvh를 받아 최소선을 넘어 그대로 통과해 버린다(대조군이
+    # 대조 노릇을 못 한다).
+    if measurement["name"] == WIDE_SHAPE:
+        if measurement["storyLeft"] <= OVERFLOW_TOLERANCE_PX:
+            reasons.append(
+                f"넓은 창인데 서사 칸이 왼쪽 끝({measurement['storyLeft']:.1f}px)에 "
+                "붙었다 — 3컬럼이 무너졌다"
+            )
+
+    # ⑥ 좁은 형태(미디어쿼리가 도는 형태)에서 상태 칸이 뷰포트의 25%를
+    # 넘지 않는다(IN-02) — 12.3-15가 서사 칸을 살린 근거 자체가 이 상한
+    # (`max-height: 25dvh`)인데, 그 상한 자체는 지금까지 한 번도 판정에
+    # 안 쓰였다. 넓은 형태(WIDE_SHAPE)에서는 세로 3컬럼이 아니라 이 상한
+    # 규칙 자체가 없으므로 판정하지 않는다.
+    if measurement["name"] != WIDE_SHAPE:
+        max_status_height = viewport_height * MAX_STATUS_HEIGHT_RATIO
+        if measurement["statusHeight"] > max_status_height + OVERFLOW_TOLERANCE_PX:
+            reasons.append(
+                f"상태 칸이 {measurement['statusHeight']:.1f}px로 상한 "
+                f"{max_status_height:.1f}px(뷰포트의 25%)를 넘었다"
+            )
+
     return (len(reasons) == 0, reasons)
 
 
@@ -701,7 +765,7 @@ TRAPS: list[tuple[str, str, str]] = [
         # 12.3-16이 .composer에 더한 두 선언(min-height: 0 + overflow-y:
         # auto)을 되돌린다 — 조작부와 그 안의 GM 제안 후보 버튼·보내기
         # 단추가 다시 .pane의 overflow: hidden에 잘린다(닿을 수 있음
-        # 단언 ⑤를 겨눈다).
+        # 단언 ③을 겨눈다).
         """
 .composer {
   min-height: auto;
