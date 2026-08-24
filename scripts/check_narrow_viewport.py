@@ -119,13 +119,45 @@ TOUCH_TARGETS: list[tuple[str, str, bool]] = [
 ]
 
 # 고정판이 흉내 내는 실제 화면 클래스 이름들 — 이 이름들이 소스에서
-# 사라지면 고정판은 더 이상 실제 화면을 안 비춘다(T-12.3-67).
+# 사라지면 고정판은 더 이상 실제 화면을 안 비춘다(T-12.3-67). ChatPane과
+# CreationPane 둘 다 12.3-16에서 세 층(chat__head는 ChatPane 전용 —
+# CreationPane은 그 자리에 turnLabel을 쓴다)·composer·proposal을 새로
+# 흉내 내기 시작했으므로 여기 함께 늘렸다.
 REQUIRED_SOURCE_CLASS_NAMES: dict[str, list[str]] = {
     "frontend/src/panes/StatusPane.tsx": ["pane--status"],
     "frontend/src/panes/StoryPane.tsx": ["pane--story"],
-    "frontend/src/panes/ChatPane.tsx": ["pane--chat", "chat-line--mine"],
-    "frontend/src/panes/CreationPane.tsx": ["chat-line--mine"],
+    "frontend/src/panes/ChatPane.tsx": [
+        "pane--chat",
+        "chat__head",
+        "chat",
+        "composer",
+        "proposal",
+        "chat-line--mine",
+    ],
+    "frontend/src/panes/CreationPane.tsx": [
+        "chat-line--mine",
+        "chat",
+        "composer",
+        "proposal",
+    ],
 }
+
+# `className=` 속성값(단순 문자열이든 `{조건 ? "a" : "b"}` 삼항식이든) 안에서
+# 이름 하나를 낱말 경계로 찾는다. `className=` 뒤 `{...}`나 `"..."`
+# 구간만 본다 — 그래서 주석에 이름만 적혀 있어도 통과하던 구멍(단순
+# `class_name not in text`)이 막힌다. 경계는 "앞뒤가 낱말 문자(밑줄
+# 포함)도 하이픈도 아닌 자리"다 — 그래서 `chat`은 `chat-line`·
+# `chat__head`·`pane--chat`의 부분 문자열로는 안 걸리고, `className="chat"`
+# 같은 완전한 토큰에만 걸린다.
+_CLASS_NAME_ATTR_RE = re.compile(r'className=(?:\{[^}]*\}|"[^"]*")', re.DOTALL)
+
+
+def _class_name_present_in_jsx(text: str, class_name: str) -> bool:
+    boundary = r"(?<![\w-])" + re.escape(class_name) + r"(?![\w-])"
+    return any(
+        re.search(boundary, match.group(0)) is not None
+        for match in _CLASS_NAME_ATTR_RE.finditer(text)
+    )
 
 
 def check_fixture_still_mirrors_source() -> list[str]:
@@ -133,7 +165,12 @@ def check_fixture_still_mirrors_source() -> list[str]:
 
     하나라도 없으면 마크업이 바뀐 것이고, 이 스크립트의 고정판은 더 이상
     실제 화면을 안 비춘다 — 그때 통과(0)를 찍으면 그물이 조용히
-    헐거워진다. 이 조항이 고정판을 쓰는 확인의 유일한 약점을 막는 자리다.
+    헐거워진다. 이 조항이 막는 것은 **이름이 사라지는** 종류의 드리프트뿐이다
+    (`className=` 문맥에서 낱말 경계로 찾는다). **중첩 구조가 바뀌는**
+    종류의 드리프트는 원리적으로 못 잡는다 — 이름은 다 살아 있는데 고정판이
+    그 이름들을 실제 화면과 다른 순서·다른 부모자식 관계로 담는 경우다
+    (12.3-16이 닫은 결함이 정확히 이 종류였다: `.composer`·`.proposal`
+    이름은 있었지만 고정판이 그것들을 아예 안 담고 있었다).
     """
     missing: list[str] = []
     for rel_path, class_names in REQUIRED_SOURCE_CLASS_NAMES.items():
@@ -144,7 +181,7 @@ def check_fixture_still_mirrors_source() -> list[str]:
             missing.append(f"{rel_path} — 파일을 못 읽음({exc})")
             continue
         for class_name in class_names:
-            if class_name not in text:
+            if not _class_name_present_in_jsx(text, class_name):
                 missing.append(f"{rel_path} — '{class_name}' 클래스를 못 찾음")
     return missing
 
