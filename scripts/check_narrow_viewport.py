@@ -35,8 +35,10 @@
 - `0` — 통과. 네 형태(1440×900 대조군 · 960×1080 · 390×844 · 844×390)
   전부에서 서사 칸이 뷰포트 높이의 4분의 1 이상이고, 골격이 안 넘치고,
   조작 칸(`select`/`input[type="number"]`)이 44px 이상이다.
-- `1` — 실패. 어느 형태에서 서사가 죽었거나, 골격이 화면 밖으로 넘쳤거나,
-  조작 칸이 44px보다 얇다.
+- `1` — 실패. 어느 형태에서 서사가 죽었거나, 골격 자신의 내용이 골격
+  상자를 넘어 잘렸거나, 세 칸(상태·서사·대화) 중 하나의 아래끝이 화면
+  밖으로 넘쳤거나, 조작부(`.composer`)의 조작 요소가 화면 밖으로 잘려
+  스크롤로도 못 닿거나, 조작 칸이 44px보다 얇다.
 - `2` — **확인 불가.** 크로미움이 없음 · `styles.css`가 없음 · 크로미움
   실행 자체가 실패함 · 측정값을 못 읽음 · **고정판이 실제 화면과 갈림**
   (아래 `check_fixture_still_mirrors_source` 참조). **`2`를 `0`으로 접지
@@ -352,6 +354,22 @@ def build_host_html(css_uri: str) -> str:
         targets[selector] = entries;
       }});
 
+      // `.shell`은 overflow: hidden이라 스크롤바를 안 만들지만, scrollHeight는
+      // 잘린 내용의 크기를 그대로 보고한다 — clientHeight(상자 자신의 높이,
+      // 100dvh로 고정)와 견주면 「골격 자신이 넘쳤는가」를 직접 잴 수 있다.
+      // 문서 최상위 요소(doc.documentElement)의 높이는 `.shell`이
+      // overflow: hidden인 이상 자식이 아무리 넘쳐도 언제나 정확히 뷰포트
+      // 높이라 그 값을 재는 단언은 원리적으로 절대 발화할 수 없다(12.3-17,
+      // T-12.3-84의 전제가 된 결함).
+      var shellScrollHeight = shellEl.scrollHeight;
+      var shellClientHeight = shellEl.clientHeight;
+      // 골격이 터졌을 때 실제로 화면 밖으로 나가는 것은 세 칸 자신이다 —
+      // 그 아래끝을 재면 사람이 읽을 사유 문장("어느 칸이 얼마나 넘쳤다")이
+      // 여기서 바로 나온다.
+      var statusBottom = statusEl.getBoundingClientRect().bottom;
+      var storyBottom = storyEl.getBoundingClientRect().bottom;
+      var chatBottom = chatEl.getBoundingClientRect().bottom;
+
       results.push({{
         name: shape.name,
         innerWidth: win.innerWidth,
@@ -359,7 +377,11 @@ def build_host_html(css_uri: str) -> str:
         statusHeight: statusEl.getBoundingClientRect().height,
         storyHeight: storyEl.getBoundingClientRect().height,
         chatHeight: chatEl.getBoundingClientRect().height,
-        scrollHeight: doc.documentElement.scrollHeight,
+        shellScrollHeight: shellScrollHeight,
+        shellClientHeight: shellClientHeight,
+        statusBottom: statusBottom,
+        storyBottom: storyBottom,
+        chatBottom: chatBottom,
         otherLineBg: win.getComputedStyle(otherLineEl).backgroundColor,
         mineLineBg: win.getComputedStyle(mineLineEl).backgroundColor,
         targets: targets
@@ -463,11 +485,29 @@ def judge(measurement: dict) -> tuple[bool, list[str]]:
 
     # ② 골격이 화면 밖으로 안 넘친다 — G-12.3-29 missing이 직접 경고한
     # 함정(서사 행에 픽셀 바닥만 줘서 전체가 넘치는 것)을 이 줄이 막는다.
-    if measurement["scrollHeight"] > viewport_height + OVERFLOW_TOLERANCE_PX:
+    #
+    # 예전엔 문서 최상위 요소의 높이를 뷰포트와 견줬는데, `.shell`이
+    # `height: 100dvh; overflow: hidden`이라 그 값은 자식이 아무리 넘쳐도
+    # **언제나 정확히 뷰포트 높이**로 못 박혀 있었다 — 그 단언은 원리적으로
+    # 절대 발화할 수 없었다(12.3-17, T-12.3-84). 대신 골격 **자신의**
+    # 넘침(scrollHeight 대 clientHeight)과, 골격이 터졌을 때 실제로 화면
+    # 밖으로 나가는 세 칸의 아래끝을 잰다.
+    if measurement["shellScrollHeight"] > measurement["shellClientHeight"] + OVERFLOW_TOLERANCE_PX:
         reasons.append(
-            f"문서 높이({measurement['scrollHeight']:.1f}px)가 뷰포트"
-            f"({viewport_height}px)를 넘었다"
+            f"골격 내용({measurement['shellScrollHeight']:.1f}px)이 골격 상자"
+            f"({measurement['shellClientHeight']:.1f}px)를 넘어 잘렸다"
         )
+    for pane_key, human_name in (
+        ("statusBottom", "상태 칸"),
+        ("storyBottom", "서사 칸"),
+        ("chatBottom", "대화 칸"),
+    ):
+        bottom = measurement[pane_key]
+        if bottom > viewport_height + OVERFLOW_TOLERANCE_PX:
+            reasons.append(
+                f"{human_name}({pane_key}) 아래끝 {bottom:.1f}px가 뷰포트"
+                f"({viewport_height}px)를 넘었다"
+            )
 
     # ③ 사람이 실제로 누르는 것 전부(TOUCH_TARGETS, 12.3-16 Task 2)가
     # 「44px 이상이고 스크롤로 닿는다」다 — 높이만 재면 조상이 잘라 버려
@@ -557,7 +597,7 @@ def main() -> int:
             f"{measurement['name']} · 상태 {measurement['statusHeight']:.1f}px · "
             f"서사 {measurement['storyHeight']:.1f}px · "
             f"대화 {measurement['chatHeight']:.1f}px · "
-            f"문서높이 {measurement['scrollHeight']:.1f}px · {status}"
+            f"골격내용 {measurement['shellScrollHeight']:.1f}px · {status}"
         )
         if not passed:
             any_failed = True
