@@ -140,6 +140,12 @@ def build_inner_html(css_uri: str) -> str:
     내용을 흉내 내면 그 흉내가 낡는 순간 그물이 조용히 헐거워지므로,
     흉내 내지 않고 「상태 칸이 아무리 커져도 서사가 안 죽는가」를 직접
     시험한다 — 이 고정판은 실제보다 일부러 더 가혹하다.
+
+    대화판(`.pane--chat`)도 같은 원칙이다 — `ChatPane.tsx`의 세 층
+    (`.chat__head` → `.chat` → `.composer`) 그대로를 담되, `.composer`
+    안에는 놀이 중 가장 잦고 가장 높은 상태(GM 제안 카드 — 후보 버튼
+    둘 + 다시 쓰기 하나)를 넣는다. 실제 내용을 흉내 내지 말고 가장
+    가혹한 상태를 넣는다는 원칙은 상태 칸 900px 블록과 같다(12.3-16).
     """
     return f"""<!DOCTYPE html>
 <html lang="ko">
@@ -156,13 +162,31 @@ def build_inner_html(css_uri: str) -> str:
   </aside>
   <main class="pane pane--story"></main>
   <section class="pane pane--chat">
-    <div class="chat-line">
-      <div class="chat-line__who">남</div>
-      <div class="chat-line__text">남의 말</div>
+    <div class="chat__head">
+      <p class="t-caps">모두의 행동</p>
     </div>
-    <div class="chat-line chat-line--mine">
-      <div class="chat-line__who">나</div>
-      <div class="chat-line__text">내 말</div>
+    <div class="chat">
+      <div class="chat-line">
+        <div class="chat-line__who">남</div>
+        <div class="chat-line__text">남의 말</div>
+      </div>
+      <div class="chat-line chat-line--mine">
+        <div class="chat-line__who">나</div>
+        <div class="chat-line__text">내 말</div>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="proposal">
+        <p class="t-caps">어느 쪽인가요</p>
+        <button type="button" class="candidate">후보 1</button>
+        <button type="button" class="candidate">후보 2</button>
+        <button type="button" class="btn btn--ghost btn--wide">다시 쓰기</button>
+      </div>
+      <form class="composer__row">
+        <input class="composer__input" type="text" placeholder="무엇을 하나요?">
+        <button type="submit" class="btn btn--primary">보내기</button>
+      </form>
+      <div class="composer__status">상태 문구</div>
     </div>
   </section>
 </div>
@@ -179,6 +203,7 @@ def build_host_html(css_uri: str) -> str:
     """
     inner_html_json = json.dumps(build_inner_html(css_uri))
     shapes_json = json.dumps(SHAPES)
+    tolerance_json = json.dumps(OVERFLOW_TOLERANCE_PX)
     return f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
@@ -188,7 +213,49 @@ def build_host_html(css_uri: str) -> str:
 (function () {{
   var SHAPES = {shapes_json};
   var INNER_HTML = {inner_html_json};
+  var OVERFLOW_TOLERANCE_PX = {tolerance_json};
   var results = [];
+
+  // 「닿을 수 있는가」를 위치가 아니라 스크롤 경로 유무로 판정한다. 조상을
+  // el에서 shell까지 거슬러 오르며: overflow-y가 auto|scroll인 조상을
+  // 만나면 그 조상이 스크롤 경로이므로 비교 기준 상자를 그 조상 자신의
+  // 상자로 바꿔 계속 오르고(그 안의 내용은 화면 밖에 있어도 손가락으로
+  // 스크롤하면 닿는다), hidden|clip인 조상을 만나면 지금 비교 기준
+  // 상자가 그 조상 상자를 OVERFLOW_TOLERANCE_PX보다 크게 벗어났는지
+  // 본다 — 벗어났으면 그만큼은 스크롤로도 영영 안 닿는다. 이 구분이
+  // 왜 필요한가: 상태 칸의 select/입력칸은 부모(.pane--status)가
+  // overflow-y: auto라 화면 밖에 있어도 통과해야 하는데, 단순히
+  // 「뷰포트를 넘었는가」로만 재면 그것을 거짓 빨강으로 찍는다. 반대로
+  // 조작부(.composer)는 조상(.pane)이 overflow: hidden이라 넘친 만큼이
+  // 정말로 안 닿는다 — 그 둘을 가르는 것은 위치가 아니라 스크롤 경로다.
+  // 다 오른 뒤에는 마지막 비교 기준 상자의 아래끝이 뷰포트 안에 있는지
+  // 본다.
+  function reachable(win, shell, el) {{
+    var ownBottom = el.getBoundingClientRect().bottom;
+    var box = el.getBoundingClientRect();
+    var current = el;
+    while (current !== shell) {{
+      var parent = current.parentElement;
+      if (parent === null) {{ break; }}
+      var overflowY = win.getComputedStyle(parent).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll") {{
+        box = parent.getBoundingClientRect();
+      }} else if (overflowY === "hidden" || overflowY === "clip") {{
+        var parentBox = parent.getBoundingClientRect();
+        if (
+          box.top < parentBox.top - OVERFLOW_TOLERANCE_PX ||
+          box.bottom > parentBox.bottom + OVERFLOW_TOLERANCE_PX
+        ) {{
+          return {{ bottom: ownBottom, blockedBy: parent.className }};
+        }}
+      }}
+      current = parent;
+    }}
+    if (box.bottom > win.innerHeight + OVERFLOW_TOLERANCE_PX) {{
+      return {{ bottom: ownBottom, blockedBy: "viewport" }};
+    }}
+    return {{ bottom: ownBottom, blockedBy: null }};
+  }}
 
   function measure(shape, done) {{
     var iframe = document.createElement("iframe");
@@ -198,13 +265,16 @@ def build_host_html(css_uri: str) -> str:
     iframe.onload = function () {{
       var doc = iframe.contentDocument;
       var win = iframe.contentWindow;
+      var shellEl = doc.querySelector(".shell");
       var statusEl = doc.querySelector(".pane--status");
       var storyEl = doc.querySelector(".pane--story");
       var chatEl = doc.querySelector(".pane--chat");
+      var composerEl = doc.querySelector(".composer");
       var selectEl = doc.querySelector("select");
       var inputEl = doc.querySelector('input[type="number"]');
       var otherLineEl = doc.querySelector(".chat-line:not(.chat-line--mine)");
       var mineLineEl = doc.querySelector(".chat-line--mine");
+      var composerReach = reachable(win, shellEl, composerEl);
       results.push({{
         name: shape.name,
         innerWidth: win.innerWidth,
@@ -216,7 +286,9 @@ def build_host_html(css_uri: str) -> str:
         inputHeight: inputEl.getBoundingClientRect().height,
         scrollHeight: doc.documentElement.scrollHeight,
         otherLineBg: win.getComputedStyle(otherLineEl).backgroundColor,
-        mineLineBg: win.getComputedStyle(mineLineEl).backgroundColor
+        mineLineBg: win.getComputedStyle(mineLineEl).backgroundColor,
+        composerBottom: composerReach.bottom,
+        composerBlockedBy: composerReach.blockedBy
       }});
       document.body.removeChild(iframe);
       done();
@@ -347,6 +419,19 @@ def judge(measurement: dict) -> tuple[bool, list[str]]:
                 "내 줄과 남의 줄의 배경색이 같다"
                 f"({measurement['mineLineBg']}) — 누가 말했는지 한눈에 안 갈린다"
             )
+
+    # ⑤ 조작부(.composer)가 잘려서 못 닿지 않는다 — 위치가 아니라 스크롤
+    # 경로 유무로 판정한다(reachable(), 12.3-16). `.pane`이
+    # `overflow: hidden`이라 조작부가 넘친 만큼은 스크롤 없이 사라진다 —
+    # 그것을 여기서 잡는다. 상태 칸의 조작 칸은 `.pane--status`가
+    # `overflow-y: auto`라 화면 밖에 있어도 스크롤로 닿으므로 이 판정에
+    # 안 걸린다.
+    if measurement["composerBlockedBy"] is not None:
+        reasons.append(
+            f"조작부(.composer)가 '{measurement['composerBlockedBy']}'에 잘려 "
+            f"아래끝 {measurement['composerBottom']:.1f}px가 화면"
+            f"({viewport_height}px) 밖이다 — 스크롤로도 못 닿는다"
+        )
 
     return (len(reasons) == 0, reasons)
 
