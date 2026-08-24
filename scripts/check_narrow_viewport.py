@@ -48,7 +48,10 @@
   실행 자체가 실패함 · 측정값을 못 읽음(키 누락·형태 이름/차례 어긋남
   포함) · 고정판에 재야 할 요소가 없음 · 형태 조건부 단언이 도는 이름이
   `SHAPES`에 없음 · import 실패 · **고정판이 실제 화면과 갈림**
-  (아래 `check_fixture_still_mirrors_source` 참조). **`2`를 `0`으로 접지
+  (아래 `check_fixture_still_mirrors_source` 참조) · **조작 요소
+  (`TOUCH_TARGETS`) 선택자가 문서에서 하나도 못 찾음**(G-12.3-32 — 재야
+  할 것이 하나도 없으면 판정 루프가 한 번도 안 돌아 「재 봤더니 문제없다」와
+  「잴 것 자체가 없었다」가 같은 통과로 섞이던 자리). **`2`를 `0`으로 접지
   않는다** — 확인을 못 한 상황이 통과로 보이는 것이 정확히 이 결함군이
   1년 가까이 살아남은 이유다.
 
@@ -630,6 +633,27 @@ def extract_measurements(dom: str) -> list[dict] | None:
         if missing_measured:
             print(
                 f"{item['name']} 측정값에 {missing_measured}가 없다 — 확인 불가.",
+                file=sys.stderr,
+            )
+            return None
+        # 조작 요소 선택자가 문서에서 하나도 못 찾은 경우(빈 값 경계,
+        # G-12.3-32) — 여기서 막는 이유: judge()는 (통과 여부, 사유 목록)
+        # 두 칸만 돌려주는 계약이라 「판정 불가」를 표현할 칸이 없고, 그
+        # 계약을 바꾸면 호출자 두 곳(run_check/run_self_test)이 함께
+        # 흔들린다. 잰 값을 읽는 이 함수는 이미 `None`이라는 「확인 불가」
+        # 통로를 갖고 있다. `.get(selector, [])`를 쓰는 것이 요점이다 —
+        # 칸 자체가 통째로 없는 경우(예전엔 judge()에서 KeyError로 터져
+        # 파이썬 기본 종료 코드 1로 샜다)와 칸은 있는데 빈 경우를 같은
+        # 한 자리에서 함께 잡는다.
+        unmatched_selectors = [
+            f"{selector}({human_name})"
+            for selector, human_name, _check_height in TOUCH_TARGETS
+            if len(item["targets"].get(selector, [])) == 0
+        ]
+        if unmatched_selectors:
+            print(
+                f"{item['name']} — 조작 요소 선택자가 문서에서 하나도 못 찾음: "
+                f"{unmatched_selectors} — 판정하지 않는다. 확인 불가.",
                 file=sys.stderr,
             )
             return None
