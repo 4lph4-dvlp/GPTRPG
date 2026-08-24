@@ -16,8 +16,28 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
-EVENT_SCHEMA_VERSION = 11
-"""판 10 -> 판 11: 캐릭터 만들기 화면 줄기(Phase 12.3, D-02/D-03/D-11)가
+EVENT_SCHEMA_VERSION = 12
+"""판 11 -> 판 12: 장면 오프닝(Phase 13, SCENE-01/02, D-01~D-09)이 사건
+형식에 닿았다. 새 사건 종류가 하나 늘었다 — `SceneOpened`(판정 없이 장면을
+여는 서사, `declare_seq` 없이 기록되는 세 번째 진입점).
+
+기존 `narration_appended`를 재사용하지 않은 이유: `frontend/src/session/groupTurns.ts`의
+`findRootDeclareSeq`가 뿌리 `action_declared`를 못 찾은 서사 사건을 조용히
+버린다. 오프닝에는 선언이 없으므로, `narration_appended`로 기록하면 서버에는
+남고 화면에는 영원히 안 뜬다(D-04가 요구하는 「늦게 온 사람도 기록을 올려
+오프닝을 본다」가 그래서 깨진다).
+
+`SceneOpened.source`가 이 문단이 어디서 왔는지를 남긴다 — 낭독문형 그대로
+(`"scripted"`) · 메모형을 AI가 좁혀 쓴 것(`"sketch"`, 13-03) · AI가 실패해
+시나리오 원문으로 대체한 것(`"fallback"`, 13-03/D-09). `caused_by_seq`는
+`None`이다 — 오프닝을 일으킨 앞선 사건이 없다.
+
+**`rules_core/reducer.py`의 신설 분기는 이 판 올리기와 반드시 같은
+커밋이다**(08-CONTEXT.md D-06, 이미 여러 번 난 사고 — `scene_illustrated`·
+`character_occupied`·`action_classified`·`resource_changed`·판 9의
+다섯 사건·판 11의 세 사건에 이어 이번이 일곱 번째 사례).
+
+판 10 -> 판 11: 캐릭터 만들기 화면 줄기(Phase 12.3, D-02/D-03/D-11)가
 사건 형식에 닿았다. 새 사건 종류가 셋 늘었다 — 칸이 아니라 **종류**다.
 
 `CreationGmSpoke`(GM이 만들기 중에 한 말 한 줄 — 안내·지목·되묻기·정리
@@ -689,6 +709,24 @@ class CreationHostClaimed(EventEnvelope):
     previous_browser_id: str | None = None
 
 
+class SceneOpened(EventEnvelope):
+    """판정 없이 장면을 여는 오프닝 서사(D-01/D-02/D-06, 판 12) — `declare_seq`
+    없이 기록되는 세 번째 진입점(`proceed()`가 두 번째, SCENE-01).
+
+    `source`가 이 문단이 어디서 왔는지를 말한다: 낭독문형 그대로
+    (`"scripted"`) · 메모형을 AI가 좁혀 쓴 것(`"sketch"`, 13-03) · AI가
+    실패해 시나리오 원문으로 대체한 것(`"fallback"`, 13-03/D-09). `text`는
+    빈 문자열이나 공백뿐일 수 없다 — 등록 시점 검사(D-07ⓐ)와 액터
+    (`OpenScene`)가 이중으로 막는다(SCENE-02 empty). `caused_by_seq`는
+    항상 `None`이다 — 오프닝을 일으킨 앞선 사건이 없다.
+    """
+
+    event_type: Literal["scene_opened"]
+    scenario_id: str
+    text: str
+    source: Literal["scripted", "sketch", "fallback"]
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -710,6 +748,7 @@ GameEvent = Annotated[
         CreationGmSpoke,
         CreationConsentRecorded,
         CreationHostClaimed,
+        SceneOpened,
     ],
     Field(discriminator="event_type"),
 ]
@@ -737,9 +776,10 @@ _KNOWN_EVENT_TYPES = frozenset(
         "creation_gm_spoke",
         "creation_consent_recorded",
         "creation_host_claimed",
+        "scene_opened",
     }
 )
-"""`GameEvent` 판별 유니온이 아는 열아홉 사건 종류 — `parse_event`가 이
+"""`GameEvent` 판별 유니온이 아는 스무 사건 종류 — `parse_event`가 이
 목록 밖의 `event_type`을 `CorruptEventRecord`로 분류하는 데 쓴다."""
 
 

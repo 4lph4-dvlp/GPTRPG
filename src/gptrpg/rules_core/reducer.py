@@ -236,6 +236,20 @@ class GameState:
     칸에서 채운다 — 인원 확정과 룰북 선택이 같은 사건에서 함께
     일어나므로 새 사건을 만들 이유가 없다. `None`은 「아직 인원이 확정
     안 됐다」다."""
+    session_scenario_id: str | None = None
+    """이 세션이 쓰는 시나리오(판 12+, Phase 13, D-18). `scene_opened`
+    사건에서만 채워진다. `None`은 「아직 오프닝이 안 열렸다(그래서 이
+    세션의 시나리오가 아직 없다)」다 — 판 12 이전 기록에서는 영원히
+    `None`이라 읽는 쪽이 기존 시나리오를 기본값으로 쓴다.
+    `party_roster`처럼 **풀리는 사건이 없다** — 한 번 채워지면 다시
+    `None`으로 돌아가지 않는다."""
+    scene_opened_seq: int | None = None
+    """오프닝을 기록한 `scene_opened` 사건의 순번(판 12+, Phase 13,
+    D-01/D-02). `None`은 「아직 오프닝이 안 열렸다」다 — 화면이 이 값을
+    보고 오프닝을 다시 부를지 판단한다(D-04, 화면이 다시 계산하지
+    않는다). 한 번 채워지면 다시 `None`으로 돌아가지 않는다(풀리는
+    사건이 없다) — `session_scenario_id`와 항상 같은 사건에서 함께
+    채워진다."""
 
 
 def initial_state(session_id: str) -> GameState:
@@ -285,9 +299,9 @@ def _legacy_v1_counts_as_failure(grade: str) -> bool:
 def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameState:
     """사건 하나를 이전 상태에 접어 새 상태를 돌려준다.
 
-    열아홉 종류를 전부 다룬다(판 9가 캐릭터 만들기 다섯 종류를, 판 11이
-    만들기 화면 줄기 세 종류를 늘렸다). 모르는 종류가 오면
-    UnknownEventType을 던진다 — 조용히 넘어가지 않는다.
+    스무 종류를 전부 다룬다(판 9가 캐릭터 만들기 다섯 종류를, 판 11이
+    만들기 화면 줄기 세 종류를, 판 12가 장면 오프닝 한 종류를 늘렸다).
+    모르는 종류가 오면 UnknownEventType을 던진다 — 조용히 넘어가지 않는다.
     """
     seq = payload["seq"]
     if event_type == "action_declared":
@@ -594,6 +608,19 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
         # 방장 기록(판 11, D-11)은 한 칸만 덮어쓴다 — 처음 잡든
         # 승계든 최종 상태는 「지금 방장이 누구인가」 하나뿐이다.
         return replace(state, last_seq=seq, creation_host_browser_id=payload["browser_id"])
+    if event_type == "scene_opened":
+        # 오프닝 기록(판 12, D-01/D-02/D-06)은 두 칸을 한 번에 채운다 —
+        # party_roster_locked(558행 부근)와 같은 단순 잠금형이다. **그래도
+        # 분기가 있어야 한다:** 이 분기가 없으면 이 종류가 하나라도 있는
+        # 세션이 폴링마다 UnknownEventType을 맞고 영구히 안 열린다
+        # (위 여러 분기가 같은 사고를 반복해서 기록해 두었다 — 이 판
+        # 올리기와 이 분기는 반드시 같은 커밋).
+        return replace(
+            state,
+            last_seq=seq,
+            session_scenario_id=payload["scenario_id"],
+            scene_opened_seq=seq,
+        )
     raise UnknownEventType(event_type)
 
 

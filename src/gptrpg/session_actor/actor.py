@@ -36,6 +36,7 @@ from gptrpg.event_log.schema import (
     ResourceChanged,
     SafetyFlagged,
     SceneIllustrated,
+    SceneOpened,
     utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
@@ -213,6 +214,52 @@ class RecordGmSpoke:
     say: str
     target_character_id: str | None
     dedupe_key: str
+
+
+@dataclass(frozen=True)
+class ClaimGmSlot:
+    """AI를 부르기 전에 이 세션 안에서 슬롯 하나를 먼저 잡는 명령(D-02/D-03,
+    Phase 13). 큐 **안**에서 슬롯을 먼저 잡고 그 뒤에야 무거운 일(AI 호출)을
+    하라는 것이 D-03의 요구다 — `web/routes_creation.py`의 기존 GM 호출
+    네 곳은 지금 「큐 밖 사전 검사 → AI 호출 → 큐 안 재검사」 순서라 겹친
+    두 요청이 둘 다 AI를 부른다(13-RESEARCH.md Pitfall 1). 오프닝은 정확히
+    같은 모양의 다섯 번째 자동 발동 호출이고, 이 명령이 그 순서를
+    뒤집는다 — 슬롯을 못 딴 쪽은 AI를 아예 안 부른다.
+
+    **사건을 남기지 않는다** — `SessionActor._gm_slots_in_flight`는 액터
+    메모리(집합)일 뿐이다. 「지금 이 순간 누가 AI를 부르는 중인가」는 서버
+    재시작을 넘겨 살아남을 필요가 없는 값이고, 오히려 살아남으면 재시작
+    뒤 슬롯이 영구히 잠긴다.
+    """
+
+    slot_key: str
+
+
+@dataclass(frozen=True)
+class ReleaseGmSlot:
+    """`ClaimGmSlot`으로 잡은 슬롯을 돌려주는 명령(D-03, Phase 13).
+
+    호출부가 `try/finally`의 `finally`에서 무조건 부른다 — AI 호출이
+    실패해도 슬롯이 영구히 잠기지 않는다(T-13-03). 없던 키를 지워도
+    조용히 성공한다 — `finally`가 두 번 불릴 수 있다."""
+
+    slot_key: str
+
+
+@dataclass(frozen=True)
+class OpenScene:
+    """판정 없이 장면을 여는 명령(D-01/D-06, SCENE-01, Phase 13) —
+    `declare_seq` 없이 기록되는 세 번째 진입점(`proceed()`가 이미 연 두
+    번째 진입점은 여전히 `declare_seq`를 필수로 받는다).
+
+    `text`는 호출부가 이미 완성한 오프닝 문단이다(낭독문형이면 저자의
+    다섯 칸을 그대로 이은 것, 메모형이면 AI가 좁혀 쓴 것 또는 폴백) — 이
+    명령 자신은 그 문단이 어떻게 만들어졌는지 모른다. `source`가 출처만
+    사건에 남긴다."""
+
+    scenario_id: str
+    text: str
+    source: str
 
 
 @dataclass(frozen=True)
@@ -462,6 +509,9 @@ Command = (
     | RecordConsent
     | ReopenCreationStep
     | ClaimCreationHost
+    | ClaimGmSlot
+    | ReleaseGmSlot
+    | OpenScene
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
@@ -494,6 +544,7 @@ _EVENT_CLASSES: dict[str, type] = {
     "creation_gm_spoke": CreationGmSpoke,
     "creation_consent_recorded": CreationConsentRecorded,
     "creation_host_claimed": CreationHostClaimed,
+    "scene_opened": SceneOpened,
 }
 
 
@@ -580,6 +631,45 @@ class AlreadyGmSpoken(CommandRejected):
         self.prior = prior
 
 
+class GmSlotBusy(CommandRejected):
+    """이미 다른 요청이 같은 `slot_key`로 AI를 부르는 중이다(D-02/D-03,
+    Phase 13). 라우트는 이것을 409로 끝낸다 — 다른 탭이 지금 부르고
+    있으므로 화면은 폴링으로 결과를 받는다. `CommandRejected`의 하위
+    클래스라 기존 `except CommandRejected` 경로가 그대로 잡는다 — 409로
+    구분해야 하는 자리에서만 이 클래스를 먼저 잡는다."""
+
+
+class GmSlotClaimed(CommandRejected):
+    """`ClaimGmSlot`이 성공했다는 뜻이다 — `ProceedEligible`과 같은 자리
+    (사건을 안 남기는 「확인만 하는」 명령의 성공을 예외로 표현해야
+    `_process`가 append 이전에 멈춘다). **이름과 달리 실패가 아니다** —
+    호출부는 이 예외를 성공으로 해석하고 그대로 진행한다."""
+
+
+class GmSlotReleased(CommandRejected):
+    """`ReleaseGmSlot`이 성공했다는 뜻이다 — `GmSlotClaimed`와 같은 자리·
+    같은 이유. 호출부(라우트의 `finally`)는 반환값을 보지 않으므로 이
+    예외를 굳이 잡을 필요조차 없다."""
+
+
+class SceneAlreadyOpened(CommandRejected):
+    """이 세션은 이미 오프닝이 열렸다(D-01, Phase 13). `.prior_seq`가
+    이미 기록된 `scene_opened` 사건의 순번을 들고 있다 — 라우트는 이
+    값으로 200 + `opened=False`를 돌려준다(겹친 탭에게 오류를 보이지
+    않는다, `AlreadyGmSpoken`을 잡아 지난 문장을 그대로 돌려주는
+    `announce_creation`의 규율과 같다).
+
+    **슬롯(`GmSlotBusy`)과 이 예외는 서로 다른 갈래를 막는다** — 슬롯은
+    「동시」를(두 요청이 같은 순간에 온다), 이 예외는 「이미 끝남」을
+    (첫 호출이 이미 끝난 뒤 두 번째 요청이 온다) 막는다. 슬롯만 있으면
+    첫 호출이 끝난 뒤 슬롯이 풀린 다음에 온 요청이 슬롯을 새로 따서
+    오프닝을 다시 열려고 시도할 수 있다 — 둘 다 필요하다."""
+
+    def __init__(self, prior_seq: int) -> None:
+        super().__init__("이미 장면이 열렸다")
+        self.prior_seq = prior_seq
+
+
 class RosterAlreadyLocked(CommandRejected):
     """파티 명단이 이미 잠긴 뒤 만들기 관련 명령이 들어왔다(D-08) — 중간에
     추가·제외는 없다. `CommandRejected`의 하위 클래스라 기존
@@ -638,6 +728,11 @@ class SessionActor:
         # 세 자리에 따로 적지 않는다.
         self._clock_segment_count = clock_segment_count
         self._report_dir = report_dir if report_dir is not None else DEFAULT_REPORTS_DIR
+        self._gm_slots_in_flight: set[str] = set()
+        """지금 이 순간 AI를 부르는 중인 슬롯 키 집합(D-02/D-03, Phase 13).
+        **사건이 아니다** — 서버 재시작을 넘겨 살아남을 필요가 없고,
+        오히려 살아남으면 재시작 뒤 슬롯이 영구히 잠긴다. `ClaimGmSlot`/
+        `ReleaseGmSlot`만 이 집합을 건드린다."""
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -924,6 +1019,12 @@ class SessionActor:
             return self._prepare_reopen(command)
         if isinstance(command, ClaimCreationHost):
             return self._prepare_claim_host(command)
+        if isinstance(command, ClaimGmSlot):
+            return self._prepare_claim_gm_slot(command)
+        if isinstance(command, ReleaseGmSlot):
+            return self._prepare_release_gm_slot(command)
+        if isinstance(command, OpenScene):
+            return self._prepare_open_scene(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -1963,6 +2064,54 @@ class SessionActor:
                 "say": command.say,
                 "target_character_id": command.target_character_id,
                 "dedupe_key": command.dedupe_key,
+            },
+        )
+
+    def _prepare_claim_gm_slot(self, command: ClaimGmSlot) -> tuple[str, int | None, dict]:
+        """슬롯 하나를 잡는다(D-02/D-03, Phase 13) — 이미 다른 요청이
+        같은 `slot_key`를 잡고 있으면 `GmSlotBusy`, 아니면 집합에 넣고
+        `GmSlotClaimed`를 던진다(사건을 안 남긴다, `ClaimGmSlot` 도크스트링
+        참조). 이 메서드는 단일 소비자 큐 안에서만 불리므로 집합을 직접
+        건드려도 경합이 없다."""
+        if command.slot_key in self._gm_slots_in_flight:
+            raise GmSlotBusy(f"이미 다른 요청이 슬롯을 잡고 있다: {command.slot_key!r}")
+        self._gm_slots_in_flight.add(command.slot_key)
+        raise GmSlotClaimed("슬롯을 잡았다")
+
+    def _prepare_release_gm_slot(self, command: ReleaseGmSlot) -> tuple[str, int | None, dict]:
+        """`ClaimGmSlot`으로 잡은 슬롯을 돌려준다(D-03, Phase 13) — 없던
+        키를 지워도 조용히 성공한다(`ReleaseGmSlot` 도크스트링 참조,
+        호출부의 `finally`가 두 번 불릴 수 있다). `discard`는 없는 원소를
+        지워도 예외를 던지지 않는다."""
+        self._gm_slots_in_flight.discard(command.slot_key)
+        raise GmSlotReleased("슬롯을 돌려줬다")
+
+    def _prepare_open_scene(self, command: OpenScene) -> tuple[str, int | None, dict]:
+        """판정 없이 장면을 연다(D-01/D-06, SCENE-01, Phase 13).
+
+        검증 순서:
+        ① 파티 명단이 아직 안 잠겼으면 거부한다(D-01의 경계 — 「첫
+           사람이 완성한 순간」이 아니다. 라우트만 보면 서버 재시작·직접
+           호출을 못 막으므로 액터가 다시 지킨다, `_prepare_confirm`의
+           소유권 검사와 같은 이유).
+        ② 이미 오프닝이 열렸으면 `SceneAlreadyOpened`(슬롯이 막지 못하는
+           갈래 — 「동시」가 아니라 「이미 끝남」을 막는다).
+        ③ 빈 문자열이나 공백뿐인 오프닝은 절대 기록되지 않는다
+           (SCENE-02 empty).
+        """
+        if self.state.party_roster is None:
+            raise CommandRejected("파티 명단이 아직 안 잠겨 장면을 열 수 없다")
+        if self.state.scene_opened_seq is not None:
+            raise SceneAlreadyOpened(self.state.scene_opened_seq)
+        if not command.text.strip():
+            raise CommandRejected("오프닝 text는 비어 있을 수 없다")
+        return (
+            "scene_opened",
+            None,
+            {
+                "scenario_id": command.scenario_id,
+                "text": command.text,
+                "source": command.source,
             },
         )
 

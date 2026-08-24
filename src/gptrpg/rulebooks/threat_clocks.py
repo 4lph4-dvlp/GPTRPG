@@ -14,29 +14,20 @@ D-48(캐스트는 시나리오 캐스트 전체, 국면별 필터링 없음), D2
 데이터 구조).
 """
 
-from dataclasses import dataclass
-
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rules_core.entities import Entity, StatEntry
+from gptrpg.rules_core.scenario import ThreatClockContent
+
+__all__ = ["ThreatClockContent", "THREAT_CLOCK_SEGMENT_COUNT", "M0_THREAT_CLOCK", "THREAT_CAST"]
 
 THREAT_CLOCK_SEGMENT_COUNT = 4
 """EXP-01이 요구한 칸 수 — D21의 4~6칸 범위 안 값."""
 
-
-@dataclass(frozen=True)
-class ThreatClockContent:
-    """위협 시계 하나의 이야기 내용 — 이름 / 정체 / 원하는 것 / 칸 설명 / 파국.
-
-    진행 조건과 상태는 담지 않는다(D21) — 코드가 이미 그 두 가지의 유일한
-    출처다.
-    """
-
-    clock_id: str
-    name: str
-    identity: str
-    wants: str
-    segment_descriptions: tuple[str, ...]
-    catastrophe: str
+# `ThreatClockContent`는 Phase 13(D-18)이 `rules_core/scenario.py`로 옮겼다 —
+# `ScenarioDecl.threat_clock`이 이 타입을 참조해야 하는데 `rules_core`는
+# `rulebooks`를 import할 수 없다(`.importlinter` contract:2). 여기서 다시
+# export하는 것은 이 이름을 쓰던 기존 호출부(`web/routes_actions.py` 등)가
+# 안 깨지게 하기 위해서다 — 정의는 `rules_core/scenario.py`가 유일하다.
 
 
 # 진지하게도, 우습게도, 슬프게도 풀릴 수 있게 톤을 하나로 좁히지 않는다.

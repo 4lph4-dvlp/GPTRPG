@@ -46,8 +46,11 @@ from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, Unkno
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
+from gptrpg.rulebooks.lamplight_vigil import LAMPLIGHT_VIGIL_ID
 from gptrpg.rulebooks.moves import get_moves
+from gptrpg.rulebooks.scenarios import UnknownScenario, get_scenario
 from gptrpg.rules_core.entities import Entity
+from gptrpg.rules_core.scenario import render_scripted_opening
 from gptrpg.rules_core.resource_change import (
     InvalidResourceChange,
     ResourceChangeDecl,
@@ -86,16 +89,23 @@ from gptrpg.session_actor.actor import (
     AlreadyConfirmed,
     AlreadyResolved,
     AppendNarration,
+    ClaimGmSlot,
     CommandRejected,
     ConfirmAction,
     DeclareAction,
+    GmSlotBusy,
+    GmSlotClaimed,
+    GmSlotReleased,
+    OpenScene,
     ProceedEligible,
     RecordActionClassification,
     RecordAiCall,
     RecordResourceChange,
     RecordSafetyFlag,
     RecordSceneIllustration,
+    ReleaseGmSlot,
     ResolveCheck,
+    SceneAlreadyOpened,
     VerifyProceedEligibility,
 )
 from gptrpg.session_actor.actor import SessionActor
@@ -1750,6 +1760,113 @@ async def proceed(
         proceeded=True,
         narration_chunk_count=chunk_index,
     )
+
+
+class OpeningRequest(BaseModel):
+    """`POST /sessions/{session_id}/opening`의 본문(SCENE-01, Phase 13).
+
+    `character_id`는 신원 대조에 쓴다 — `proceed()`와 같은 이유(TRUST-02,
+    D-04). `scenario_id`의 기본값은 **이 판에서 유일하게 등록된 시나리오**
+    (`LAMPLIGHT_VIGIL_ID`)다. 계획 원문(13-01-PLAN.md ⑤)은 「기존
+    시나리오」를 기본값으로 적었으나, 그 시나리오(「우물 아래의 것」)의
+    `ScenarioDecl` 이관은 13-03의 몫이라 이 판에는 아직 등록돼 있지 않다
+    — 등록되지 않은 시나리오를 기본값으로 두면 화면이 `scenario_id`를
+    아예 안 보내는 실제 호출(13-01-PLAN.md Task 2 ⑤, 시나리오 고르는
+    UI가 없다)이 항상 400으로 실패한다. 13-03이 「우물 아래의 것」을
+    등록하는 시점에 이 기본값을 다시 판단해야 한다."""
+
+    character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
+    scenario_id: str = Field(default=LAMPLIGHT_VIGIL_ID, max_length=MAX_ID_LEN)
+
+
+class OpeningResponse(BaseModel):
+    opened: bool
+    seq: int
+    source: str
+
+
+@router.post("/sessions/{session_id}/opening", response_model=OpeningResponse)
+async def opening(
+    session_id: str,
+    request: Request,
+    body: OpeningRequest,
+) -> OpeningResponse:
+    """판정 없이 장면을 여는 세 번째 진입점(SCENE-01, D-01/D-02/D-06,
+    Phase 13) — `declare_seq` 없이 `scene_opened` 사건을 남긴다. `proceed()`
+    가 이미 연 두 번째 진입점은 여전히 `declare_seq`를 필수로 받는다(그
+    경로는 판정 없는 서술이지 오프닝이 아니다) — 이것이 세 번째 진입점이다.
+
+    **신원 검증이 맨 앞이다**(`proceed()`와 한 글자도 다르지 않다,
+    TRUST-02/D-04, ASVS V4). **슬롯을 먼저 잡고 그 뒤에야 시나리오를
+    읽는다**(D-02/D-03) — 무거운 일(미래의 sketch 갈래에서는 AI 호출) 앞에
+    슬롯이 있어야 그 호출이 한 번뿐이다. 슬롯을 못 따면 다른 탭이 지금
+    부르고 있다는 뜻이므로 409로 끝낸다(화면은 폴링으로 결과를 받는다).
+    AI가 실패해도(이 판에는 AI 호출이 없지만 13-03의 sketch 갈래를 위해
+    구조를 그대로 유지한다) 슬롯이 영구히 잠기지 않도록 `finally`에서
+    무조건 `ReleaseGmSlot`을 부른다.
+
+    낭독문형(`opening_kind == "scripted"`)은 AI를 아예 안 부른다(D-06) —
+    저자가 쓴 다섯 칸을 `render_scripted_opening`으로 정해진 순서로 이어
+    그대로 기록한다. 메모형(`"sketch"`)은 **이 판에서는** 같은 다섯 칸을
+    그대로 이어 `source="fallback"`으로 제출한다 — 이것은 자리표시자가
+    아니라 D-09가 정한 실제 폴백 경로 자체다(「오프닝 AI 호출이 실패하면
+    시나리오 원문을 그대로 띄운다」). 13-03이 이 앞에 상황 판단 → 서술
+    구간을 얹고, 실패했을 때 떨어지는 자리로 이 코드를 그대로 쓴다.
+    **501/`NotImplemented`로 두지 않는다** — 지금 실제로 도는 세션이 이
+    갈래를 타므로, 그러면 이 계획이 없애려는 빈 화면이 그대로 돌아온다.
+    """
+    identity = read_identity(request, session_id)
+    if identity is None or identity.character_id != body.character_id:
+        print("경고: 신원 검증 실패 — opening 거부", file=sys.stderr)
+        raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
+
+    registry = request.app.state.registry
+    actor = registry.get_or_create(session_id)
+
+    try:
+        await actor.submit(ClaimGmSlot(slot_key="opening"))
+    except GmSlotClaimed:
+        pass  # 슬롯을 땄다 — 그대로 진행한다(사건은 안 남는다).
+    except GmSlotBusy as exc:
+        # 다른 탭이 지금 부르고 있다 — 화면은 폴링으로 결과를 받는다.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    try:
+        try:
+            scenario = get_scenario(body.scenario_id)
+        except UnknownScenario as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if scenario.opening_kind == "scripted":
+            text = render_scripted_opening(scenario.opening)
+            source = "scripted"
+        else:
+            text = render_scripted_opening(scenario.opening)
+            source = "fallback"
+
+        try:
+            seq = await actor.submit(
+                OpenScene(scenario_id=body.scenario_id, text=text, source=source)
+            )
+        except SceneAlreadyOpened as exc:
+            # 겹친 탭에게 오류를 보이지 않는다 — `announce_creation`이
+            # `AlreadyGmSpoken`을 잡아 지난 문장을 그대로 돌려주는 규율과
+            # 같다.
+            return OpeningResponse(opened=False, seq=exc.prior_seq, source=source)
+        except CommandRejected as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except SequenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        # AI가 실패해도(또는 위에서 다른 예외가 나도) 슬롯이 영구히
+        # 잠기지 않는다 — 이 finally가 없으면 한 번 실패한 세션에서
+        # 아무도 다시 오프닝을 못 연다(T-13-03).
+        try:
+            await actor.submit(ReleaseGmSlot(slot_key="opening"))
+        except GmSlotReleased:
+            pass
+
+    return OpeningResponse(opened=True, seq=seq, source=source)
 
 
 async def _illustrate_scene(
