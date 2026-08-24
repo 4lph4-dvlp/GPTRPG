@@ -101,6 +101,23 @@ SHAPES = [
     {"name": "844x390", "width": 844, "height": 390},
 ]
 
+# 사람이 실제로 손가락으로 누르는 조작 요소 목록(12.3-16 Task 2) —
+# 자바스크립트(측정)와 파이썬(judge의 사유 문장) 양쪽이 이 하나의 목록을
+# 돈다. 대상마다 코드를 복사하면 다음에 하나 늘 때 한쪽만 늘어난다.
+# 세 번째 칸(checkHeight)이 44px 하한을 거는지를 가른다 — `.composer`
+# (조작부 전체 상자)에는 안 걸고, 실제로 손가락이 닿는 낱개 조작
+# 요소에만 건다. 여럿을 돌려주는 선택자(`.candidate`·`.proposal .btn`)는
+# 전부 재고, 그중 하나라도 못 닿으면 실패다.
+TOUCH_TARGETS: list[tuple[str, str, bool]] = [
+    (".composer", "조작부 전체", False),
+    (".composer__input", "말 쓰는 칸", True),
+    (".composer__row .btn", "보내기 단추", True),
+    (".proposal .btn", "제안 카드의 다시 쓰기 단추", True),
+    (".candidate", "GM 제안 후보 버튼", True),
+    ("select", "능력치 배치 칸", True),
+    ('input[type="number"]', "점수 숫자칸", True),
+]
+
 # 고정판이 흉내 내는 실제 화면 클래스 이름들 — 이 이름들이 소스에서
 # 사라지면 고정판은 더 이상 실제 화면을 안 비춘다(T-12.3-67).
 REQUIRED_SOURCE_CLASS_NAMES: dict[str, list[str]] = {
@@ -204,6 +221,11 @@ def build_host_html(css_uri: str) -> str:
     inner_html_json = json.dumps(build_inner_html(css_uri))
     shapes_json = json.dumps(SHAPES)
     tolerance_json = json.dumps(OVERFLOW_TOLERANCE_PX)
+    # 선택자만 넘긴다 — 44px 하한을 거는지(checkHeight)는 judge()가 대상
+    # 이름으로 다시 갈라 결정하는 판정 규율이라 여기선 안 쓴다. 자바스크립트는
+    # 대상마다 높이를 항상 재 두고, python judge()가 TOUCH_TARGETS의 세
+    # 번째 칸을 보고 그 값을 쓸지 말지를 정한다.
+    touch_target_selectors_json = json.dumps([selector for selector, _name, _check in TOUCH_TARGETS])
     return f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
@@ -214,6 +236,7 @@ def build_host_html(css_uri: str) -> str:
   var SHAPES = {shapes_json};
   var INNER_HTML = {inner_html_json};
   var OVERFLOW_TOLERANCE_PX = {tolerance_json};
+  var TOUCH_TARGET_SELECTORS = {touch_target_selectors_json};
   var results = [];
 
   // 「닿을 수 있는가」를 위치가 아니라 스크롤 경로 유무로 판정한다. 조상을
@@ -269,12 +292,29 @@ def build_host_html(css_uri: str) -> str:
       var statusEl = doc.querySelector(".pane--status");
       var storyEl = doc.querySelector(".pane--story");
       var chatEl = doc.querySelector(".pane--chat");
-      var composerEl = doc.querySelector(".composer");
-      var selectEl = doc.querySelector("select");
-      var inputEl = doc.querySelector('input[type="number"]');
       var otherLineEl = doc.querySelector(".chat-line:not(.chat-line--mine)");
       var mineLineEl = doc.querySelector(".chat-line--mine");
-      var composerReach = reachable(win, shellEl, composerEl);
+
+      // 사람이 실제로 누르는 것 전부(TOUCH_TARGETS, 12.3-16 Task 2)를 같은
+      // 목록으로 돈다 — 여럿을 돌려주는 선택자(.candidate·.proposal .btn)는
+      // querySelectorAll로 전부 재고, 대상별로 [{{bottom, blockedBy, height}}]
+      // 배열을 담는다. 44px 하한을 그 값에 걸지는 judge()(python)가
+      // TOUCH_TARGETS의 checkHeight 칸을 보고 정한다 — 여기선 항상 잰다.
+      var targets = {{}};
+      TOUCH_TARGET_SELECTORS.forEach(function (selector) {{
+        var elements = doc.querySelectorAll(selector);
+        var entries = [];
+        elements.forEach(function (el) {{
+          var reach = reachable(win, shellEl, el);
+          entries.push({{
+            bottom: reach.bottom,
+            blockedBy: reach.blockedBy,
+            height: el.getBoundingClientRect().height
+          }});
+        }});
+        targets[selector] = entries;
+      }});
+
       results.push({{
         name: shape.name,
         innerWidth: win.innerWidth,
@@ -282,13 +322,10 @@ def build_host_html(css_uri: str) -> str:
         statusHeight: statusEl.getBoundingClientRect().height,
         storyHeight: storyEl.getBoundingClientRect().height,
         chatHeight: chatEl.getBoundingClientRect().height,
-        selectHeight: selectEl.getBoundingClientRect().height,
-        inputHeight: inputEl.getBoundingClientRect().height,
         scrollHeight: doc.documentElement.scrollHeight,
         otherLineBg: win.getComputedStyle(otherLineEl).backgroundColor,
         mineLineBg: win.getComputedStyle(mineLineEl).backgroundColor,
-        composerBottom: composerReach.bottom,
-        composerBlockedBy: composerReach.blockedBy
+        targets: targets
       }});
       document.body.removeChild(iframe);
       done();
@@ -395,19 +432,30 @@ def judge(measurement: dict) -> tuple[bool, list[str]]:
             f"({viewport_height}px)를 넘었다"
         )
 
-    # ③ 조작 칸(select/input[type=number])이 44px 이상이다 — G-12.3-28을
-    # 「미확인」에서 「쟀다」로 옮기는 단언. 오늘 코드에서 이 항목은 이미
-    # 통과한다(규율은 코드에 있었지만 픽셀에 도달하는지 확인한 적이 없었다).
-    if measurement["selectHeight"] < TOUCH_TARGET_MIN_PX:
-        reasons.append(
-            f"select 높이가 {measurement['selectHeight']:.1f}px로 "
-            f"{TOUCH_TARGET_MIN_PX}px보다 낮다"
-        )
-    if measurement["inputHeight"] < TOUCH_TARGET_MIN_PX:
-        reasons.append(
-            f"input[type=number] 높이가 {measurement['inputHeight']:.1f}px로 "
-            f"{TOUCH_TARGET_MIN_PX}px보다 낮다"
-        )
+    # ③ 사람이 실제로 누르는 것 전부(TOUCH_TARGETS, 12.3-16 Task 2)가
+    # 「44px 이상이고 스크롤로 닿는다」다 — 높이만 재면 조상이 잘라 버려
+    # 화면에 한 픽셀도 안 보이는 요소도 원래 크기 그대로를 보고한다.
+    # 「손가락으로 누를 수 있다」를 확인하겠다는 단언이 「누를 수 없는
+    # 것」을 통과시키던 구멍(G-12.3-28)을 여기서 닫는다 — 높이 단언과
+    # 닿을 수 있음 단언(reachable())을 같은 목록 위에서 함께 돈다.
+    # checkHeight가 거짓인 대상(`.composer` 자체)에는 44px 하한을 안
+    # 건다 — 조작부 상자 자체가 아니라 그 안의 낱개 조작 요소가 눌리는
+    # 것이다.
+    for selector, human_name, check_height in TOUCH_TARGETS:
+        entries = measurement["targets"][selector]
+        for index, entry in enumerate(entries):
+            which = f"{index + 1}번째 " if len(entries) > 1 else ""
+            if entry["blockedBy"] is not None:
+                reasons.append(
+                    f"{human_name}({selector}) {which}아래끝 {entry['bottom']:.1f}px가 "
+                    f"'{entry['blockedBy']}'에 잘려 화면({viewport_height}px) 밖이다 — "
+                    "스크롤로도 못 닿는다"
+                )
+            if check_height and entry["height"] < TOUCH_TARGET_MIN_PX:
+                reasons.append(
+                    f"{human_name}({selector}) {which}높이가 {entry['height']:.1f}px로 "
+                    f"{TOUCH_TARGET_MIN_PX}px보다 낮다"
+                )
 
     # ④ 내 줄의 본문 배경이 남의 줄과 다르다(G-12.3-27). 배경색으로 잡는
     # 이유 — 이름표 글자색은 오늘도 이미 다르다(그것이 사장님이 본 「이름만
@@ -419,19 +467,6 @@ def judge(measurement: dict) -> tuple[bool, list[str]]:
                 "내 줄과 남의 줄의 배경색이 같다"
                 f"({measurement['mineLineBg']}) — 누가 말했는지 한눈에 안 갈린다"
             )
-
-    # ⑤ 조작부(.composer)가 잘려서 못 닿지 않는다 — 위치가 아니라 스크롤
-    # 경로 유무로 판정한다(reachable(), 12.3-16). `.pane`이
-    # `overflow: hidden`이라 조작부가 넘친 만큼은 스크롤 없이 사라진다 —
-    # 그것을 여기서 잡는다. 상태 칸의 조작 칸은 `.pane--status`가
-    # `overflow-y: auto`라 화면 밖에 있어도 스크롤로 닿으므로 이 판정에
-    # 안 걸린다.
-    if measurement["composerBlockedBy"] is not None:
-        reasons.append(
-            f"조작부(.composer)가 '{measurement['composerBlockedBy']}'에 잘려 "
-            f"아래끝 {measurement['composerBottom']:.1f}px가 화면"
-            f"({viewport_height}px) 밖이다 — 스크롤로도 못 닿는다"
-        )
 
     return (len(reasons) == 0, reasons)
 
