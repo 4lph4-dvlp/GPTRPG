@@ -755,10 +755,21 @@ Plans:
 **Plans**: 6 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 13-01-PLAN.md — 시나리오 선언 형식 + 낭독문형 오프닝 한 경로를 요청부터 화면까지 (tracer)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 13-02-PLAN.md — 겹친 GM 호출이 AI를 두 번 부르는 구멍을 다섯 자리에서 닫는다 (D-03)
 - [ ] 13-03-PLAN.md — 메모형 오프닝(상황 판단이 좁혀 넘긴다) + 기존 시나리오를 등록소로 이관
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 13-04-PLAN.md — 3층 대상 관리와 명부 그릇, 버려지던 장면 대상 판단을 받는다
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 13-05-PLAN.md — 분류기의 대상 칸 + 층 밖 지목의 결정론적 처리(열림/닫힘)
 - [ ] 13-06-PLAN.md — 왼쪽 상태칸의 접힌 명부 줄 + 단계 전체 사람 확인
 
