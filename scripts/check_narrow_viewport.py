@@ -188,8 +188,12 @@ def check_fixture_still_mirrors_source() -> list[str]:
     return missing
 
 
-def build_inner_html(css_uri: str) -> str:
+def build_inner_html(css_uri: str, extra_css: str | None = None) -> str:
     """실제 화면과 같은 클래스 이름의 골격을 담은 고정판(fixture) 문서.
+
+    `extra_css`가 주어지면 실제 `styles.css`를 링크한 뒤에 <style> 블록으로
+    덧씌운다(--self-test 함정용, 12.3-17). 기본값은 없으므로 기본 실행
+    경로는 오늘과 완전히 같은 문서를 만든다.
 
     상태 칸에 일부러 900px짜리 블록을 넣는 이유: 상태 칸의 높이는
     룰북·캐릭터·자원 축에 따라 얼마든지 자란다(폰에서 실측 506px). 실제
@@ -203,11 +207,17 @@ def build_inner_html(css_uri: str) -> str:
     둘 + 다시 쓰기 하나)를 넣는다. 실제 내용을 흉내 내지 말고 가장
     가혹한 상태를 넣는다는 원칙은 상태 칸 900px 블록과 같다(12.3-16).
     """
+    # 덧씌울 CSS(--self-test 함정용) — 실제 styles.css를 링크한 뒤에 <style>
+    # 블록으로 넣는다. 나중에 오는 규칙이 이기므로 별도 우선순위 장치가
+    # 필요 없다. 저장소 파일은 절대 안 건드린다 — 함정은 이 임시 문서
+    # 안에만 존재한다(T-12.3-84).
+    overlay_style = f"<style>{extra_css}</style>" if extra_css else ""
     return f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
 <link rel="stylesheet" href="{css_uri}">
+{overlay_style}
 </head>
 <body>
 <div class="shell">
@@ -250,14 +260,16 @@ def build_inner_html(css_uri: str) -> str:
 </html>"""
 
 
-def build_host_html(css_uri: str) -> str:
+def build_host_html(css_uri: str, extra_css: str | None = None) -> str:
     """네 형태를 순서대로 재는 바깥 문서.
 
     iframe을 하나 만들어 onload에서 재고, 지우고, 다음 것으로 넘어간다
     (한 번에 하나씩 — 동시에 네 개를 띄우면 레이아웃 계산 시점이 서로
     간섭할 수 있다). 다 잰 값은 `<pre id="measured">`에 JSON으로 담는다.
+
+    `extra_css`는 그대로 `build_inner_html`에 전달된다(--self-test 함정용).
     """
-    inner_html_json = json.dumps(build_inner_html(css_uri))
+    inner_html_json = json.dumps(build_inner_html(css_uri, extra_css))
     shapes_json = json.dumps(SHAPES)
     tolerance_json = json.dumps(OVERFLOW_TOLERANCE_PX)
     # 선택자만 넘긴다 — 44px 하한을 거는지(checkHeight)는 judge()가 대상
@@ -548,7 +560,132 @@ def judge(measurement: dict) -> tuple[bool, list[str]]:
     return (len(reasons) == 0, reasons)
 
 
-def main() -> int:
+# 함정 셋(--self-test, 12.3-17) — (이름, 덧씌울 CSS, 빨강이 나와야 하는
+# 형태). 셋 다 실제로 있었던 결함이고, 서로 다른 단언을 겨눈다. 함정은
+# 저장소 파일을 절대 안 건드린다 — build_inner_html의 extra_css 인자로
+# 메모리 안의 임시 문서에만 얹는다(T-12.3-84).
+TRAPS: list[tuple[str, str, str]] = [
+    (
+        "pixel-floor",
+        # 12.3-15가 스스로 「이 그물이 거절한다」고 이름 붙인 처방을
+        # 되살린다 — 세로 골격 서사·대화 행에 240px 픽셀 바닥을 다시
+        # 박는다. 844×390에서 세 행의 합이 화면 높이를 넘어 골격 자신이
+        # 넘친다(넘침 단언 ②를 겨눈다).
+        """
+@media (max-width: 1080px) {
+  .shell {
+    grid-template-rows: auto minmax(240px, 1fr) minmax(240px, 40dvh);
+  }
+}
+""",
+        "844x390",
+    ),
+    (
+        "clipped-composer",
+        # 12.3-16이 .composer에 더한 두 선언(min-height: 0 + overflow-y:
+        # auto)을 되돌린다 — 조작부와 그 안의 GM 제안 후보 버튼·보내기
+        # 단추가 다시 .pane의 overflow: hidden에 잘린다(닿을 수 있음
+        # 단언 ⑤를 겨눈다).
+        """
+.composer {
+  min-height: auto;
+  overflow-y: visible;
+}
+""",
+        "844x390",
+    ),
+    (
+        "starved-story",
+        # 12.3-15 이전 상태 — 상태 칸의 높이 상한(max-height: 25dvh)과
+        # 내부 스크롤(overflow-y: auto)을 없앤다. 고정판의 상태 칸에는
+        # 900px 블록이 있으므로 상태 칸이 전부 가져가고 서사가 굶는다
+        # (서사 최소선 단언 ①을 겨눈다).
+        """
+@media (max-width: 1080px) {
+  .pane--status {
+    max-height: none;
+    overflow-y: visible;
+  }
+}
+""",
+        "390x844",
+    ),
+]
+
+
+def run_self_test() -> int:
+    """함정 셋을 스스로 얹어 각 단언이 실제로 빨강을 내는지 뒤집어 확인한다.
+
+    기대는 뒤집혀 있다 — 그 함정이 겨눈 형태가 judge()에서 **실패(빨강)로
+    나와야** 이 명령 자체는 통과(0)다. 함정이 통과(초록)로 나오면 그
+    단언이 죽었다는 뜻이고 이 명령은 1로 끝난다. 저장소 파일은 한 번도
+    안 건드린다 — 함정마다 host.html을 새로 만들어 크로미움을 돌리고,
+    확인이 끝나면 임시 디렉터리째 버린다.
+    """
+    if not CSS_PATH.is_file():
+        print(f"{CSS_PATH}가 없다. 종료 코드 2.", file=sys.stderr)
+        return 2
+
+    chromium = find_chromium()
+    if chromium is None:
+        print(
+            "헤드리스로 띄울 크로미움 계열 브라우저를 찾지 못했다"
+            f"({', '.join(CHROMIUM_CANDIDATES)} 전부 없음). 종료 코드 2.",
+            file=sys.stderr,
+        )
+        return 2
+
+    css_uri = CSS_PATH.as_uri()
+    dead_assertions: list[str] = []
+
+    for trap_name, trap_css, target_shape in TRAPS:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            host_path = Path(tmp_dir) / "host.html"
+            host_path.write_text(
+                build_host_html(css_uri, extra_css=trap_css), encoding="utf-8"
+            )
+
+            dom = dump_dom(chromium, host_path.as_uri())
+            if dom is None:
+                print(
+                    f"{trap_name} — 크로미움 실행 자체가 실패했다. 종료 코드 2.",
+                    file=sys.stderr,
+                )
+                return 2
+
+            measurements = extract_measurements(dom)
+            if measurements is None:
+                print(f"{trap_name} — 측정값을 못 읽었다. 종료 코드 2.", file=sys.stderr)
+                return 2
+
+        target = next((m for m in measurements if m["name"] == target_shape), None)
+        if target is None:
+            print(
+                f"{trap_name} — 겨눈 형태 {target_shape}의 측정값이 없다. 종료 코드 2.",
+                file=sys.stderr,
+            )
+            return 2
+
+        passed, reasons = judge(target)
+        if passed:
+            print(f"{trap_name} · {target_shape} · 초록(단언이 죽었다)")
+            dead_assertions.append(trap_name)
+        else:
+            first_reason = reasons[0] if reasons else "(사유 없음)"
+            print(f"{trap_name} · {target_shape} · 빨강 · {first_reason}")
+
+    if dead_assertions:
+        print(
+            "다음 함정이 통과(초록)로 나왔다 — 그 함정이 겨눈 단언이 죽었다: "
+            + ", ".join(dead_assertions),
+            file=sys.stderr,
+        )
+        return 1
+
+    return 0
+
+
+def run_check() -> int:
     missing_class_names = check_fixture_still_mirrors_source()
     if missing_class_names:
         print(
@@ -605,6 +742,23 @@ def main() -> int:
                 print(f"  - {reason}", file=sys.stderr)
 
     return 1 if any_failed else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """인자 갈래 하나(--self-test)뿐이라 인자 파서를 안 들인다.
+
+    알 수 없는 인자가 오면 조용히 기본 경로로 안 넘기고 쓰는 법을 인쇄한
+    뒤 종료 코드 2로 접는다 — 모르는 것을 조용히 기본값으로 넘기지 않는
+    이 저장소의 규율 그대로다.
+    """
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv:
+        return run_check()
+    if argv == ["--self-test"]:
+        return run_self_test()
+    print("사용법: check_narrow_viewport.py [--self-test]", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
