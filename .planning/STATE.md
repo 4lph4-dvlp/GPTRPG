@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
-current_phase_name: 캐릭터 만들기 화면
-status: verifying
-stopped_at: Completed 12.3-14-PLAN.md — phase 12.3 마지막 계획
-last_updated: "2026-08-22T07:54:13.154Z"
-last_activity: 2026-08-22
-last_activity_desc: Phase 12.3 execution started
-state_head: cf2692356f1dc75fa4f1cdf757ef1c495904fa9c
+current_phase_name: 캐릭터 만들기 화면 (INSERTED)
+status: executing
+stopped_at: Completed 12.3-15-PLAN.md — phase 12.3 gap-closure 완료(15/15)
+last_updated: "2026-08-24T01:34:35.282Z"
+last_activity: 2026-08-24
+last_activity_desc: 12.3-15(G-12.3-27/28/29 gap closure) 완료 — phase 12.3 종료
+state_head: f2f7503e1407b37d9e2b71be5ec9ad6af92ff180
 progress:
   total_phases: 14
-  completed_phases: 6
-  total_plans: 52
-  completed_plans: 52
+  completed_phases: 8
+  total_plans: 53
+  completed_plans: 53
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 12.3 — 캐릭터 만들기 화면
+**Current focus:** Phase 12.3 — 캐릭터 만들기 화면 (INSERTED)
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 12.3 (캐릭터 만들기 화면) — EXECUTING
-Plan: 14 of 14
-Status: Phase complete — ready for verification
-Last activity: 2026-08-22 — 12.3-13 완료(인원 확정 관문 세 결함 통합 수정)
+Phase: 12.3 (캐릭터 만들기 화면 (INSERTED)) — COMPLETE
+Plan: 15 of 15
+Status: Phase 12.3 complete — 15/15 PLAN.md와 15/15 SUMMARY.md가 디스크에 있다
+Last activity: 2026-08-24 — 12.3-15(gap closure: G-12.3-27/28/29) 완료로 phase 12.3 종료
 
 > 계획 번호 참고: `Plan: N of 11`의 카운터는 phase 초기 계획 수(10개)에
 > gap-closure로 추가된 12.3-11 한 건이 더해진 실제 파일 개수(11)를 따른다 —
@@ -42,7 +42,11 @@ Last activity: 2026-08-22 — 12.3-13 완료(인원 확정 관문 세 결함 통
 > 둘 다 11개)로 직접 정정했다. 12.3-13 완료 시점에도 같은 드리프트가
 > 재발했다(`state advance-plan`이 "3 of 14"를 남김) — 디스크 상태
 > (`*-PLAN.md` 14개, `*-SUMMARY.md` 13개, 12.3-14만 남음)로 "14 of 14"로
-> 다시 정정했다.
+> 다시 정정했다. 12.3-15(이 계획, gap-closure) 완료 시점에도 같은 드리프트가
+> 세 번째로 재발했다 — `gsd-tools state advance-plan`이 "2 of 15"(진행률
+> `progress.completed_phases`도 7→6으로 되레 줄임)를 남겼다. 디스크 상태
+> (`*-PLAN.md` 15개, `*-SUMMARY.md` 15개, 전부 짝이 맞음)로 "15 of 15"·
+> `completed_phases: 8`(12.3 완료로 +1)로 다시 정정했다.
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -152,6 +156,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P12 | 12min | 2 tasks | 3 files |
 | Phase 12.3 P13 | ~16min | 3 tasks | 9 files |
 | Phase 12.3 P14 | ~20min | 3 tasks | 6 files |
+| Phase 12.3 P15 | ~50min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -348,6 +353,8 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 인원 거절 문구는 예외 전체(str(exc), dataclass repr)가 아니라 사람이 읽을 절반(exc.reason)만 CommandRejected에 싣는다 — 예외 자체(rules_core/rulebook.py)는 안 고친다(D-15)
 - [Phase 12.3]: 12.3-14: Task 1·2의 RED/GREEN 커밋을 하나로 묶되(12.3-12/13과 같은 판단), 두 Task가 공유한 파일(labels.ts/creationView.ts/test.ts)은 diff를 완전히 분리해 Task별 원자 커밋을 유지했다
 - [Phase 12.3]: 12.3-14: COPY.loading 남는 자리 넷을 전수 감사해 전부 실제 진행 중 상태로 확인 — 계획의 grep 기준선(<2)과 실측(3)이 어긋난 것은 12.3-13이 정당하게 추가한 로딩 분기를 계획이 기준선에 못 반영해서다(SUMMARY Deviations 참조)
+- [Phase 12.3]: 12.3-15: 좁은 화면 서사 칸이 0px가 되는 결함(G-12.3-29, 저장소 첫 커밋부터 있던 놀이 화면 규칙)을 12.3 범위 밖 청소임에도 여기서 닫음 — 사람이 12.3 UAT를 걷다가 실제로 부딪혔고 재현·실측·수정이 모두 손에 있었기 때문. .pane--status에 max-height: 25dvh + 내부 스크롤을 주고 대화 행 바닥을 0으로 내려, 서사 행이 픽셀 바닥 없이도 언제나 최소 35dvh를 받게 함(픽셀 바닥과 탭 분리는 기각).
+- [Phase 12.3]: 12.3-15: check_insecure_origin.py의 방식(표준 라이브러리 + 이미 있는 크로미움 + srcdoc 고정판 + 종료 코드 0/1/2)을 배치(layout) 회귀 그물에도 그대로 적용해 scripts/check_narrow_viewport.py를 신설 — 이 저장소의 화면 시험(vitest)은 jsdom 없는 순수 함수 시험이라 배치를 잴 도구가 원래 없었다.
 
 ### Pending Todos
 
@@ -405,9 +412,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-22T07:54:12.764Z
-Stopped at: Completed 12.3-14-PLAN.md — phase 12.3 마지막 계획
-이어받아 Task 2·Task 3 커밋까지 완료
+Last session: 2026-08-24T01:34:34.857Z
+Stopped at: Completed 12.3-15-PLAN.md — phase 12.3 gap-closure 완료(15/15), 3개 Task 모두 단일 세션에서 커밋
 Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
