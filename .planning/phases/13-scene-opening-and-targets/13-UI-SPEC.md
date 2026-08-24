@@ -1,7 +1,9 @@
 ---
 phase: 13
 slug: scene-opening-and-targets
-status: draft
+status: approved
+reviewed_at: 2026-08-24
+blocked_on: discuss-phase-13-roster-screen
 shadcn_initialized: false
 preset: none
 created: 2026-08-24
@@ -136,8 +138,13 @@ Accent reserved for: `.btn--primary`(기존 확정/제출류 버튼), 포커스 
   그린다 — 오프닝에는 그 값 자체가 없다.
 - **오프닝 대기:** 기존 `Waiting`(`frontend/src/components/Waiting.tsx`) 컴포넌트를 그대로
   가져다 `label={COPY.openingWaiting}`로 쓴다. 새 스피너·새 점 애니메이션을 만들지 않는다.
-- **재시도 단추(예외 갈래만):** 기존 `.btn`/`.btn--ghost` 클래스 재사용 — `CreationScreen`의
-  `creationAnnounceRetry` 단추와 같은 시각 처리.
+- **재시도 단추(예외 갈래만):** 기존 `.btn btn--primary` 클래스 재사용 — `CreationScreen`
+  (`frontend/src/screens/CreationScreen.tsx:492-499`)의 `creationAnnounceRetry` 단추와 **정확히**
+  같은 시각 처리: 위에 `<p className="t-label">{error}</p>`로 실패 이유를 먼저 말하고, 그 아래
+  `disabled={pending}`인 `btn btn--primary` 단추 하나. (초안이 `.btn--ghost`라고 적었던 것은
+  코드와 어긋난 오기 — 실제 12.3 재시도 단추는 `btn--primary`다. 그 단추에 달린 주석이 밝히듯,
+  예전에 `className`이 아예 없어 브라우저 기본 회색 사각형으로 뜬 적이 있어 일부러 이 화면의
+  다른 모든 단추와 같은 클래스로 맞춘 자리다 — 다시 어긋내지 않는다.)
 - **명부 화면:** 이 단계는 만들지 않는다(CONTEXT.md Claude's Discretion — "UI hint: yes"이나
   필수 아님). 계획이 만들기로 하면 `StatusPane`의 기존 목록 패턴(`.chip`/`.stat-row`류)을
   따를 것 — 새 목록 컴포넌트 체계를 만들지 않는다.
@@ -150,16 +157,43 @@ Accent reserved for: `.btn--primary`(기존 확정/제출류 버튼), 포커스 
 
 ## UI Considerations
 
-Applicable state considerations resolved: 4 covered, 2 backstop, 1 unresolved
+Probe run 2026-08-24 (`ui-consideration-probe`, element kinds author-supplied — the prose
+classifier is English-cued and mis-read the Korean descriptions, so `elements` overrides were
+authored per element and confirmed with the user).
 
-| Category | Element(s) | Status | Resolution / Reason |
-|----------|------------|--------|---------------------|
-| empty | 오프닝 서사 블록(media) | ✅ covered | `party_roster_locked` 도달 전(명단이 아직 안 잠긴 극히 짧은 창)에는 기존 `COPY.emptyHeading`/`emptyBody`를 그대로 보인다 — 새 문구 없음 |
-| loading | 오프닝 서사 블록(media) | ✅ covered | 명단 잠금 이후 오프닝 호출이 도는 동안 `Waiting` 컴포넌트 + `COPY.openingWaiting`("진행자가 이야기를 여는 중이에요")을 보인다 |
-| error | 오프닝 서사 블록(media) | ✅ covered | 세 갈래로 각각 다르게 말한다(D-09/12.3 D-13 상속) — ① AI가 이상하게 답함: 오류 표시 없이 시나리오 원문을 그대로 오프닝으로 띄운다(의도적 무표시) ② AI 설정 자체 없음(503): `COPY.creationGmUnavailable` 재사용 ③ 연결 끊김: `COPY.disconnected` + `.topstrip` 재사용 |
-| populated | 오프닝 서사 블록(media) | ✅ covered | `.turn` 컨테이너 + `.narration p`(명조 17px/1.75) 문단만 — 머리말·인용문·판정 줄 없음(Component Notes 참조) |
-| overflow / long-text | 오프닝 서사 블록(static-content 성격) | 🧪 backstop | 다섯 요소를 담은 긴 낭독문(D-06/D-21 신규 낭독문형 시나리오)이 `.narration p`의 `white-space: pre-wrap` 아래에서 카드 폭(`.story__inner` max-width 720px) 안에 정상적으로 줄바꿈되는지는 실제 시나리오 데이터로 held-out 검증한다 — 문자 수 상한을 새로 두지 않는다(원문 그대로 신뢰) |
-| zero-one-many | 만난 사람 명부(list-collection, 선택) | ⚠ unresolved | 이 단계는 명부 전용 화면을 만들지 않는다(Component Notes 참조) — 화면화 여부·영/1/다수 레이아웃은 계획 재량으로 남긴다. 화면화하면 `StatusPane`의 기존 `.chip`/`.stat-row` 패턴을 따를 것 |
+**Applicable: 21** — 6 resolved (explicit) · 2 resolved (backstop) · 6 dismissed · 7 unresolved
+
+Element kinds: **E1** 오프닝 서사 카드 `media` + `static-content` · **E2** 오프닝 대기 표시
+`static-content` · **E3** 오프닝 재시도 단추 `interactive-control` + `static-content` ·
+**E4** 빈 이야기 판 `static-content` · **E5** 만난 사람 명부 `list-collection`
+
+| Category | Element | Status | Resolution / Reason |
+|----------|---------|--------|---------------------|
+| empty | E1 오프닝 서사 카드 | ✅ resolved (explicit) | `party_roster_locked` 도달 전(명단이 아직 안 잠긴 극히 짧은 창)에는 기존 `COPY.emptyHeading`/`emptyBody`를 그대로 보인다 — 새 문구 없음 |
+| loading | E1 오프닝 서사 카드 | ✅ resolved (explicit) | 명단 잠금 이후 오프닝 호출이 도는 동안 `Waiting` 컴포넌트 + `COPY.openingWaiting`("진행자가 이야기를 여는 중이에요")을 보인다 |
+| error | E1 오프닝 서사 카드 | ✅ resolved (explicit) | 세 갈래로 각각 다르게 말한다(D-09 / 12.3 D-13 상속) — ① AI가 이상하게 답함: 오류 표시 없이 시나리오 원문을 그대로 오프닝으로 띄운다(**의도적 무표시** — 빈 화면이 생기는 순간을 만들지 않는다) ② AI 설정 자체 없음(503): `COPY.creationGmUnavailable` 재사용 ③ 연결 끊김: `COPY.disconnected` + `.topstrip` 재사용 |
+| populated | E1 오프닝 서사 카드 | ✅ resolved (explicit) | `.turn` 컨테이너 + `.narration p`(명조 17px/1.75) 문단만 — `.turn__head`·`.turn__quote`·판정 줄 없음(Component Notes 참조) |
+| overflow | E1 오프닝 서사 카드 | 🧪 resolved (backstop) | 문자 수 상한을 두지 않는다(사장님 확정 2026-08-24 — 시나리오 원문을 자르지 않는다). 다섯 요소를 담은 긴 낭독문(D-06/D-21 낭독문형 시나리오)이 `.narration p`의 `white-space: pre-wrap` 아래에서 카드 폭(`.story__inner` max-width 720px) 안에 정상 줄바꿈되는지를 **실제 시나리오 데이터로 held-out 검증**한다 |
+| long-text | E1 오프닝 서사 카드 | 🧪 resolved (backstop) | 위와 같은 검사로 함께 확인한다 — 잘라내기·말줄임·접기를 도입하지 않고 reflow에 맡긴다 |
+| overflow | E2 오프닝 대기 표시 | ⛔ dismissed | 고정 한 줄 문구(`COPY.openingWaiting`) + 점 셋 애니메이션뿐이라 컨테이너를 넘칠 가변 내용이 존재하지 않는다 |
+| long-text | E2 오프닝 대기 표시 | ⛔ dismissed | 같은 이유 — 문구가 상수라 길이가 변하지 않는다 |
+| loading | E3 오프닝 재시도 단추 | ✅ resolved (explicit) | 재시도 요청이 도는 동안 단추가 `disabled={pending}`로 비활성화된다 — 새 스피너·새 표시를 더하지 않는다(`CreationScreen.tsx:492-499`와 동일) |
+| error | E3 오프닝 재시도 단추 | ✅ resolved (explicit) | 재시도가 또 실패하면 단추 위 `<p className="t-label">{error}</p>`의 실패 이유가 갱신되고 **단추는 그대로 남는다** — 사람이 쥘 수 있는 유일한 복구 경로를 뺏지 않는다(12.3 D-13 ①/②) |
+| overflow | E3 오프닝 재시도 단추 | ⛔ dismissed | 라벨이 고정 문구(`COPY.openingRetry`)라 넘칠 가변 내용이 없다 |
+| long-text | E3 오프닝 재시도 단추 | ⛔ dismissed | 같은 이유 |
+| overflow | E4 빈 이야기 판 | ⛔ dismissed | 고정 두 줄(`COPY.emptyHeading`/`emptyBody`)뿐이라 넘칠 가변 내용이 없다 |
+| long-text | E4 빈 이야기 판 | ⛔ dismissed | 같은 이유 |
+| empty | E5 만난 사람 명부 | ⚠ unresolved | **`/gsd-discuss-phase 13`에서 정하기로 함** (2026-08-24, 사장님 결정) — 명부를 이번 단계에서 화면으로 만들지 여부가 미정이라 화면 상태를 지금 확정할 수 없다 |
+| loading | E5 만난 사람 명부 | ⚠ unresolved | 위와 같음 |
+| error | E5 만난 사람 명부 | ⚠ unresolved | 위와 같음 |
+| populated | E5 만난 사람 명부 | ⚠ unresolved | 위와 같음 |
+| partial | E5 만난 사람 명부 | ⚠ unresolved | 위와 같음 |
+| overflow | E5 만난 사람 명부 | ⚠ unresolved | 위와 같음 |
+| zero-one-many | E5 만난 사람 명부 | ⚠ unresolved | 위와 같음 — 화면화하기로 하면 영/한 명/여러 명 레이아웃과 `StatusPane`의 기존 `.chip`/`.stat-row` 패턴 준수를 그때 계약으로 박는다 |
+
+> **⚠ 이 문서는 아직 계획에 넘길 수 없다.** E5의 7행이 미정이고, 그 미정은 계획 재량이 아니라
+> `/gsd-discuss-phase 13`에서 정하기로 사장님이 결정한 항목이다. discuss가 끝나면 이 절을
+> 다시 돌려(REPLACE) E5 행을 확정한 뒤 계획으로 넘어간다.
 
 <!-- Status vocabulary (locked by probe-core projectTruths):
      ✅ covered   → a plain truth string lifted into must_haves.truths
@@ -184,11 +218,26 @@ Applicable state considerations resolved: 4 covered, 2 backstop, 1 unresolved
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+`gsd-ui-checker` 2026-08-24 — **APPROVED**, BLOCK 항목 없음. 인용된 토큰·문구·컴포넌트를
+실제 저장소(`frontend/src/styles.css`, `labels.ts`, `Waiting.tsx`, `components.json` 부재)와
+대조해 전부 일치를 확인함.
 
-**Approval:** pending
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: FLAG (non-blocking)
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: FLAG (non-blocking)
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
+
+**비차단 권장 2건**
+
+1. **Visuals** — "이 화면에서 무엇이 먼저 눈에 들어오는가"를 선언한 문장이 없다. 권장 문구:
+   오프닝은 이야기 문단이 유일한 시각 초점이고, 액센트·놋쇠색을 아예 쓰지 않아 문단 자체가
+   화면에서 가장 먼저 읽힌다.
+2. **Typography** — 선언된 크기가 13/15/17/19/28px로 5개라 "4개 이하" 규칙에 기계적으로
+   저촉한다. 다만 이 5개는 04-UI-SPEC이 세우고 08~12.3이 이어받은 **기존 전역 스케일**이고
+   이 단계가 새로 더한 크기는 없다(이 단계가 건드리는 것은 이미 있는 `.narration p` 17px
+   하나뿐). 저장소 전체 부채이므로 BLOCK이 아닌 FLAG. 전역 타입 스케일 정리는 별도 백로그.
+
+**Approval:** approved (checker) · ⚠ **계획 진행 보류** — UI Considerations의 E5 7행이
+`/gsd-discuss-phase 13` 결정 대기 중
