@@ -795,10 +795,18 @@ def judge(measurement: dict) -> tuple[bool, list[str]]:
 
 
 # 함정 셋(--self-test, 12.3-17) — (이름, 덧씌울 CSS, 빨강이 나와야 하는
-# 형태). 셋 다 실제로 있었던 결함이고, 서로 다른 단언을 겨눈다. 함정은
-# 저장소 파일을 절대 안 건드린다 — build_inner_html의 extra_css 인자로
-# 메모리 안의 임시 문서에만 얹는다(T-12.3-84).
-TRAPS: list[tuple[str, str, str]] = [
+# 형태, 겨눈 단언의 표식). 셋 다 실제로 있었던 결함이고, 서로 다른 단언을
+# 겨눈다. 함정은 저장소 파일을 절대 안 건드린다 — build_inner_html의
+# extra_css 인자로 메모리 안의 임시 문서에만 얹는다(T-12.3-84).
+#
+# **넷째 칸(표식)을 고르는 규칙(12.3-20, WR-01 대응).** 표식은 그 함정이
+# 겨눈 단언이 judge()에서 만드는 사유 문장에**만** 들어 있어야 하는 짧은
+# 조각이다 — 다른 단언의 사유 문장에도 나오는 조각을 고르면 이 확인은
+# 다시 「아무거나 빨갛기만 하면 통과」로 되돌아간다(이번에 닫는 결함과
+# 같은 모양). judge()의 사유 문장을 고치는 사람은 이 표식도 함께 봐야
+# 한다 — 문장을 바꾸다 표식이 다른 단언의 사유에도 걸리게 되면, 그것을
+# 기계가 스스로 알아낼 방법은 없다(run_self_test() 도크스트링 참조).
+TRAPS: list[tuple[str, str, str, str]] = [
     (
         "pixel-floor",
         # 12.3-15가 스스로 「이 그물이 거절한다」고 이름 붙인 처방을
@@ -813,6 +821,9 @@ TRAPS: list[tuple[str, str, str]] = [
 }
 """,
         "844x390",
+        # 넘침 단언 ②의 사유("골격 내용(...)이 골격 상자(...)를 넘어
+        # 잘렸다")에만 나온다. 다른 어떤 사유 문장도 "골격 상자"를 안 쓴다.
+        "골격 상자",
     ),
     (
         "clipped-composer",
@@ -827,6 +838,9 @@ TRAPS: list[tuple[str, str, str]] = [
 }
 """,
         "844x390",
+        # 닿을 수 있음 단언 ③의 사유(reachable()이 blockedBy를 돌려줄
+        # 때만)에만 나온다.
+        "스크롤로도 못 닿는다",
     ),
     (
         "starved-story",
@@ -843,18 +857,66 @@ TRAPS: list[tuple[str, str, str]] = [
 }
 """,
         "390x844",
+        # 서사 최소선 단언 ①의 사유("서사 칸이 ...최소선...보다 낮다")에만
+        # 나온다. 상태 칸 상한 단언(⑥)의 사유는 "상한"을 쓰므로 겹치지
+        # 않는다.
+        "최소선",
     ),
 ]
 
 
-def run_self_test() -> int:
-    """함정 셋을 스스로 얹어 각 단언이 실제로 빨강을 내는지 뒤집어 확인한다.
+def _validate_trap_markers() -> str | None:
+    """함정마다 겨눈 단언의 표식(TRAPS 넷째 칸)이 비어 있지 않은지 본다.
 
-    기대는 뒤집혀 있다 — 그 함정이 겨눈 형태가 judge()에서 **실패(빨강)로
-    나와야** 이 명령 자체는 통과(0)다. 함정이 통과(초록)로 나오면 그
-    단언이 죽었다는 뜻이고 이 명령은 1로 끝난다. 저장소 파일은 한 번도
-    안 건드린다 — 함정마다 host.html을 새로 만들어 크로미움을 돌리고,
-    확인이 끝나면 임시 디렉터리째 버린다.
+    빈 문자열이나 공백뿐인 표식은 어떤 사유 문장에나 들어 있는 것으로
+    읽혀 이 확인이 항상 통과가 된다 — 이 파일이 닫으려는 결함(초록만
+    내는 그물은 아무것도 증명하지 않는다)과 정확히 같은 모양이다. 문제가
+    있으면 사람이 읽을 사유 문장을, 아니면 `None`을 돌려준다.
+    `_validate_shape_name_constants()`와 같은 형태·같은 자리(run_self_test()
+    진입부)에서 불린다.
+    """
+    for trap_name, _trap_css, _target_shape, marker in TRAPS:
+        if not marker.strip():
+            return (
+                f"'{trap_name}' 함정의 표식이 비었거나 공백뿐이다 — 이 상태면 "
+                "어떤 사유 문장에나 들어 있는 것으로 읽혀 확인이 항상 통과가 된다"
+            )
+    return None
+
+
+def run_self_test() -> int:
+    """함정 셋을 스스로 얹어, 그 함정이 겨눈 바로 그 단언이 실제로 빨강을
+    내는지 표식으로 대조해 뒤집어 확인한다.
+
+    기대는 뒤집혀 있다 — 그 함정이 겨눈 형태가 judge()에서 겨눈 단언의
+    사유(TRAPS 넷째 칸의 표식)를 담아 **실패(빨강)로 나와야** 이 명령
+    자체는 통과(0)다. 통과 여부 하나만 보면, 함정이 여러 단언을 함께
+    건드릴 때 옆 단언이 대신 빨강을 내 줘도 통과로 보인다 — 겨눈 단언이
+    죽어 있어도 그렇다. 그래서 판정 결과(passed, reasons) 중 reasons 안에
+    그 함정의 표식이 실제로 있는지까지 본다.
+
+    함정마다 결과는 세 갈래로 갈린다. ① 겨눈 단언이 울렸다 — 함정
+    이름·형태·빨강·그 표식이 들어 있는 사유를 인쇄한다. ② 통과로
+    나왔다 — 「초록(단언이 죽었다)」. ③ 빨강은 났는데 겨눈 단언이 아니다
+    — 겨눈 표식이 무엇이었는지와 대신 울린 사유를 함께 인쇄한다. ②·③
+    둘 다 그 함정이 겨눈 단언이 죽었을 수 있다는 같은 신호이므로 죽은
+    단언 목록에 들어간다.
+
+    종료 코드 셋의 뜻.
+    - `0` — 함정 셋 전부에서 겨눈 단언이 실제로 울렸다.
+    - `1` — 하나 이상에서 겨눈 단언이 안 울렸다(위 ②나 ③).
+    - `2` — 확인 자체를 못 함(크로미움 없음·표식이 비었음·측정값을 못
+      읽었음 등 — 통과도 실패도 아니다).
+
+    **표식 방식이 못 잡는 것.** 표식은 judge()의 사유 문장 안 짧은
+    조각을 문자열로 대조하는 것뿐이다 — 사유 문장을 고치면서 그 표식이
+    다른 단언의 사유 문장에도 들어가게 바뀌면, 이 확인은 다시 「아무거나
+    빨갛기만 하면 통과」로 헐거워진다. 그것을 기계가 스스로 알아낼
+    방법은 없다 — 사유 문장을 고치는 사람이 TRAPS 위 주석이 적은 표식
+    규칙을 함께 봐야 한다.
+
+    저장소 파일은 한 번도 안 건드린다 — 함정마다 host.html을 새로
+    만들어 크로미움을 돌리고, 확인이 끝나면 임시 디렉터리째 버린다.
     """
     if _IMPORT_ERROR is not None:
         print(
@@ -866,6 +928,11 @@ def run_self_test() -> int:
     guard_error = _validate_shape_name_constants()
     if guard_error is not None:
         print(f"{guard_error}. 종료 코드 2.", file=sys.stderr)
+        return 2
+
+    marker_error = _validate_trap_markers()
+    if marker_error is not None:
+        print(f"{marker_error}. 종료 코드 2.", file=sys.stderr)
         return 2
 
     if not CSS_PATH.is_file():
@@ -884,7 +951,7 @@ def run_self_test() -> int:
     css_uri = CSS_PATH.as_uri()
     dead_assertions: list[str] = []
 
-    for trap_name, trap_css, target_shape in TRAPS:
+    for trap_name, trap_css, target_shape, marker in TRAPS:
         with tempfile.TemporaryDirectory() as tmp_dir:
             host_path = Path(tmp_dir) / "host.html"
             host_path.write_text(
@@ -921,16 +988,29 @@ def run_self_test() -> int:
 
         passed, reasons = judge(target)
         if passed:
+            # ㉡ 통과로 나왔다 — 단언이 죽었다.
             print(f"{trap_name} · {target_shape} · 초록(단언이 죽었다)")
             dead_assertions.append(trap_name)
         else:
-            first_reason = reasons[0] if reasons else "(사유 없음)"
-            print(f"{trap_name} · {target_shape} · 빨강 · {first_reason}")
+            hit_reason = next((r for r in reasons if marker in r), None)
+            if hit_reason is not None:
+                # ㉠ 겨눈 단언이 실제로 울렸다.
+                print(f"{trap_name} · {target_shape} · 빨강 · {hit_reason}")
+            else:
+                # ㉢ 빨강은 났는데 겨눈 단언이 아니다 — 다른 단언이 대신
+                # 울렸다. 겨눈 단언은 여전히 죽어 있을 수 있다.
+                first_reason = reasons[0] if reasons else "(사유 없음)"
+                print(
+                    f"{trap_name} · {target_shape} · 빨강(겨눈 단언 아님) · "
+                    f"겨눈 표식 '{marker}'가 사유에 없음 · 대신 울린 사유: "
+                    f"{first_reason}"
+                )
+                dead_assertions.append(trap_name)
 
     if dead_assertions:
         print(
-            "다음 함정이 통과(초록)로 나왔다 — 그 함정이 겨눈 단언이 죽었다: "
-            + ", ".join(dead_assertions),
+            "다음 함정이 겨눈 단언을 울리지 못했다(초록으로 나왔거나, 빨강은 "
+            "났지만 다른 단언이 대신 울렸다): " + ", ".join(dead_assertions),
             file=sys.stderr,
         )
         return 1
