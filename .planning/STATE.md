@@ -5,14 +5,14 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 13
 current_phase_name: 장면 — 오프닝과 대상
 status: planning
-stopped_at: Phase 13 context gathered
-last_updated: "2026-08-24T13:42:20.012Z"
+stopped_at: Phase 13 명부 화면 확정 (D-23~D-26) — UI 계약 막힘 해제, 계획 대기
+last_updated: "2026-08-24T15:55:11.232Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 13 context gathered (7개 영역 논의, 결정 22건)
-state_head: c8fae59821af06a5ffdb6dfa47eb8fd38949d97a
+state_head: 6746255315a40e520d4ed52c6ee54bdd95b0adf9
 progress:
   total_phases: 14
-  completed_phases: 8
+  completed_phases: 7
   total_plans: 58
   completed_plans: 58
 ---
@@ -445,8 +445,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-24T13:42:19.543Z
-Stopped at: Phase 13 context gathered
+Last session: 2026-08-24T15:55:10.765Z
+Stopped at: Phase 13 명부 화면 확정 (D-23~D-26) — UI 계약 막힘 해제, 계획 대기
 Resume file: .planning/phases/13-scene-opening-and-targets/13-CONTEXT.md
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
