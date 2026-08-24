@@ -66,12 +66,25 @@ import tempfile
 from pathlib import Path
 
 # 스크립트로 실행하면 파이썬이 이 파일의 디렉터리(scripts/)를 sys.path[0]에
-# 자동으로 넣으므로 별도 경로 조작 없이 바로 import된다. 이 import가
-# 안전한 두 가지 이유: (1) check_insecure_origin.py의 실행부가
+# 자동으로 넣어 주지만, 모듈로 부르거나(`-m scripts.check_narrow_viewport`)
+# pytest 수집 경로에 걸리면 그 자동 삽입이 안 일어나 ModuleNotFoundError가
+# 파이썬 기본 종료 코드 1로 샌다(WR-05) — 「확인 못 함」이 「실패」로 섞인다.
+# 경로를 명시로 넣어 실행 방식과 무관하게 만들고, import 자체가 실패하는
+# 경우까지 대비해 try/except로 감싸 값을 나중에 종료 코드 2로 접는다. 이
+# import가 안전한 두 가지 이유: (1) check_insecure_origin.py의 실행부가
 # `if __name__ == "__main__":`으로 막혀 있어 import만으로는 서버를 띄우거나
 # 어떤 부작용도 안 일으킨다. (2) find_chromium/CHROMIUM_CANDIDATES는 상수와
 # 순수 함수라 두 확인이 항상 같은 방법으로 같은 브라우저를 찾는다.
-from check_insecure_origin import CHROMIUM_CANDIDATES, find_chromium  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+_IMPORT_ERROR: Exception | None = None
+try:
+    from check_insecure_origin import CHROMIUM_CANDIDATES, find_chromium  # noqa: E402
+except ImportError as exc:  # pragma: no cover - 방어적, 정상 경로에선 안 밟힌다
+    _IMPORT_ERROR = exc
+    CHROMIUM_CANDIDATES = ()
+
+    def find_chromium() -> str | None:  # noqa: E302
+        return None
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CSS_PATH = REPO_ROOT / "frontend" / "src" / "styles.css"
@@ -102,6 +115,24 @@ SHAPES = [
     {"name": "390x844", "width": 390, "height": 844},
     {"name": "844x390", "width": 844, "height": 390},
 ]
+
+
+def _validate_shape_name_constants() -> str | None:
+    """형태 조건부 단언이 도는 이름들이 `SHAPES`에 실제로 있는지 본다(WR-04).
+
+    `SHAPES`의 이름을 바꾸거나 그 형태를 빼면 그 이름에 걸린 단언은 **어떤
+    경고도 없이 한 번도 실행되지 않고 통과**로 나온다 — 「확인 안 한 것이
+    통과로 보인다」는 이 파일이 세 종료 코드로 막겠다고 선언한 실패 모양
+    그대로다. 문제가 있으면 사람이 읽을 사유 문장을 돌려주고, 없으면
+    `None`이다.
+    """
+    shape_names = {s["name"] for s in SHAPES}
+    if MINE_LINE_COLOR_CHECK_SHAPE not in shape_names:
+        return (
+            f"'{MINE_LINE_COLOR_CHECK_SHAPE}' 형태가 SHAPES에 없어 배경색 단언"
+            "(내 줄/남의 줄 구분, G-12.3-27)이 한 번도 실행되지 않는다"
+        )
+    return None
 
 # 사람이 실제로 손가락으로 누르는 조작 요소 목록(12.3-16 Task 2) —
 # 자바스크립트(측정)와 파이썬(judge의 사유 문장) 양쪽이 이 하나의 목록을
@@ -338,6 +369,12 @@ def build_host_html(css_uri: str, extra_css: str | None = None) -> str:
     iframe.style.height = shape.height + "px";
     iframe.onload = function () {{
       var doc = iframe.contentDocument;
+      // appendChild 시점의 초기 about:blank 항해에도 이 핸들러가 한 번 더
+      // 불린다(실측 — 형태마다 about:blank -> about:srcdoc 두 번). 그
+      // 회차에서 그냥 아래로 내려가 done()을 부르면 빈 문서를 재고 다음
+      // 형태로 넘어간다 — 「확인 못 함」이 「통과」로 둔갑한다. 진짜 로드는
+      // 곧 다시 오므로 여기서는 아무것도 안 하고 돌아간다(WR-01).
+      if (!doc || !doc.querySelector(".shell")) {{ return; }}
       var win = iframe.contentWindow;
       var shellEl = doc.querySelector(".shell");
       var statusEl = doc.querySelector(".pane--status");
@@ -345,6 +382,25 @@ def build_host_html(css_uri: str, extra_css: str | None = None) -> str:
       var chatEl = doc.querySelector(".pane--chat");
       var otherLineEl = doc.querySelector(".chat-line:not(.chat-line--mine)");
       var mineLineEl = doc.querySelector(".chat-line--mine");
+
+      // 재야 할 요소가 하나라도 없으면 판정에 안 들어간다(빈 값 경계) — 이
+      // 없음은 「높이가 0」과 다르다. null 요소에서 getBoundingClientRect를
+      // 부르면 TypeError로 이 회차가 조용히 끊겨 PENDING으로 굳고, 파이썬
+      // 쪽은 virtual-time-budget이 다 돼서야 종료 코드 2로 끝난다 — 대신
+      // 여기서 바로 무엇이 없었는지 담아 넘겨 판정을 건너뛰게 한다.
+      var missingElements = [];
+      if (shellEl === null) {{ missingElements.push(".shell"); }}
+      if (statusEl === null) {{ missingElements.push(".pane--status"); }}
+      if (storyEl === null) {{ missingElements.push(".pane--story"); }}
+      if (chatEl === null) {{ missingElements.push(".pane--chat"); }}
+      if (otherLineEl === null) {{ missingElements.push(".chat-line(남의 줄)"); }}
+      if (mineLineEl === null) {{ missingElements.push(".chat-line--mine"); }}
+      if (missingElements.length > 0) {{
+        results.push({{ name: shape.name, missingElements: missingElements }});
+        document.body.removeChild(iframe);
+        done();
+        return;
+      }}
 
       // 사람이 실제로 누르는 것 전부(TOUCH_TARGETS, 12.3-16 Task 2)를 같은
       // 목록으로 돈다 — 여럿을 돌려주는 선택자(.candidate·.proposal .btn)는
@@ -384,6 +440,7 @@ def build_host_html(css_uri: str, extra_css: str | None = None) -> str:
 
       results.push({{
         name: shape.name,
+        missingElements: [],
         innerWidth: win.innerWidth,
         innerHeight: win.innerHeight,
         statusHeight: statusEl.getBoundingClientRect().height,
@@ -453,6 +510,30 @@ def dump_dom(chromium: str, url: str) -> str | None:
     return result.stdout
 
 
+# 모든 형태가 갖춰야 하는 기본 키 — missingElements가 채워진 형태는 나머지
+# 측정값이 아예 없다(요소가 없어서 못 쟀으므로), 그래도 이 둘만은 항상 있어야
+# 「무엇이 없었는지」를 사람이 읽을 수 있다.
+BASE_MEASUREMENT_KEYS = ("name", "missingElements")
+# missingElements가 빈 배열일 때(=정상 측정) judge()가 실제로 꺼내 쓰는 키
+# 전부. 하나라도 없으면 judge()가 `measurement["..."]`에서 KeyError를 던져
+# 트레이스백 + 파이썬 기본 종료 코드 1로 샌다(WR-05) — 여기서 미리 검사해
+# 종료 코드 2로 접는다.
+REQUIRED_MEASUREMENT_KEYS = (
+    "innerHeight",
+    "statusHeight",
+    "storyHeight",
+    "chatHeight",
+    "shellScrollHeight",
+    "shellClientHeight",
+    "statusBottom",
+    "storyBottom",
+    "chatBottom",
+    "otherLineBg",
+    "mineLineBg",
+    "targets",
+)
+
+
 def extract_measurements(dom: str) -> list[dict] | None:
     match = re.search(r'<pre id="measured">(.*?)</pre>', dom, re.DOTALL)
     if match is None:
@@ -478,6 +559,41 @@ def extract_measurements(dom: str) -> list[dict] | None:
             file=sys.stderr,
         )
         return None
+
+    # 키·형태 이름·차례를 함께 본다 — 개수만 세면 이름이 뒤섞여도 통과한다.
+    # 셋 중 하나라도 어긋나면 무엇이 어긋났는지 인쇄하고 None을 돌려줘
+    # 호출자가 종료 코드 2로 끝내게 한다.
+    for index, (item, shape) in enumerate(zip(data, SHAPES)):
+        if not isinstance(item, dict):
+            print(f"{index + 1}번째 측정값이 객체가 아니다.", file=sys.stderr)
+            return None
+        missing_base = [key for key in BASE_MEASUREMENT_KEYS if key not in item]
+        if missing_base:
+            print(
+                f"{index + 1}번째 측정값에 {missing_base}가 없다 — 확인 불가.",
+                file=sys.stderr,
+            )
+            return None
+        if item["name"] != shape["name"]:
+            print(
+                f"{index + 1}번째 측정값의 형태 이름이 어긋났다 — 기대 "
+                f"'{shape['name']}', 실제 '{item['name']}'. 같은 측정값이면 "
+                "같은 차례여야 한다.",
+                file=sys.stderr,
+            )
+            return None
+        if item["missingElements"]:
+            # 고정판에 없는 요소가 있는 형태는 나머지 키를 아예 안 담아
+            # 왔으므로(측정을 안 했으므로) 여기선 더 안 본다 — 호출부가
+            # missingElements를 보고 판정 없이 종료 코드 2로 끝낸다.
+            continue
+        missing_measured = [key for key in REQUIRED_MEASUREMENT_KEYS if key not in item]
+        if missing_measured:
+            print(
+                f"{item['name']} 측정값에 {missing_measured}가 없다 — 확인 불가.",
+                file=sys.stderr,
+            )
+            return None
     return data
 
 
@@ -622,6 +738,18 @@ def run_self_test() -> int:
     안 건드린다 — 함정마다 host.html을 새로 만들어 크로미움을 돌리고,
     확인이 끝나면 임시 디렉터리째 버린다.
     """
+    if _IMPORT_ERROR is not None:
+        print(
+            f"check_insecure_origin을 import하지 못했다: {_IMPORT_ERROR}. 종료 코드 2.",
+            file=sys.stderr,
+        )
+        return 2
+
+    guard_error = _validate_shape_name_constants()
+    if guard_error is not None:
+        print(f"{guard_error}. 종료 코드 2.", file=sys.stderr)
+        return 2
+
     if not CSS_PATH.is_file():
         print(f"{CSS_PATH}가 없다. 종료 코드 2.", file=sys.stderr)
         return 2
@@ -665,6 +793,13 @@ def run_self_test() -> int:
                 file=sys.stderr,
             )
             return 2
+        if target["missingElements"]:
+            print(
+                f"{trap_name} — 겨눈 형태 {target_shape}에 재야 할 요소가 없다"
+                f"({target['missingElements']}). 종료 코드 2.",
+                file=sys.stderr,
+            )
+            return 2
 
         passed, reasons = judge(target)
         if passed:
@@ -686,6 +821,18 @@ def run_self_test() -> int:
 
 
 def run_check() -> int:
+    if _IMPORT_ERROR is not None:
+        print(
+            f"check_insecure_origin을 import하지 못했다: {_IMPORT_ERROR}. 종료 코드 2.",
+            file=sys.stderr,
+        )
+        return 2
+
+    guard_error = _validate_shape_name_constants()
+    if guard_error is not None:
+        print(f"{guard_error}. 종료 코드 2.", file=sys.stderr)
+        return 2
+
     missing_class_names = check_fixture_still_mirrors_source()
     if missing_class_names:
         print(
@@ -725,6 +872,22 @@ def run_check() -> int:
         measurements = extract_measurements(dom)
         if measurements is None:
             return 2
+
+    # 재야 할 요소가 하나라도 없는 형태가 있으면 그 자리에서 멈춘다 —
+    # 판정하지 않고 종료 코드 2다. 못 잰 것을 통과(0)로도 실패(1)로도
+    # 접지 않는다(빈 값 경계).
+    any_missing = False
+    for measurement in measurements:
+        if measurement["missingElements"]:
+            any_missing = True
+            print(
+                f"{measurement['name']} — 고정판에서 재야 할 요소가 없다: "
+                f"{measurement['missingElements']}",
+                file=sys.stderr,
+            )
+    if any_missing:
+        print("판정하지 않는다 — 확인 불가. 종료 코드 2.", file=sys.stderr)
+        return 2
 
     any_failed = False
     for measurement in measurements:
