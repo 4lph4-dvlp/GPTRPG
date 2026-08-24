@@ -86,6 +86,10 @@ TOUCH_TARGET_MIN_PX = 44
 # 반올림 오차를 흡수하기 위한 여유다.
 OVERFLOW_TOLERANCE_PX = 1
 
+# 내 줄과 남의 줄의 배경색이 갈리는지는 형태와 무관한 단언(G-12.3-27)이라
+# 네 형태 전부에서 반복할 필요가 없다 — 폰 세로 한 형태에서만 본다.
+MINE_LINE_COLOR_CHECK_SHAPE = "390x844"
+
 # 네 형태. 1440×900은 넓은 창의 대조군(3컬럼이 그대로인지 본다). 960×1080은
 # 1920×1080 화면의 절반 폭(사장님이 실제로 보고한 형태). 390×844는 폰
 # 세로. 844×390은 폰 가로 — 세로 높이가 가장 모자란 형태라 픽셀 바닥의
@@ -199,6 +203,8 @@ def build_host_html(css_uri: str) -> str:
       var chatEl = doc.querySelector(".pane--chat");
       var selectEl = doc.querySelector("select");
       var inputEl = doc.querySelector('input[type="number"]');
+      var otherLineEl = doc.querySelector(".chat-line:not(.chat-line--mine)");
+      var mineLineEl = doc.querySelector(".chat-line--mine");
       results.push({{
         name: shape.name,
         innerWidth: win.innerWidth,
@@ -208,7 +214,9 @@ def build_host_html(css_uri: str) -> str:
         chatHeight: chatEl.getBoundingClientRect().height,
         selectHeight: selectEl.getBoundingClientRect().height,
         inputHeight: inputEl.getBoundingClientRect().height,
-        scrollHeight: doc.documentElement.scrollHeight
+        scrollHeight: doc.documentElement.scrollHeight,
+        otherLineBg: win.getComputedStyle(otherLineEl).backgroundColor,
+        mineLineBg: win.getComputedStyle(mineLineEl).backgroundColor
       }});
       document.body.removeChild(iframe);
       done();
@@ -328,6 +336,17 @@ def judge(measurement: dict) -> tuple[bool, list[str]]:
             f"input[type=number] 높이가 {measurement['inputHeight']:.1f}px로 "
             f"{TOUCH_TARGET_MIN_PX}px보다 낮다"
         )
+
+    # ④ 내 줄의 본문 배경이 남의 줄과 다르다(G-12.3-27). 배경색으로 잡는
+    # 이유 — 이름표 글자색은 오늘도 이미 다르다(그것이 사장님이 본 「이름만
+    # 노랗다」다). 갈려야 하는 것은 줄 전체이고, 그것을 픽셀 근처에서 잴 수
+    # 있는 가장 단순한 신호가 줄의 배경이다.
+    if measurement["name"] == MINE_LINE_COLOR_CHECK_SHAPE:
+        if measurement["otherLineBg"] == measurement["mineLineBg"]:
+            reasons.append(
+                "내 줄과 남의 줄의 배경색이 같다"
+                f"({measurement['mineLineBg']}) — 누가 말했는지 한눈에 안 갈린다"
+            )
 
     return (len(reasons) == 0, reasons)
 
