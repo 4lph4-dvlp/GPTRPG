@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
-current_phase_name: creation-screen
+current_phase_name: 캐릭터 만들기 화면 (INSERTED)
 status: executing
-stopped_at: Completed 12.3-15-PLAN.md — phase 12.3 gap-closure 완료(15/15)
-last_updated: "2026-08-24T03:10:51.310Z"
+stopped_at: Completed 12.3-16-PLAN.md — 폰 조작부 잘림 결함 종료(16/18)
+last_updated: "2026-08-24T03:47:11.227Z"
 last_activity: 2026-08-24
-last_activity_desc: 12.3-15(G-12.3-27/28/29 gap closure) 완료 — phase 12.3 종료
-state_head: 5dd0f222135afedd6d97f759038cf0ea3fab90fc
+last_activity_desc: Phase 12.3 execution started
+state_head: 3da9b928d1146cf31f210d23701b4d13d3231586
 progress:
   total_phases: 14
-  completed_phases: 8
+  completed_phases: 6
   total_plans: 56
-  completed_plans: 53
+  completed_plans: 54
 ---
 
 # Project State
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 
 ## Current Position
 
-Phase: 12.3 (creation-screen) — READY TO EXECUTE
-Plan: 15 of 15
-Status: Phase 12.3 complete — 15/15 PLAN.md와 15/15 SUMMARY.md가 디스크에 있다
-Last activity: 2026-08-24 — 12.3-15(gap closure: G-12.3-27/28/29) 완료로 phase 12.3 종료
+Phase: 12.3 (캐릭터 만들기 화면 (INSERTED)) — EXECUTING
+Plan: 17 of 18
+Status: Ready to execute
+Last activity: 2026-08-24 — 12.3-16 완료(폰 조작부 잘림 결함 종료)
 
 > 계획 번호 참고: `Plan: N of 11`의 카운터는 phase 초기 계획 수(10개)에
 > gap-closure로 추가된 12.3-11 한 건이 더해진 실제 파일 개수(11)를 따른다 —
@@ -42,11 +42,16 @@ Last activity: 2026-08-24 — 12.3-15(gap closure: G-12.3-27/28/29) 완료로 ph
 > 둘 다 11개)로 직접 정정했다. 12.3-13 완료 시점에도 같은 드리프트가
 > 재발했다(`state advance-plan`이 "3 of 14"를 남김) — 디스크 상태
 > (`*-PLAN.md` 14개, `*-SUMMARY.md` 13개, 12.3-14만 남음)로 "14 of 14"로
-> 다시 정정했다. 12.3-15(이 계획, gap-closure) 완료 시점에도 같은 드리프트가
+> 다시 정정했다. 12.3-15(gap-closure) 완료 시점에도 같은 드리프트가
 > 세 번째로 재발했다 — `gsd-tools state advance-plan`이 "2 of 15"(진행률
 > `progress.completed_phases`도 7→6으로 되레 줄임)를 남겼다. 디스크 상태
 > (`*-PLAN.md` 15개, `*-SUMMARY.md` 15개, 전부 짝이 맞음)로 "15 of 15"·
-> `completed_phases: 8`(12.3 완료로 +1)로 다시 정정했다.
+> `completed_phases: 8`(12.3 완료로 +1)로 다시 정정했다. 12.3-16(이 계획,
+> gap-closure) 완료 시점에도 같은 드리프트가 네 번째로 재발했다 —
+> `gsd-tools state advance-plan`이 "2 of 18"을 남겼다(직전 위치를 1로 보고
+> +1만 함 — phase가 gap-closure로 계속 늘어난 실제 파일 개수를 못 따라간다).
+> 디스크 상태(`*-PLAN.md` 18개, `*-SUMMARY.md` 16개, 17·18만 남음)로
+> "17 of 18"로 다시 정정했다.
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -157,6 +162,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P13 | ~16min | 3 tasks | 9 files |
 | Phase 12.3 P14 | ~20min | 3 tasks | 6 files |
 | Phase 12.3 P15 | ~50min | 3 tasks | 3 files |
+| Phase 12.3 P16 | ~35min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -355,6 +361,9 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 12.3-14: COPY.loading 남는 자리 넷을 전수 감사해 전부 실제 진행 중 상태로 확인 — 계획의 grep 기준선(<2)과 실측(3)이 어긋난 것은 12.3-13이 정당하게 추가한 로딩 분기를 계획이 기준선에 못 반영해서다(SUMMARY Deviations 참조)
 - [Phase 12.3]: 12.3-15: 좁은 화면 서사 칸이 0px가 되는 결함(G-12.3-29, 저장소 첫 커밋부터 있던 놀이 화면 규칙)을 12.3 범위 밖 청소임에도 여기서 닫음 — 사람이 12.3 UAT를 걷다가 실제로 부딪혔고 재현·실측·수정이 모두 손에 있었기 때문. .pane--status에 max-height: 25dvh + 내부 스크롤을 주고 대화 행 바닥을 0으로 내려, 서사 행이 픽셀 바닥 없이도 언제나 최소 35dvh를 받게 함(픽셀 바닥과 탭 분리는 기각).
 - [Phase 12.3]: 12.3-15: check_insecure_origin.py의 방식(표준 라이브러리 + 이미 있는 크로미움 + srcdoc 고정판 + 종료 코드 0/1/2)을 배치(layout) 회귀 그물에도 그대로 적용해 scripts/check_narrow_viewport.py를 신설 — 이 저장소의 화면 시험(vitest)은 jsdom 없는 순수 함수 시험이라 배치를 잴 도구가 원래 없었다.
+- [Phase 12.3]: 12.3-16: .composer에 min-height: 0 + overflow-y: auto 두 줄만 채택 — 코드 검토 CR-02의 flex: 0 0 auto + max-height: 100% 처방은 조작부를 안 줄어들게 만들어 결함을 되살리므로 기각
+- [Phase 12.3]: 12.3-16: 「닿을 수 있는가」를 뷰포트 위치 비교가 아니라 스크롤 경로 유무(reachable())로 판정 — 상태 칸의 스크롤 가능한 조작 칸이 거짓 빨강을 안 낸다
+- [Phase 12.3]: 12.3-16: TOUCH_TARGETS에 .candidate를 별도 항목으로 추가(Rule 2) — 실제 GM 제안 후보 버튼은 .btn이 아니라 candidate 클래스만 쓴다는 것을 코드로 확인
 
 ### Pending Todos
 
@@ -412,8 +421,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-24T01:34:34.857Z
-Stopped at: Completed 12.3-15-PLAN.md — phase 12.3 gap-closure 완료(15/15), 3개 Task 모두 단일 세션에서 커밋
+Last session: 2026-08-24T03:47:10.847Z
+Stopped at: Completed 12.3-16-PLAN.md — 폰 조작부 잘림 결함 종료(16/18)
 Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
