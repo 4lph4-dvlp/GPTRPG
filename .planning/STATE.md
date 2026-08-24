@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: 캐릭터 만들기 화면 (INSERTED)
 status: executing
-stopped_at: Completed 12.3-16-PLAN.md — 폰 조작부 잘림 결함 종료(16/18)
-last_updated: "2026-08-24T03:47:11.227Z"
+stopped_at: Completed 12.3-17-PLAN.md — 그물 자신을 시험하는 --self-test + 죽어 있던 넘침 단언 되살리기(17/18)
+last_updated: "2026-08-24T04:03:10.243Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 12.3 execution started
-state_head: 3da9b928d1146cf31f210d23701b4d13d3231586
+state_head: df2c240672b8f9f8c938275d85fde49b02bea486
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 56
-  completed_plans: 54
+  completed_plans: 55
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.3 (캐릭터 만들기 화면 (INSERTED)) — EXECUTING
-Plan: 17 of 18
+Plan: 18 of 18
 Status: Ready to execute
 Last activity: 2026-08-24 — 12.3-16 완료(폰 조작부 잘림 결함 종료)
 
@@ -163,6 +163,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P14 | ~20min | 3 tasks | 6 files |
 | Phase 12.3 P15 | ~50min | 3 tasks | 3 files |
 | Phase 12.3 P16 | ~35min | 3 tasks | 2 files |
+| Phase 12.3 P17 | ~20min | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -364,6 +365,8 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 12.3-16: .composer에 min-height: 0 + overflow-y: auto 두 줄만 채택 — 코드 검토 CR-02의 flex: 0 0 auto + max-height: 100% 처방은 조작부를 안 줄어들게 만들어 결함을 되살리므로 기각
 - [Phase 12.3]: 12.3-16: 「닿을 수 있는가」를 뷰포트 위치 비교가 아니라 스크롤 경로 유무(reachable())로 판정 — 상태 칸의 스크롤 가능한 조작 칸이 거짓 빨강을 안 낸다
 - [Phase 12.3]: 12.3-16: TOUCH_TARGETS에 .candidate를 별도 항목으로 추가(Rule 2) — 실제 GM 제안 후보 버튼은 .btn이 아니라 candidate 클래스만 쓴다는 것을 코드로 확인
+- [Phase 12.3]: 12.3-17: 넘침 단언을 문서 최상위 요소 높이(.shell overflow:hidden 때문에 원리적으로 절대 발화 불가)에서 .shell 자신의 scrollHeight/clientHeight + 세 칸 아래끝으로 교체, --self-test로 함정 셋을 메모리 안에서만 얹어 단언 생존을 뒤집어 확인
+- [Phase 12.3]: 12.3-17: pixel-floor 함정은 넘침 단언(②)과 닿을 수 있음 단언(⑤)을 동시에 겨눈다(구조적 필연, 조작부가 대화 행 맨 아래라 골격이 넘치면 함께 밀려난다) — 킬스위치 확인은 두 단언을 함께 무력화해야 재현됨을 실측으로 확인
 
 ### Pending Todos
 
@@ -421,8 +424,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-24T03:47:10.847Z
-Stopped at: Completed 12.3-16-PLAN.md — 폰 조작부 잘림 결함 종료(16/18)
+Last session: 2026-08-24T04:03:09.855Z
+Stopped at: Completed 12.3-17-PLAN.md — 그물 자신을 시험하는 --self-test + 죽어 있던 넘침 단언 되살리기(17/18)
 Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
