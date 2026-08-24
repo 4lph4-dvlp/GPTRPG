@@ -173,9 +173,28 @@ input {
 }
 
 @media (max-width: 1080px) {
+  /* 세로 3행 골격 — 셋 중 어느 것도 남은 높이를 통째로 가져가지 못하게
+     한다(G-12.3-29). 예전엔 1행(상태)이 auto라 내용만큼 전부 가져가고
+     3행(대화)엔 240px 바닥이 박혀 있어, 최소값이 0인 2행(서사)만 모자란
+     높이를 혼자 뒤집어쓰고 0이 됐다(폰 실측 906px + 240px 위아래에 눌려
+     서사 0px). 고친 지금은: 1행이 아래 .pane--status의 `max-height: 25dvh`로
+     상한을 받고(전부 못 가져간다), 3행 바닥을 0으로 내려 콘텐츠가 없을 때는
+     안 가져가게 한다. 그래서 2행(서사)이 산수로 언제나 최소 35dvh
+     (=100-25-40)를 받는다.
+     픽셀 바닥(예: 서사 행에 minmax(240px, 1fr))은 일부러 안 쓴다 — 세 행
+     바닥의 합이 화면 높이를 넘으면 골격 전체가 넘치고(폰 가로 844×390에서
+     즉시 터진다), 그것은 고친 것이 아니라 넘침으로 옮긴 것뿐이다
+     (`12.3-UAT.md` G-12.3-29 missing이 직접 경고한 함정 — scripts/
+     check_narrow_viewport.py가 문서 넘침을 같이 재서 이 처방을 거절한다).
+     좁은 화면을 탭으로 가르는 대안도 기각 — 놀이 중에 서사와 대화가
+     동시에 보이는 것이 이 화면의 값어치다.
+     이 규칙은 놀이 화면(SessionScreen/StatusPane/StoryPane)의 것이고
+     저장소 첫 커밋(7821dc0, 2026-08-05)부터 있었으며 사람이 폰으로 처음
+     열어 봐서 `12.3-UAT.md`의 G-12.3-29로 드러났다(12.3이 만든 결함은
+     아니지만 여기서 닫는다 — 12.3-15-PLAN.md 참조). */
   .shell {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr) minmax(240px, 40dvh);
+    grid-template-rows: auto minmax(0, 1fr) minmax(0, 40dvh);
   }
   .pane--status {
     flex-direction: row;
@@ -184,7 +203,12 @@ input {
     gap: var(--space-md);
     border-right: none;
     border-bottom: 1px solid var(--line-soft);
-    overflow-y: visible;
+    /* 상한(max-height)과 내부 스크롤(overflow-y: auto)을 항상 같이 둔다 —
+       상한만 있고 스크롤이 없으면 상태 칸의 내용이 잘려서 사라진다
+       (T-12.3-70). 상태 칸은 이제 세로의 4분의 1까지만 쓰고, 넘치면 이
+       칸 안에서만 스크롤된다(바깥 골격은 안 밀린다). */
+    max-height: 25dvh;
+    overflow-y: auto;
     padding: var(--space-md);
   }
   .pane--chat {
