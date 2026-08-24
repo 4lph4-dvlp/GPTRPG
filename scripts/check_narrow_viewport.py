@@ -176,7 +176,13 @@ TOUCH_TARGETS: list[tuple[str, str, bool]] = [
 # 사라지면 고정판은 더 이상 실제 화면을 안 비춘다(T-12.3-67). ChatPane과
 # CreationPane 둘 다 12.3-16에서 세 층(chat__head는 ChatPane 전용 —
 # CreationPane은 그 자리에 turnLabel을 쓴다)·composer·proposal을 새로
-# 흉내 내기 시작했으므로 여기 함께 늘렸다.
+# 흉내 내기 시작했으므로 여기 함께 늘렸다. composer__row·composer__input·
+# candidate·btn은 TOUCH_TARGETS가 쓰는 조합 선택자의 낱말들이다(G-12.3-32,
+# 12.3-19) — 실제 화면에서 이 낱말들이 사라지면 조작 요소 이름 감시가
+# 그것을 여기서 잡는다. TOUCH_TARGETS의 나머지 둘(`select`·
+# `input[type="number"]`)은 태그·속성 선택자라 클래스 이름이 아니므로 이
+# 목록에 못 넣는다 — 그 둘은 extract_measurements()의 조작 요소 빈 값
+# 검사(0개면 종료 코드 2)로만 지켜진다.
 REQUIRED_SOURCE_CLASS_NAMES: dict[str, list[str]] = {
     "frontend/src/panes/StatusPane.tsx": ["pane--status"],
     "frontend/src/panes/StoryPane.tsx": ["pane--story"],
@@ -187,12 +193,20 @@ REQUIRED_SOURCE_CLASS_NAMES: dict[str, list[str]] = {
         "composer",
         "proposal",
         "chat-line--mine",
+        "composer__row",
+        "composer__input",
+        "candidate",
+        "btn",
     ],
     "frontend/src/panes/CreationPane.tsx": [
         "chat-line--mine",
         "chat",
         "composer",
         "proposal",
+        "composer__row",
+        "composer__input",
+        "candidate",
+        "btn",
     ],
 }
 
@@ -225,6 +239,22 @@ def check_fixture_still_mirrors_source() -> list[str]:
     그 이름들을 실제 화면과 다른 순서·다른 부모자식 관계로 담는 경우다
     (12.3-16이 닫은 결함이 정확히 이 종류였다: `.composer`·`.proposal`
     이름은 있었지만 고정판이 그것들을 아예 안 담고 있었다).
+
+    **이 그물과 조작 요소 빈 값 검사(extract_measurements(), G-12.3-32,
+    12.3-19)는 서로 다른 절반을 맡는다.**
+
+    - 조작 요소 빈 값 검사가 잡는 절반 — 고정판 자신이 그 요소를 잃은
+      경우(고정판이 바뀌거나 TOUCH_TARGETS 선택자가 늘었는데 고정판이 안
+      따라온 경우). 헤드리스 문서에서 잰 것이 0개이므로 즉시 종료 코드 2.
+    - 이 함수가 잡는 절반 — 실제 화면 파일(`.tsx`)에서 그 **이름이**
+      사라진 경우. 고정판은 자기 마크업을 그대로 갖고 있으니 조작 요소
+      빈 값 검사로는 절대 안 걸린다.
+    - 둘 다 못 잡는 것 — 이름은 다 살아 있는데 실제 화면의 **중첩
+      구조**만 바뀌어 조합 선택자(`.composer__row .btn`·`.proposal .btn`
+      같은)가 실제로는 다른 것을 가리키게 되는 경우. 이것을 진짜로
+      잡으려면 실제 화면 컴포넌트를 렌더해야 하고 그 도구(RTL/jsdom)가
+      이 저장소에 없다. 이 한계는 위 문단(`deferred-items.md`의 IN-06
+      처지)이 이미 같은 결로 기록해 둔 것이고, 여기서 새로 닫지 않는다.
     """
     missing: list[str] = []
     for rel_path, class_names in REQUIRED_SOURCE_CLASS_NAMES.items():
