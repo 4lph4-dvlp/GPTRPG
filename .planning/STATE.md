@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 12.3
 current_phase_name: creation-screen
 status: executing
-stopped_at: Completed 12.3-18-PLAN.md — 「확인을 못 했다」가 「통과」로 보이는 남은 길들 종료(18/18)
-last_updated: "2026-08-24T05:18:35.647Z"
+stopped_at: Completed 12.3-19-PLAN.md — 조작 요소 「잴 것이 없었다」를 종료 코드 2로 가르는 마지막 빈 값 경계 종료(19/20)
+last_updated: "2026-08-24T08:00:33.278Z"
 last_activity: 2026-08-24
 last_activity_desc: Phase 12.3 execution started
-state_head: d75d595070f87fbef45a7b0e426dcfad12d2d5eb
+state_head: af9f8c1524ec0c98338b69ce51736ddcd06863c8
 progress:
   total_phases: 14
   completed_phases: 6
   total_plans: 58
-  completed_plans: 56
+  completed_plans: 57
 ---
 
 # Project State
@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 12.3 (creation-screen) — READY TO EXECUTE
-Plan: 18 of 18
-Status: Ready to execute
-Last activity: 2026-08-24 — 12.3-16 완료(폰 조작부 잘림 결함 종료)
+Plan: 19 of 20
+Status: Ready to execute (12.3-20 남음)
+Last activity: 2026-08-24 — 12.3-19 완료(조작 요소 「잴 것이 없었다」 종료 코드 2 gap 종료)
 
 > 계획 번호 참고: `Plan: N of 11`의 카운터는 phase 초기 계획 수(10개)에
 > gap-closure로 추가된 12.3-11 한 건이 더해진 실제 파일 개수(11)를 따른다 —
@@ -51,7 +51,12 @@ Last activity: 2026-08-24 — 12.3-16 완료(폰 조작부 잘림 결함 종료)
 > `gsd-tools state advance-plan`이 "2 of 18"을 남겼다(직전 위치를 1로 보고
 > +1만 함 — phase가 gap-closure로 계속 늘어난 실제 파일 개수를 못 따라간다).
 > 디스크 상태(`*-PLAN.md` 18개, `*-SUMMARY.md` 16개, 17·18만 남음)로
-> "17 of 18"로 다시 정정했다.
+> "17 of 18"로 다시 정정했다. 12.3-19(gap-closure) 완료 시점에도 같은
+> 드리프트가 다섯 번째로 재발했다 — `gsd-tools state advance-plan`이
+> `status: verifying`·`stopped_at`을 18/18(이미 지난 계획)로 남겼다(그
+> 사이 12.3-20 PLAN.md가 추가돼 있었는데 그 파일 개수 증가를 못
+> 따라갔다). 디스크 상태(`*-PLAN.md` 20개, `*-SUMMARY.md` 19개, 12.3-20만
+> 남음)로 "19 of 20"·`status: executing`으로 다시 정정했다.
 
 > 라우팅 정정(2026-08-17 갱신): `phase.complete`가 Phase 11 마감 후에도 12.1을 다음으로 골랐다.
 > 그러나 ROADMAP 순서는 **11 → 12 → 12.1**이고, 12.1 자신이 `Depends on`에 **Phase 12
@@ -165,6 +170,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P16 | ~35min | 3 tasks | 2 files |
 | Phase 12.3 P17 | ~20min | 3 tasks | 2 files |
 | Phase 12.3 P18 | ~65min | 3 tasks | 3 files |
+| Phase 12.3 P19 | ~15min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -369,6 +375,8 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 12.3-17: 넘침 단언을 문서 최상위 요소 높이(.shell overflow:hidden 때문에 원리적으로 절대 발화 불가)에서 .shell 자신의 scrollHeight/clientHeight + 세 칸 아래끝으로 교체, --self-test로 함정 셋을 메모리 안에서만 얹어 단언 생존을 뒤집어 확인
 - [Phase 12.3]: 12.3-17: pixel-floor 함정은 넘침 단언(②)과 닿을 수 있음 단언(⑤)을 동시에 겨눈다(구조적 필연, 조작부가 대화 행 맨 아래라 골격이 넘치면 함께 밀려난다) — 킬스위치 확인은 두 단언을 함께 무력화해야 재현됨을 실측으로 확인
 - [Phase 12.3]: 12.3-18: check_narrow_viewport.py의 빈 문서 판정·키 누락·형태 이름 침묵·import 실패 다섯 자리를 종료 코드 2로 접었다. 넓은 창 대조군이 storyLeft/storyWidth로 3컬럼 붕괴를 실제로 잡고, 상태 칸 25dvh 상한을 단언으로 지킨다. 코드 검토 16건 전부의 처지를 deferred-items.md에 기록(접은 12건 + 안 접은 4건)
+- [Phase 12.3]: 12.3-19: 조작 요소(TOUCH_TARGETS) 선택자가 하나도 못 찾으면 extract_measurements()가 판정 없이 종료 코드 2로 끝나는 빈 값 경계 추가 — G-12.3-32 종료. 전0→후2→원복0 실증 완료
+- [Phase 12.3]: 12.3-19: 이름 감시 목록(REQUIRED_SOURCE_CLASS_NAMES)에 composer__row·composer__input·candidate·btn 추가 — 조작 요소 조합 선택자가 쓰는 낱말까지 감시. select·input[type=number]는 태그/속성 선택자라 목록에 못 넣음을 주석으로 명시
 
 ### Pending Todos
 
@@ -426,8 +434,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-24T04:19:41.992Z
-Stopped at: Completed 12.3-18-PLAN.md — 「확인을 못 했다」가 「통과」로 보이는 남은 길들 종료(18/18)
+Last session: 2026-08-24T08:00:32.889Z
+Stopped at: Completed 12.3-19-PLAN.md — 조작 요소 「잴 것이 없었다」를 종료 코드 2로 가르는 마지막 빈 값 경계 종료(19/20)
 Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
