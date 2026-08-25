@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { GameStateView } from "../api/types.ts";
-import { shouldOpenScene } from "./openingView.ts";
+import { hasLockedRoster, shouldOpenScene } from "./openingView.ts";
 
 function baseState(overrides: Partial<GameStateView> = {}): GameStateView {
   return {
@@ -72,5 +72,37 @@ describe("지금 오프닝을 부를 때인지 판정한다 (SCENE-01, D-01/D-02
       scene_opened_seq: null,
     });
     expect(shouldOpenScene(state, false)).toBe(true);
+  });
+});
+
+/**
+ * `hasLockedRoster` 배선 회귀 시험 — Task 3 사람 확인이 잡은 실제 결함.
+ *
+ * `shouldOpenScene`의 갈래는 전부 옳았다(위 다섯 시험이 그대로 통과했다).
+ * 결함은 `SessionScreen`의 effect **의존성 배열**에 있었다 — 순수 판정
+ * 함수를 시험해도 「그 판정이 실제로 다시 도는가」는 안 잡힌다는 것이
+ * 이 파일의 도크스트링이 이미 경고한 바로 그 모양이다. RTL 없이 이
+ * 저장소에서 닿을 수 있는 가장 가까운 시험 자리는 effect가 의존성으로
+ * 쓰는 신호 자체를 순수 함수로 빼서 그 신호가 실제 상태 전이에서
+ * 바뀌는지를 확인하는 것이다.
+ */
+describe("hasLockedRoster — SessionScreen effect 의존성 배선 결함 회귀 시험", () => {
+  it("결함 재현: 이전 식(`feed.state?.party_roster !== null`)은 「마운트 직후 아직 상태 없음」과 「이미 잠긴 채로 첫 폴링 도착」을 똑같이 true로 접는다 — 그래서 React가 변화를 못 보고 effect가 다시 안 돈다", () => {
+    const beforeFirstPoll = (null as GameStateView | null)?.party_roster !== null;
+    const afterFirstPollAlreadyLocked =
+      baseState({ party_roster: ["hero-1"] }).party_roster !== null;
+    expect(beforeFirstPoll).toBe(true);
+    expect(afterFirstPollAlreadyLocked).toBe(true);
+    expect(beforeFirstPoll).toBe(afterFirstPollAlreadyLocked); // 결함: 값이 안 바뀐다
+  });
+
+  it("hasLockedRoster는 같은 전이에서 false → true로 실제로 바뀐다 — React가 변화를 보고 effect를 다시 돌린다", () => {
+    expect(hasLockedRoster(null)).toBe(false);
+    expect(hasLockedRoster(baseState({ party_roster: ["hero-1"] }))).toBe(true);
+  });
+
+  it("명단이 마운트 이후에 잠기는 정상 경로도 여전히 false → true다(기존 전이가 안 깨졌다)", () => {
+    expect(hasLockedRoster(baseState({ party_roster: null }))).toBe(false);
+    expect(hasLockedRoster(baseState({ party_roster: ["hero-1"] }))).toBe(true);
   });
 });

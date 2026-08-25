@@ -44,3 +44,23 @@ export function shouldOpenScene(
   }
   return true;
 }
+
+/**
+ * `SessionScreen`의 자동 발동 effect가 의존성 배열에 넣는 「명단이
+ * 잠겼는가」 신호(SCENE-01 배선, Task 3 사람 확인에서 잡힌 결함의 수정).
+ *
+ * **실제로 잡은 결함.** effect 의존성에 `feed.state?.party_roster !== null`을
+ * 직접 썼었다. `feed.state`가 아직 `null`일 때 옵셔널 체이닝은
+ * `undefined`를 내므로 `undefined !== null` → `true`다. 그런데 명단이
+ * **마운트되기 전에 이미 잠긴** 세션(늦게 들어온 사람 — 방장이 아닌
+ * 나머지 인원 대부분이 이 경로다)의 첫 폴링에서도 `party_roster`가
+ * 배열이므로 `array !== null` → `true`다. **서로 다른 두 상태("아직 상태
+ * 없음"과 "이미 잠김")가 같은 `true`로 접힌다** — React는 의존성을
+ * `Object.is`로 얕게 비교하므로 `true → true`는 "안 바뀜"이고, 마운트
+ * 직후의 no-op 실행(그때는 `feed.state`가 아직 `null`이라 조건이
+ * 거짓이다) 이후로 effect가 다시 안 돈다. `state !== null &&`를 앞에
+ * 두면 그 전이가 `false → true`로 반드시 갈라진다.
+ */
+export function hasLockedRoster(state: GameStateView | null): boolean {
+  return state !== null && state.party_roster !== null;
+}

@@ -22,7 +22,7 @@ import { groupTurns } from "../session/groupTurns.ts";
 // 발동 조건을 다시 쓰지 않고 `openingView.ts`의 순수 함수 하나만 부른다
 // (D-06/G-12.3-5와 같은 규율) — 별칭은 이 effect의 조건절이 그 함수를
 // 부르는 유일한 자리임을 grep 한 줄로 확인할 수 있게 한다.
-import { shouldOpenScene as canOpenScene } from "../session/openingView.ts";
+import { hasLockedRoster, shouldOpenScene as canOpenScene } from "../session/openingView.ts";
 import { usePolling } from "../session/usePolling.ts";
 import type {
   CharacterSheet,
@@ -210,15 +210,23 @@ export function SessionScreen({ sessionId, characterId }: SessionScreenProps) {
     // 만든다. 사람이 재시도 단추를 누르면 triggerOpening이 맨 앞에서
     // openingError를 비우므로 다시 시도할 수 있다.
     //
-    // 의존성은 원시값만(sessionId·characterId·party_roster !== null·
+    // 의존성은 원시값만(sessionId·characterId·party_roster 잠김 여부·
     // scene_opened_seq·openingError !== null) + triggerOpening 하나다 —
     // shouldOpenScene이 실제로 읽는 값과 일치해야 한다. feed.state 자체나
     // 배열/객체를 넣으면 폴링마다 새 참조가 와서 effect가 매번 다시
     // 돈다(자동 안내 effect와 같은 규율).
+    //
+    // party_roster 칸은 `feed.state?.party_roster !== null`이 아니라
+    // `hasLockedRoster(feed.state)`를 쓴다 — 전자는 `feed.state`가 아직
+    // `null`일 때(옵셔널 체이닝 → `undefined !== null` → `true`)와 명단이
+    // 마운트 이전에 이미 잠긴 세션의 첫 폴링(`array !== null` → `true`)이
+    // 똑같이 `true`로 접혀 그 전이에서 effect가 다시 안 도는 결함이 있었다
+    // (Task 3 사람 확인에서 잡힘 — `openingView.ts`의 `hasLockedRoster`
+    // 도크스트링 참고).
   }, [
     sessionId,
     characterId,
-    feed.state?.party_roster !== null,
+    hasLockedRoster(feed.state),
     feed.state?.scene_opened_seq ?? null,
     openingError !== null,
     triggerOpening,
