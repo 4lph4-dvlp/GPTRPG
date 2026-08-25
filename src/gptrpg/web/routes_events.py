@@ -162,6 +162,15 @@ class GameStateView(BaseModel):
     전부에 뿌려지면 그 값을 사칭해 남의 항목을 제출할 수 있게 된다. 「내가
     방장인가」는 부른 사람에게만 답하는 전용 경로(12.3-03)가 답한다."""
 
+    scene_opened_seq: int | None
+    """오프닝(`scene_opened`)이 기록된 순번(판 12+, Phase 13, SCENE-01).
+    `None`은 「아직 오프닝이 안 열렸다」다. **화면이 이 값을 다시 계산하지
+    않는다**(D-04 규율 — 값이 한 자리에만 있어야 어긋남이 구조적으로
+    불가능하다) — `GameState.scene_opened_seq`를 그대로 옮긴다.
+    `session_scenario_id`는 이 응답에 싣지 않는다 — 이 판에서 화면이 쓸
+    자리가 없고, 안 쓰는 값을 응답에 싣는 것은 나중에 「화면이 시나리오를
+    고른다」로 잘못 자라는 씨앗이다."""
+
 
 def _creation_character_views(
     game_state: GameState, rulebook: Rulebook | None
@@ -359,5 +368,6 @@ async def poll_events(
         ],
         creation_step_values=_creation_step_value_views(game_state),
         creation_host_claimed=game_state.creation_host_browser_id is not None,
+        scene_opened_seq=game_state.scene_opened_seq,
     )
     return PollResponse(events=events, state=state_view, check_calculations=check_calculations)

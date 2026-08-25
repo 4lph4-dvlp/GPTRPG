@@ -286,6 +286,21 @@ export interface CreationHostClaimedEvent extends EventEnvelope {
   previous_browser_id: string | null;
 }
 
+/**
+ * 판정 없이 장면을 여는 오프닝 서사(D-01/D-02/D-06, 판 12) —
+ * `event_log/schema.py::SceneOpened` 그대로. `source`가 이 문단이
+ * 어디서 왔는지 말한다: 낭독문형 그대로(`"scripted"`) · 메모형을 AI가
+ * 좁혀 쓴 것(`"sketch"`, 13-03) · AI가 실패해 시나리오 원문으로 대체한
+ * 것(`"fallback"`, 13-03/D-09). `text`는 서버가 다섯 요소를 이미 이어
+ * 붙인 한 덩어리다 — 화면이 다시 조립하지 않는다.
+ */
+export interface SceneOpenedEvent extends EventEnvelope {
+  event_type: "scene_opened";
+  scenario_id: string;
+  text: string;
+  source: "scripted" | "sketch" | "fallback";
+}
+
 export type GameEvent =
   | ActionDeclaredEvent
   | ActionConfirmedEvent
@@ -305,7 +320,8 @@ export type GameEvent =
   | PartyRosterLockedEvent
   | CreationGmSpokeEvent
   | CreationConsentRecordedEvent
-  | CreationHostClaimedEvent;
+  | CreationHostClaimedEvent
+  | SceneOpenedEvent;
 
 /** 완성된 캐릭터 하나(D-04) — `consented`/`required_steps_filled`는
  * 서버가 이미 하는 판단을 그대로 옮긴 것이지 화면이 다시 계산하지 않는다. */
@@ -373,6 +389,10 @@ export interface GameStateView {
   /** 이 세션의 방장이 잡혔는지 여부만(D-11) — `creation_host_browser_id`
    * 값 자체는 절대 싣지 않는다(T-12.3-05). */
   creation_host_claimed: boolean;
+  /** 오프닝(`scene_opened`)이 기록된 순번(판 12+, Phase 13, SCENE-01) —
+   * `null`은 「아직 안 열렸다」다. 화면이 이 값을 다시 계산하지 않는다
+   * (D-04) — 오프닝 자동 발동 조건(`shouldOpenScene`)이 그대로 읽는다. */
+  scene_opened_seq: number | null;
 }
 
 export interface PollResponse {
@@ -597,6 +617,18 @@ export interface CreationDeclarationView {
  * 공통으로 돌려주는 순번 하나. */
 export interface SeqResponse {
   seq: number;
+}
+
+/**
+ * `POST .../opening`의 응답(SCENE-01) — `routes_actions.py::OpeningResponse`.
+ * `opened`가 거짓이면 이 요청이 새로 연 것이 아니라 겹친 탭이 이미 열려
+ * 있던 오프닝을 가리킨 것이다(D-02) — `seq`는 그 경우에도 실제
+ * `scene_opened` 사건의 순번이다.
+ */
+export interface OpeningResponse {
+  opened: boolean;
+  seq: number;
+  source: "scripted" | "sketch" | "fallback";
 }
 
 /** `POST .../creation/complete`의 응답 — `routes_creation.py::CreationCompleteResponse`. */

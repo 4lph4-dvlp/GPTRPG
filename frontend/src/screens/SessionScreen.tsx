@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchCharacterSheet, fetchCharacters } from "../api/client.ts";
+import { ApiError, fetchCharacterSheet, fetchCharacters, openScene } from "../api/client.ts";
 import { changeIntensity } from "../components/ResourceChangeBadge.tsx";
 import { DiceModal } from "../components/DiceModal.tsx";
 import { COPY } from "../labels.ts";
@@ -19,6 +19,10 @@ import { StatusPane } from "../panes/StatusPane.tsx";
 import { StoryPane } from "../panes/StoryPane.tsx";
 import { indexCalculations } from "../session/checkSummary.ts";
 import { groupTurns } from "../session/groupTurns.ts";
+// 발동 조건을 다시 쓰지 않고 `openingView.ts`의 순수 함수 하나만 부른다
+// (D-06/G-12.3-5와 같은 규율) — 별칭은 이 effect의 조건절이 그 함수를
+// 부르는 유일한 자리임을 grep 한 줄로 확인할 수 있게 한다.
+import { shouldOpenScene as canOpenScene } from "../session/openingView.ts";
 import { usePolling } from "../session/usePolling.ts";
 import type {
   CharacterSheet,
@@ -26,6 +30,7 @@ import type {
   CheckCalculationView,
   CheckResolvedEvent,
   GameEvent,
+  SceneOpenedEvent,
 } from "../api/types.ts";
 
 /** 연출 큐 항목 하나 — 판정 사건과 그 계산 줄이 순번으로 짝지어 함께
@@ -147,6 +152,86 @@ export function SessionScreen({ sessionId, characterId }: SessionScreenProps) {
 
   const feed = usePolling(sessionId, onLiveEvents);
 
+  // 오프닝 자동 발동(SCENE-01, D-01/D-02) — 명단이 잠기면 화면이 스스로
+  // `POST /sessions/{id}/opening`을 부른다. 여러 탭이 동시에 이 effect를
+  // 타도 서버 큐 안 `ClaimGmSlot`이 세션당 한 번으로 접으므로 안전하다
+  // (D-02/D-03) — `CreationScreen`의 자동 안내 effect와 같은 규율이다.
+  const [openingPending, setOpeningPending] = useState(false);
+  const [openingError, setOpeningError] = useState<string | null>(null);
+  const openingAliveRef = useRef(true);
+  useEffect(() => {
+    openingAliveRef.current = true;
+    return () => {
+      openingAliveRef.current = false;
+    };
+  }, []);
+
+  const triggerOpening = useCallback(async (): Promise<void> => {
+    setOpeningPending(true);
+    setOpeningError(null);
+    try {
+      await openScene(sessionId, characterId);
+      if (openingAliveRef.current) {
+        feed.pollNow();
+        setOpeningPending(false);
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // 다른 탭이 지금 부르는 중이다(D-02) — 오류로 만들지 않는다.
+        // pending을 그대로 유지한 채 폴링이 결과를 실어 오길 기다린다.
+        return;
+      }
+      if (!openingAliveRef.current) {
+        return;
+      }
+      setOpeningPending(false);
+      if (err instanceof ApiError && err.status === 503) {
+        // AI 설정 자체가 없다(12.3 D-13 ②, D-09가 같은 처리를 요구).
+        setOpeningError(COPY.creationGmUnavailable);
+      } else if (err instanceof ApiError && err.detail !== undefined) {
+        setOpeningError(err.detail);
+      } else {
+        setOpeningError(COPY.openingRetry);
+      }
+    }
+  }, [sessionId, characterId, feed.pollNow]);
+
+  const openingRef = useRef(false);
+  useEffect(() => {
+    if (!canOpenScene(feed.state, openingError !== null) || openingRef.current) {
+      return;
+    }
+    openingRef.current = true;
+    void triggerOpening().finally(() => {
+      openingRef.current = false;
+    });
+    // 자동 재시도 고리를 만들지 않는다 — 실패는 openingError에 남고, 그
+    // 값이 shouldOpenScene의 두 번째 인자로 들어가 판정을 거짓으로
+    // 만든다. 사람이 재시도 단추를 누르면 triggerOpening이 맨 앞에서
+    // openingError를 비우므로 다시 시도할 수 있다.
+    //
+    // 의존성은 원시값만(sessionId·characterId·party_roster !== null·
+    // scene_opened_seq·openingError !== null) + triggerOpening 하나다 —
+    // shouldOpenScene이 실제로 읽는 값과 일치해야 한다. feed.state 자체나
+    // 배열/객체를 넣으면 폴링마다 새 참조가 와서 effect가 매번 다시
+    // 돈다(자동 안내 effect와 같은 규율).
+  }, [
+    sessionId,
+    characterId,
+    feed.state?.party_roster !== null,
+    feed.state?.scene_opened_seq ?? null,
+    openingError !== null,
+    triggerOpening,
+  ]);
+
+  const opening = useMemo<SceneOpenedEvent | null>(
+    () =>
+      feed.events.find(
+        (event): event is SceneOpenedEvent => event.event_type === "scene_opened",
+      ) ?? null,
+    [feed.events],
+  );
+
   useEffect(() => {
     if (!clockPulsing) {
       return;
@@ -256,6 +341,10 @@ export function SessionScreen({ sessionId, characterId }: SessionScreenProps) {
           justRevealedSeq={justRevealedSeq}
           failedDeclareSeqs={failedDeclareSeqs}
           calculations={feed.calculations}
+          opening={opening}
+          openingPending={openingPending}
+          openingError={openingError}
+          onRetryOpening={() => void triggerOpening()}
         />
 
         <ChatPane

@@ -11,8 +11,10 @@
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { OpeningCard } from "../components/OpeningCard.tsx";
 import { TurnCard } from "../components/TurnCard.tsx";
-import type { CheckCalculationView, ClockAdvancedEvent } from "../api/types.ts";
+import { Waiting } from "../components/Waiting.tsx";
+import type { CheckCalculationView, ClockAdvancedEvent, SceneOpenedEvent } from "../api/types.ts";
 import { COPY } from "../labels.ts";
 import { isVisibleTurn, type Turn } from "../session/groupTurns.ts";
 
@@ -50,6 +52,19 @@ interface StoryPaneProps {
   /** 판정 사건의 `seq`로 찾는 계산 줄(Phase 12.2) — `TurnCard`가 이것으로
    * 검산 줄을 그린다(자체 산수 없음). */
   calculations: Map<number, CheckCalculationView>;
+  /**
+   * 오프닝 사건(SCENE-01) — 폴링이 실어 온 `scene_opened`를 호출부가
+   * 이미 찾아 둔 것이다. `StoryPane`은 이것을 다시 찾지 않는다(D-04,
+   * 값이 한 자리에서만 계산된다).
+   */
+  opening: SceneOpenedEvent | null;
+  /** 명단 잠금 직후 오프닝 호출이 도는 중인가(D-02, 자동 발동). */
+  openingPending: boolean;
+  /** 오프닝 요청 자체가 실패했을 때만 채워진다(D-09) — AI가 이상하게
+   * 답한 갈래는 서버가 조용히 원문으로 대체하므로 여기 안 온다. */
+  openingError: string | null;
+  /** 오프닝 재시도 단추가 부르는 콜백. */
+  onRetryOpening: () => void;
 }
 
 export function StoryPane({
@@ -59,6 +74,10 @@ export function StoryPane({
   justRevealedSeq,
   failedDeclareSeqs,
   calculations,
+  opening,
+  openingPending,
+  openingError,
+  onRetryOpening,
 }: StoryPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
@@ -100,9 +119,11 @@ export function StoryPane({
     }
     // narrationCount·illustrationCount는 카드 높이를 바꾸므로 의존성에 남긴다 —
     // 바닥에 붙어 있는 동안 문장이 늘거나 그림이 붙을 때도 따라 내려가야 한다.
-    // 「새 소식」 알약은 세지 않는다: 이미 화면에 있는 카드가 자라는 것은
-    // 새로 온 소식이 아니다.
-  }, [visible.length, clockCount, narrationCount, illustrationCount]);
+    // 오프닝 카드도 같은 이유로 존재 여부를 의존성에 더한다 — 늦게 도착해
+    // 카드 높이를 바꾸는데 이것을 안 세면 바닥에 붙어 있던 사람이 그만큼
+    // 위로 밀린다. 「새 소식」 알약은 세지 않는다: 이미 화면에 있는 카드가
+    // 자라는 것은 새로 온 소식이 아니다.
+  }, [visible.length, clockCount, narrationCount, illustrationCount, opening !== null]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -126,45 +147,77 @@ export function StoryPane({
     <main className="pane pane--story">
       <div className="story" ref={scrollRef}>
         <div className="story__inner">
-          {visible.length === 0 ? (
+          {opening !== null || visible.length > 0 ? (
+            <>
+              {/* 오프닝은 턴이 아니다 — `groupTurns`를 지나가지 않고 이야기
+                  판 맨 위에 따로 그린다(D-01, `.turn__head`/`.turn__quote`
+                  없는 변형). */}
+              {opening !== null ? <OpeningCard text={opening.text} /> : null}
+              {visible.map((turn, turnIndex) => (
+                <div key={turn.declareSeq}>
+                  <TurnCard
+                    turn={turn}
+                    actorName={nameOf(turn.playerId)}
+                    isLatest={turnIndex === visible.length - 1}
+                    justRevealed={justRevealedSeq === turn.check?.seq}
+                    failed={failedDeclareSeqs.has(turn.declareSeq)}
+                    imageUrl={turn.illustration?.image_path ?? null}
+                    calculation={
+                      turn.check === null ? null : (calculations.get(turn.check.seq) ?? null)
+                    }
+                  />
+                  {turn.clock !== null ? (
+                    <div
+                      className="clock-banner"
+                      style={{ marginTop: "var(--space-md)" }}
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <span className="clock-banner__mark">◆</span>
+                      <div>
+                        <div className="clock-banner__text">
+                          위협 시계가 {Math.min(turn.clock.segment_index, segmentCount)}/
+                          {segmentCount}칸으로 넘어갔습니다
+                        </div>
+                        <div className="clock-banner__sub">
+                          {clockAdvanceReason(turn.clock.trigger)}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </>
+          ) : openingPending ? (
+            // 명단이 잠긴 뒤 오프닝 호출이 도는 동안(D-02) — 새 스피너·새
+            // 애니메이션을 만들지 않고 기존 `Waiting`을 그대로 쓴다.
+            <div className="empty">
+              <Waiting label={COPY.openingWaiting} />
+            </div>
+          ) : openingError !== null ? (
+            // 오프닝 API 요청 자체가 실패했을 때만 온다(D-09) — AI가
+            // 이상하게 답한 갈래는 서버가 조용히 원문으로 대체하므로 여기
+            // 안 온다. 재시도가 또 실패해도 이 단추는 그대로 남는다 —
+            // 사람이 쥘 수 있는 유일한 복구 경로를 뺏지 않는다.
+            <div className="empty">
+              <p className="t-label">{openingError}</p>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={openingPending}
+                onClick={onRetryOpening}
+              >
+                {COPY.openingRetry}
+              </button>
+            </div>
+          ) : (
+            // 명단이 아직 안 잠긴 극히 짧은 창(D-01) — 기존 빈 화면
+            // 문구를 그대로 쓴다. 새 문구를 만들지 않는다.
             <div className="empty">
               <span className="empty__mark">✦</span>
               <p className="t-heading">{COPY.emptyHeading}</p>
               <p className="t-label">{COPY.emptyBody}</p>
             </div>
-          ) : (
-            visible.map((turn, turnIndex) => (
-              <div key={turn.declareSeq}>
-                <TurnCard
-                  turn={turn}
-                  actorName={nameOf(turn.playerId)}
-                  isLatest={turnIndex === visible.length - 1}
-                  justRevealed={justRevealedSeq === turn.check?.seq}
-                  failed={failedDeclareSeqs.has(turn.declareSeq)}
-                  imageUrl={turn.illustration?.image_path ?? null}
-                  calculation={turn.check === null ? null : (calculations.get(turn.check.seq) ?? null)}
-                />
-                {turn.clock !== null ? (
-                  <div
-                    className="clock-banner"
-                    style={{ marginTop: "var(--space-md)" }}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span className="clock-banner__mark">◆</span>
-                    <div>
-                      <div className="clock-banner__text">
-                        위협 시계가 {Math.min(turn.clock.segment_index, segmentCount)}/
-                        {segmentCount}칸으로 넘어갔습니다
-                      </div>
-                      <div className="clock-banner__sub">
-                        {clockAdvanceReason(turn.clock.trigger)}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ))
           )}
         </div>
       </div>

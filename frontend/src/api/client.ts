@@ -24,6 +24,7 @@ import type {
   MoveCandidate,
   MyCharacterResponse,
   NominateSpeakerResponse,
+  OpeningResponse,
   PollResponse,
   ProceedResponse,
   SeqResponse,
@@ -385,5 +386,24 @@ export function proceed(
     player_id: playerId,
     character_id: characterId,
     declare_seq: declareSeq,
+  });
+}
+
+/**
+ * 판정 없이 장면을 연다(SCENE-01, D-01/D-02/D-06) — `declare_seq`가 없는
+ * 세 번째 진입점. `scenarioId`를 생략하면 서버 기본값(`LAMPLIGHT_VIGIL_ID`)
+ * 을 쓴다. 화면이 명단 잠금을 감지하고 스스로 부르지만, 겹친 탭이 409를
+ * 받을 수 있고(다른 탭이 지금 부르는 중) 서버 설정 미비가 503을 낼 수
+ * 있다 — 호출부가 상태 코드로 갈라야 하므로 `postJsonWithDetail`을 쓴다
+ * (D-15).
+ */
+export function openScene(
+  sessionId: string,
+  characterId: string,
+  scenarioId?: string,
+): Promise<OpeningResponse> {
+  return postJsonWithDetail<OpeningResponse>(`${sessionBase(sessionId)}/opening`, {
+    character_id: characterId,
+    ...(scenarioId !== undefined ? { scenario_id: scenarioId } : {}),
   });
 }
