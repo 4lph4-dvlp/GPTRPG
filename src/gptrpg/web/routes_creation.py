@@ -72,15 +72,20 @@ from gptrpg.session_actor.actor import (
     AlreadyGmSpoken,
     AlreadyOccupied,
     ClaimCreationHost,
+    ClaimGmSlot,
     CommandRejected,
     CompleteCreationStep,
     CreateCharacter,
     FixPartySize,
+    GmSlotBusy,
+    GmSlotClaimed,
+    GmSlotReleased,
     LockPartyRoster,
     OccupyCharacter,
     RecordConsent,
     RecordGmSpoke,
     RecordInterjection,
+    ReleaseGmSlot,
     ReopenCreationStep,
     RosterAlreadyLocked,
 )
@@ -793,6 +798,15 @@ async def announce_creation(
     「이미 말했나」를 AI를 부르기 **전에** 본다 — 이미 기록에 있으면
     제공자 해석조차 하지 않는다(제공자 설정이 없어도 화면이 지난 안내를
     볼 수 있어야 한다).
+
+    **D-02/D-03(13-02) — 큐 밖 사전 검사 다음에 슬롯을 잡는다.** 위 캐시
+    조회는 단일 소비자 큐 밖의 일반 속성 읽기라 겹친 두 요청이 둘 다
+    통과할 수 있다(13-RESEARCH.md Pitfall 1). 아래 슬롯 명령이 큐 **안**에서
+    그 뒤를 막는다 — 슬롯을 못 딴 쪽은 AI를 아예 안 부르고 409로 끝난다
+    (`web/routes_actions.py`의 오프닝 라우트가 이미 쓰는 모양을 그대로
+    옮긴다). `AlreadyGmSpoken` 단락은 지우지 않는다 — 슬롯은 「동시」를
+    막고 그 단락은 「이미 끝남」(슬롯이 풀린 뒤 늦게 온 요청)을 막는다,
+    둘 다 필요하다.
     """
     actor = request.app.state.registry.get_or_create(session_id)
     if actor.state.party_roster is not None:
@@ -809,27 +823,43 @@ async def announce_creation(
         return AnnounceCreationResponse(message=already_said.say, seq=already_said.seq)
 
     try:
-        provider, model = _resolve_creation_gm_provider(request)
-    except _AGENT_RESOLUTION_ERRORS as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        await actor.submit(ClaimGmSlot(slot_key=key))
+    except GmSlotClaimed:
+        pass  # 슬롯을 땄다 — 그대로 진행한다(사건은 안 남는다).
+    except GmSlotBusy as exc:
+        # 다른 탭이 지금 같은 안내를 부르는 중이다 — 화면은 폴링으로
+        # 결과를 받는다(D-02).
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    message = await asyncio.to_thread(announce_requirements, rulebook, provider, model)
     try:
-        seq = await actor.submit(
-            RecordGmSpoke(kind="announce", say=message, target_character_id=None, dedupe_key=key)
-        )
-    except AlreadyGmSpoken as exc:
-        # CR-04: 겹친 두 요청이 둘 다 위 `already_said is None`을 보고
-        # 여기까지 왔다 — 액터 큐 안의 단락이 두 번째를 잡았으니 첫 번째가
-        # 이미 기록한 값을 그대로 재사용한다(AI는 여전히 두 번 불렸을 수
-        # 있지만, 기록·최종 상태는 하나로 수렴한다).
-        return AnnounceCreationResponse(message=exc.prior.say, seq=exc.prior.seq)
-    except RosterAlreadyLocked as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except CommandRejected as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SequenceConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        try:
+            provider, model = _resolve_creation_gm_provider(request)
+        except _AGENT_RESOLUTION_ERRORS as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        message = await asyncio.to_thread(announce_requirements, rulebook, provider, model)
+        try:
+            seq = await actor.submit(
+                RecordGmSpoke(kind="announce", say=message, target_character_id=None, dedupe_key=key)
+            )
+        except AlreadyGmSpoken as exc:
+            # CR-04: 슬롯이 있어도 이 단락은 남긴다 — 슬롯이 풀린 뒤
+            # 늦게 도착한 요청(「이미 끝남」)은 슬롯을 새로 따지만 이미
+            # 기록된 값이 있으므로 여기서 잡혀 그 값을 재사용한다.
+            return AnnounceCreationResponse(message=exc.prior.say, seq=exc.prior.seq)
+        except RosterAlreadyLocked as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CommandRejected as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SequenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        # 제공자 해석·AI 호출 어느 쪽이 실패해도(또는 위에서 다른 예외가
+        # 나도) 슬롯이 영구히 잠기지 않는다(T-13-08).
+        try:
+            await actor.submit(ReleaseGmSlot(slot_key=key))
+        except GmSlotReleased:
+            pass
     return AnnounceCreationResponse(message=message, seq=seq)
 
 
@@ -896,63 +926,85 @@ async def nominate_creation_speaker(
             seq=already_said.seq,
         )
 
-    transcript = _transcript_for(state, candidates)
+    # D-02/D-03(13-02) — announce와 같은 슬롯 자리. 이 키는 위
+    # `_gm_dedupe_key` + `forfeited_nomination_mark`가 만든 최종 문자열
+    # 그대로다(캐시 조회가 쓰는 것과 같은 값이어야 슬롯과 dedupe 기준이
+    # 두 벌로 안 갈라진다).
     try:
-        rulebook = get_rulebook(body.rulebook_id)
-    except UnknownRulebook as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # GM이 사람을 부를 때 쓸 이름(G-12.3-10) — 내부 식별자가 사람 화면까지
-    # 새어 나가던 자리다(D-15).
-    labels = {
-        candidate: creation_state.display_label(state, rulebook, candidate)
-        for candidate in candidates
-    }
+        await actor.submit(ClaimGmSlot(slot_key=key))
+    except GmSlotClaimed:
+        pass
+    except GmSlotBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     try:
-        provider, model = _resolve_creation_gm_provider(request)
-    except _AGENT_RESOLUTION_ERRORS as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        transcript = _transcript_for(state, candidates)
+        try:
+            rulebook = get_rulebook(body.rulebook_id)
+        except UnknownRulebook as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # GM이 사람을 부를 때 쓸 이름(G-12.3-10) — 내부 식별자가 사람 화면까지
+        # 새어 나가던 자리다(D-15).
+        labels = {
+            candidate: creation_state.display_label(state, rulebook, candidate)
+            for candidate in candidates
+        }
 
-    try:
-        nomination = await asyncio.to_thread(
-            partial(
-                nominate_speaker,
-                candidates,
-                transcript,
-                provider,
-                model,
-                labels=labels,
-            )
-        )
-        character_id, say = nomination.character_id, nomination.say
-    except CreationGmContractViolation as exc:
-        print(f"경고: creation_gm 지목이 계약을 어겼다 — {exc}", file=sys.stderr)
-        character_id = candidates[0]
-        say = f"{labels.get(character_id, character_id)} 님, 이야기를 들려주시겠어요?"
+        try:
+            provider, model = _resolve_creation_gm_provider(request)
+        except _AGENT_RESOLUTION_ERRORS as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    try:
-        seq = await actor.submit(
-            RecordGmSpoke(
-                kind="nominate", say=say, target_character_id=character_id, dedupe_key=key
+        try:
+            nomination = await asyncio.to_thread(
+                partial(
+                    nominate_speaker,
+                    candidates,
+                    transcript,
+                    provider,
+                    model,
+                    labels=labels,
+                )
             )
-        )
-    except AlreadyGmSpoken as exc:
-        # CR-04: announce와 같은 이유 — 겹친 두 요청의 두 번째를 큐 안의
-        # 단락이 잡았다. `already_said.target_character_id`가 있어야만
-        # 재사용하는 위 조회와 같은 불변식을 지킨다(target_character_id는
-        # nominate가 항상 채우므로 여기서는 항상 있다).
-        prior_target = exc.prior.target_character_id
-        if prior_target is not None:
-            return NominateSpeakerResponse(
-                character_id=prior_target, say=exc.prior.say, seq=exc.prior.seq
+            character_id, say = nomination.character_id, nomination.say
+        except CreationGmContractViolation as exc:
+            print(f"경고: creation_gm 지목이 계약을 어겼다 — {exc}", file=sys.stderr)
+            character_id = candidates[0]
+            say = f"{labels.get(character_id, character_id)} 님, 이야기를 들려주시겠어요?"
+
+        try:
+            seq = await actor.submit(
+                RecordGmSpoke(
+                    kind="nominate", say=say, target_character_id=character_id, dedupe_key=key
+                )
             )
-        raise HTTPException(status_code=409, detail="이미 기록된 GM 말을 재사용할 수 없다") from exc
-    except RosterAlreadyLocked as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except CommandRejected as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SequenceConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except AlreadyGmSpoken as exc:
+            # CR-04: announce와 같은 이유 — 슬롯이 풀린 뒤 늦게 도착한
+            # 요청(「이미 끝남」)을 이 단락이 잡는다.
+            # `already_said.target_character_id`가 있어야만 재사용하는 위
+            # 조회와 같은 불변식을 지킨다(target_character_id는 nominate가
+            # 항상 채우므로 여기서는 항상 있다).
+            prior_target = exc.prior.target_character_id
+            if prior_target is not None:
+                return NominateSpeakerResponse(
+                    character_id=prior_target, say=exc.prior.say, seq=exc.prior.seq
+                )
+            raise HTTPException(
+                status_code=409, detail="이미 기록된 GM 말을 재사용할 수 없다"
+            ) from exc
+        except RosterAlreadyLocked as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CommandRejected as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SequenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        # 제공자 해석·AI 호출 어느 쪽이 실패해도 슬롯이 영구히 잠기지
+        # 않는다(T-13-08).
+        try:
+            await actor.submit(ReleaseGmSlot(slot_key=key))
+        except GmSlotReleased:
+            pass
 
     return NominateSpeakerResponse(character_id=character_id, say=say, seq=seq)
 
@@ -1080,62 +1132,85 @@ async def creation_follow_up(
             seq=already_said.seq,
         )
 
-    step_labels = tuple(step.label for step in rulebook.creation_steps)
-    transcript = _transcript_for(state, (body.character_id,))
+    # D-02/D-03(13-02) — announce와 같은 슬롯 자리, 상한 갈래(위)와 캐시
+    # 조회(위) **뒤**에 둔다. 상한 갈래는 AI를 아예 안 부르므로 슬롯을
+    # 잡았다 놓는 헛일을 할 이유가 없다.
+    try:
+        await actor.submit(ClaimGmSlot(slot_key=key))
+    except GmSlotClaimed:
+        pass
+    except GmSlotBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     try:
-        provider, model = _resolve_creation_gm_provider(request)
-    except _AGENT_RESOLUTION_ERRORS as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        step_labels = tuple(step.label for step in rulebook.creation_steps)
+        transcript = _transcript_for(state, (body.character_id,))
 
-    try:
-        follow_up = await asyncio.to_thread(judge_hooks, step_labels, transcript, provider, model)
-        # `judge_hooks`는 제공자가 두 번 다 실패해도 예외를 안 던지고
-        # 되묻지 않는 것으로 폴백한다(ARCH-05) — 그 경우를 이 칸이 알린다.
-        gm_answered = follow_up.gm_answered
-    except CreationGmContractViolation as exc:
-        print(f"경고: creation_gm 되묻기가 계약을 어겼다 — {exc}", file=sys.stderr)
-        follow_up = CreationGmFollowUp(needs_more=False, question=None)
-        gm_answered = False
+        try:
+            provider, model = _resolve_creation_gm_provider(request)
+        except _AGENT_RESOLUTION_ERRORS as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    if not follow_up.needs_more:
-        # 되물을 것이 없으면 GM이 아무 말도 안 한 것이다(D-02 ④) — 대화
-        # 줄기에 남길 말이 없으므로 사건을 남기지 않는다(RecordGmSpoke는
-        # 빈 say를 거절하기도 한다). 중복 방지도 필요 없다 — 값이 안
-        # 바뀐 동안 다시 눌러도 같은 판정(needs_more=False)이 나오므로
-        # 비용은 AI를 한 번 더 부르는 것뿐이다.
-        return CreationFollowUpResponse(
-            needs_more=False,
-            question=None,
-            required_steps_filled=required_steps_filled,
-            gm_answered=gm_answered,
-            seq=None,
-        )
-
-    try:
-        seq = await actor.submit(
-            RecordGmSpoke(
-                kind="follow_up",
-                say=follow_up.question,
-                target_character_id=body.character_id,
-                dedupe_key=key,
+        try:
+            follow_up = await asyncio.to_thread(
+                judge_hooks, step_labels, transcript, provider, model
             )
-        )
-    except AlreadyGmSpoken as exc:
-        # CR-04: announce와 같은 이유. `already_said.say`가 채워져 있으므로
-        # (RecordGmSpoke가 빈 say를 거절한다) needs_more는 항상 True다.
-        return CreationFollowUpResponse(
-            needs_more=True,
-            question=exc.prior.say,
-            required_steps_filled=required_steps_filled,
-            seq=exc.prior.seq,
-        )
-    except RosterAlreadyLocked as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except CommandRejected as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SequenceConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+            # `judge_hooks`는 제공자가 두 번 다 실패해도 예외를 안 던지고
+            # 되묻지 않는 것으로 폴백한다(ARCH-05) — 그 경우를 이 칸이 알린다.
+            gm_answered = follow_up.gm_answered
+        except CreationGmContractViolation as exc:
+            print(f"경고: creation_gm 되묻기가 계약을 어겼다 — {exc}", file=sys.stderr)
+            follow_up = CreationGmFollowUp(needs_more=False, question=None)
+            gm_answered = False
+
+        if not follow_up.needs_more:
+            # 되물을 것이 없으면 GM이 아무 말도 안 한 것이다(D-02 ④) — 대화
+            # 줄기에 남길 말이 없으므로 사건을 남기지 않는다(RecordGmSpoke는
+            # 빈 say를 거절하기도 한다). 중복 방지도 필요 없다 — 값이 안
+            # 바뀐 동안 다시 눌러도 같은 판정(needs_more=False)이 나오므로
+            # 비용은 AI를 한 번 더 부르는 것뿐이다. **사건이 없어 캐시가
+            # 안 생기므로, 같은 키로 다시 부르면 슬롯을 다시 거친다** —
+            # 이 finally가 없으면 그 다음 호출이 영원히 409로 막힌다
+            # (T-13-08).
+            return CreationFollowUpResponse(
+                needs_more=False,
+                question=None,
+                required_steps_filled=required_steps_filled,
+                gm_answered=gm_answered,
+                seq=None,
+            )
+
+        try:
+            seq = await actor.submit(
+                RecordGmSpoke(
+                    kind="follow_up",
+                    say=follow_up.question,
+                    target_character_id=body.character_id,
+                    dedupe_key=key,
+                )
+            )
+        except AlreadyGmSpoken as exc:
+            # CR-04: announce와 같은 이유 — 슬롯이 풀린 뒤 늦게 도착한
+            # 요청(「이미 끝남」)을 이 단락이 잡는다. `already_said.say`가
+            # 채워져 있으므로(RecordGmSpoke가 빈 say를 거절한다)
+            # needs_more는 항상 True다.
+            return CreationFollowUpResponse(
+                needs_more=True,
+                question=exc.prior.say,
+                required_steps_filled=required_steps_filled,
+                seq=exc.prior.seq,
+            )
+        except RosterAlreadyLocked as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CommandRejected as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SequenceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        try:
+            await actor.submit(ReleaseGmSlot(slot_key=key))
+        except GmSlotReleased:
+            pass
 
     return CreationFollowUpResponse(
         needs_more=True,
@@ -1229,32 +1304,69 @@ async def wrap_up_creation(
             seq=already_said.seq,
         )
 
-    transcript = _transcript_for(state, character_ids)
+    # D-02/D-03(13-02) — announce와 같은 슬롯 자리, 캐시 조회(위) 뒤에 둔다.
+    try:
+        await actor.submit(ClaimGmSlot(slot_key=key))
+    except GmSlotClaimed:
+        pass
+    except GmSlotBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     try:
-        provider, model = _resolve_creation_gm_provider(request)
-    except _AGENT_RESOLUTION_ERRORS as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        transcript = _transcript_for(state, character_ids)
 
-    try:
-        result = await asyncio.to_thread(wrap_up, fallback_intros, transcript, provider, model)
-    except CreationGmContractViolation as exc:
-        print(f"경고: creation_gm 정리가 계약을 어겼다 — {exc}", file=sys.stderr)
-        result = CreationGmWrapUp(
-            intros=fallback_intros, say="다들 준비되셨나요? 이렇게 게임을 진행할까요?"
-        )
-
-    intro_by_id = dict(result.intros)
-    for character_id in character_ids:
-        entity = state.created_characters[character_id]
         try:
-            await actor.submit(
-                CreateCharacter(
-                    character_id=character_id,
-                    browser_id=state.occupied_by.get(character_id, ""),
-                    rulebook_id=entity.rulebook_id,
-                    one_line_intro=intro_by_id.get(character_id, entity.display_name),
+            provider, model = _resolve_creation_gm_provider(request)
+        except _AGENT_RESOLUTION_ERRORS as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        try:
+            result = await asyncio.to_thread(
+                wrap_up, fallback_intros, transcript, provider, model
+            )
+        except CreationGmContractViolation as exc:
+            print(f"경고: creation_gm 정리가 계약을 어겼다 — {exc}", file=sys.stderr)
+            result = CreationGmWrapUp(
+                intros=fallback_intros, say="다들 준비되셨나요? 이렇게 게임을 진행할까요?"
+            )
+
+        intro_by_id = dict(result.intros)
+        for character_id in character_ids:
+            entity = state.created_characters[character_id]
+            try:
+                await actor.submit(
+                    CreateCharacter(
+                        character_id=character_id,
+                        browser_id=state.occupied_by.get(character_id, ""),
+                        rulebook_id=entity.rulebook_id,
+                        one_line_intro=intro_by_id.get(character_id, entity.display_name),
+                    )
                 )
+            except RosterAlreadyLocked as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except CommandRejected as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except SequenceConflict as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        try:
+            seq = await actor.submit(
+                RecordGmSpoke(
+                    kind="wrap_up", say=result.say, target_character_id=None, dedupe_key=key
+                )
+            )
+        except AlreadyGmSpoken as exc:
+            # CR-04: announce와 같은 이유 — 슬롯이 풀린 뒤 늦게 도착한
+            # 요청(「이미 끝남」)을 이 단락이 잡는다. `intros`는 위
+            # `already_said` 이른 반환과 같은 방식으로 `fallback_intros`
+            # 에서 다시 조립한다 — 제공자를 다시 부르지 않는다(D-12).
+            return WrapUpCreationResponse(
+                say=exc.prior.say,
+                intros=[
+                    CharacterIntroBody(character_id=character_id, intro=intro)
+                    for character_id, intro in fallback_intros
+                ],
+                seq=exc.prior.seq,
             )
         except RosterAlreadyLocked as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1262,29 +1374,13 @@ async def wrap_up_creation(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except SequenceConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    try:
-        seq = await actor.submit(
-            RecordGmSpoke(kind="wrap_up", say=result.say, target_character_id=None, dedupe_key=key)
-        )
-    except AlreadyGmSpoken as exc:
-        # CR-04: announce와 같은 이유. `intros`는 위 `already_said` 이른
-        # 반환과 같은 방식으로 `fallback_intros`에서 다시 조립한다 —
-        # 제공자를 다시 부르지 않는다(D-12).
-        return WrapUpCreationResponse(
-            say=exc.prior.say,
-            intros=[
-                CharacterIntroBody(character_id=character_id, intro=intro)
-                for character_id, intro in fallback_intros
-            ],
-            seq=exc.prior.seq,
-        )
-    except RosterAlreadyLocked as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except CommandRejected as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except SequenceConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        # 제공자 해석·AI 호출·`CreateCharacter` 재제출 어느 단계가
+        # 실패해도 슬롯이 영구히 잠기지 않는다(T-13-08).
+        try:
+            await actor.submit(ReleaseGmSlot(slot_key=key))
+        except GmSlotReleased:
+            pass
 
     return WrapUpCreationResponse(
         say=result.say,
