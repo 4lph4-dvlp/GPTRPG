@@ -14,12 +14,15 @@ import pytest
 from gptrpg.agents.action_classifier import (
     MAX_CANDIDATES,
     NO_CHECK_SIGNAL,
+    NO_TARGET,
     MoveCandidate,
     Proposal,
+    TargetClaim,
     UnknownItemFromAI,
     UnknownMove,
     _inventory_slot_items,
     _parse_item_use,
+    _parse_target,
     classify,
 )
 from gptrpg.agents.context import (
@@ -32,6 +35,7 @@ from gptrpg.agents.context import (
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.prompt_assembly import _format_moves, build_classifier_prompt
 from gptrpg.rules_core.entities import Entity, StatEntry
+from gptrpg.rules_core.scenario import normalize_entity_name
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID, EXAMPLE_SINGLE_STAT_FOE
 from gptrpg.rulebooks.moves import get_moves
 
@@ -425,7 +429,7 @@ def test_classify_unknown_move_does_not_increase_provider_call_count(fake_provid
 def test_proposal_field_names_have_no_confidence_slot():
     field_names = frozenset(f.name for f in fields(Proposal))
     assert field_names == frozenset(
-        {"candidates", "ai", "unknown_move", "no_check", "item_use"}
+        {"candidates", "ai", "unknown_move", "no_check", "item_use", "target"}
     )
     for name in field_names:
         assert "confidence" not in name
@@ -733,3 +737,242 @@ def test_classify_holds_exact_match_item_from_filled_slots(fake_provider):
         rulebook_display_name="Cairn",
     )
     assert proposal.item_use == ItemUseClaim(item="장검", kind="held")
+
+
+# ---------------------------------------------------------------------------
+# 13-05 Task 1: _parse_target — 대상 판단(SCENE-04, D-13①)
+#
+# `_parse_item_use`와의 핵심 차이: 목록 밖은 예외 흡수가 아니라 정상
+# 반환(`presence="unknown"`)이다 — SCENE-04가 다루라고 요구하는 정당한
+# 갈래이기 때문이다.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_target_silence_yields_none_presence():
+    """`target` 키가 있는 원소가 아예 없으면 침묵을 "대상 없음"으로 읽는다."""
+    raw = json.dumps([{"move": "parley", "stat": "CHA"}])
+    claim = _parse_target(raw, {})
+    assert claim == TargetClaim(name=None, presence="none", kind=None)
+
+
+def test_parse_target_empty_array_yields_none_presence():
+    claim = _parse_target("[]", {})
+    assert claim == TargetClaim(name=None, presence="none", kind=None)
+
+
+def test_parse_target_empty_string_yields_none_presence():
+    raw = json.dumps([{"target": ""}])
+    claim = _parse_target(raw, {})
+    assert claim == TargetClaim(name=None, presence="none", kind=None)
+
+
+def test_parse_target_whitespace_only_yields_none_presence():
+    raw = json.dumps([{"target": "   "}])
+    claim = _parse_target(raw, {})
+    assert claim == TargetClaim(name=None, presence="none", kind=None)
+
+
+def test_parse_target_no_target_marker_yields_none_presence():
+    raw = json.dumps([{"target": NO_TARGET}])
+    claim = _parse_target(raw, {})
+    assert claim == TargetClaim(name=None, presence="none", kind=None)
+
+
+def test_parse_target_exact_match_in_allowed_list_yields_known():
+    allowed = {normalize_entity_name("우물지기 이슬"): "우물지기 이슬"}
+    raw = json.dumps([{"target": "우물지기 이슬"}])
+    claim = _parse_target(raw, allowed)
+    assert claim == TargetClaim(name="우물지기 이슬", presence="known", kind=None)
+
+
+def test_parse_target_normalization_difference_still_matches_known(fake_provider):
+    """분해형 한글·앞뒤 공백만 다른 값도 목록의 **원본 이름**으로 정해진다
+    (D-19) — 「우물지기 이슬」과 「이슬」이 갈라지는 것을 구조로 막는다."""
+    import unicodedata
+
+    decomposed = unicodedata.normalize("NFD", "우물지기 이슬")
+    allowed = {normalize_entity_name("우물지기 이슬"): "우물지기 이슬"}
+    raw = json.dumps([{"target": f"  {decomposed} "}])
+    claim = _parse_target(raw, allowed)
+    assert claim.presence == "known"
+    assert claim.name == "우물지기 이슬"
+
+
+def test_parse_target_not_in_allowed_list_yields_unknown_not_an_exception():
+    """목록 밖은 예외가 아니라 정상 반환이다 — `_parse_item_use`와의 핵심 차이."""
+    raw = json.dumps([{"target": "검은 개", "target_kind": "person"}])
+    claim = _parse_target(raw, {})
+    assert claim == TargetClaim(name="검은 개", presence="unknown", kind="person")
+
+
+def test_parse_target_unknown_thing_kind():
+    raw = json.dumps([{"target": "부서진 등불", "target_kind": "thing"}])
+    claim = _parse_target(raw, {})
+    assert claim == TargetClaim(name="부서진 등불", presence="unknown", kind="thing")
+
+
+def test_parse_target_unknown_missing_kind_yields_none_kind():
+    raw = json.dumps([{"target": "검은 개"}])
+    claim = _parse_target(raw, {})
+    assert claim == TargetClaim(name="검은 개", presence="unknown", kind=None)
+
+
+def test_parse_target_unknown_invalid_kind_value_yields_none_kind():
+    """`target_kind`가 닫힌 두 값 밖이면 `presence="unknown"`이어도
+    `kind=None`이다 — 임의로 person/thing 중 하나로 지어내지 않는다."""
+    raw = json.dumps([{"target": "검은 개", "target_kind": "monster"}])
+    claim = _parse_target(raw, {})
+    assert claim.presence == "unknown"
+    assert claim.kind is None
+
+
+def test_parse_target_malformed_element_is_skipped_not_a_crash():
+    raw = json.dumps([{"target": 123}, {"target": "검은 개"}])
+    claim = _parse_target(raw, {})
+    assert claim.presence == "unknown"
+    assert claim.name == "검은 개"
+
+
+# ---------------------------------------------------------------------------
+# 13-05 Task 1: classify() — 대상 통합
+# ---------------------------------------------------------------------------
+
+
+def test_classify_allowed_targets_none_skips_target_check_entirely(fake_provider):
+    """`allowed_targets=None`(기본값, `ScenarioDecl.target_check is False`인
+    시나리오가 이 경로를 쓴다)이면 프롬프트에 대상 칸이 안 붙고 결과는
+    항상 `presence="none"`이다 — 모델이 뭐라고 답하든 상관없다(D-22)."""
+    fake_provider.complete_value = json.dumps(
+        [{"move": "parley", "stat": "CHA", "target": "우물지기 이슬"}]
+    )
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="설득한다",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+    )
+    assert proposal.target == TargetClaim(name=None, presence="none", kind=None)
+    permanent_text, _session_text = (block["text"] for block in fake_provider.calls[0][0])
+    assert "target_kind" not in permanent_text
+
+
+def test_classify_allowed_targets_provided_known_target(fake_provider):
+    allowed = {normalize_entity_name("우물지기 이슬"): "우물지기 이슬"}
+    fake_provider.complete_value = json.dumps(
+        [{"move": "parley", "stat": "CHA", "target": "우물지기 이슬"}]
+    )
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="이슬을 설득한다",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+        allowed_targets=allowed,
+    )
+    assert proposal.target == TargetClaim(name="우물지기 이슬", presence="known", kind=None)
+
+
+def test_classify_provider_failure_leaves_target_default(fake_provider):
+    """제공자 실패 경로에서는 대상도 기본값 그대로다 — 응답이 없는 상황이
+    「대상을 골랐다」로 새지 않는다."""
+
+    class _AlwaysFails:
+        name = "fake"
+
+        def list_models(self):
+            return []
+
+        def complete(self, **kwargs):
+            return AgentResult(ok=False, value=None, elapsed_ms=1, prompt_tokens=0, completion_tokens=0)
+
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=_AlwaysFails(),
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+        allowed_targets={"이슬": "우물지기 이슬"},
+    )
+    assert proposal.target == TargetClaim(name=None, presence="none", kind=None)
+
+
+def test_classify_unknown_move_absorption_still_carries_target(fake_provider):
+    """무브 목록 위반(`UnknownMove`)이 흡수돼도 대상 판단은 독립적으로
+    살아남는다 — 대상 판단은 무브 판단과 별개다."""
+    fake_provider.complete_value = json.dumps(
+        [{"move": "no-such-move"}, {"target": "우물지기 이슬"}]
+    )
+    allowed = {normalize_entity_name("우물지기 이슬"): "우물지기 이슬"}
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+    proposal = classify(
+        provider=fake_provider,
+        model="fake-model",
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        moves=moves,
+        rulebook_display_name="Dungeonworld-like",
+        allowed_targets=allowed,
+    )
+    assert proposal.unknown_move == "no-such-move"
+    assert proposal.tier == "unclear"
+    assert proposal.target == TargetClaim(name="우물지기 이슬", presence="known", kind=None)
+
+
+def test_classify_tier_is_unaffected_by_target_value(fake_provider):
+    """대상이 무엇이든(known/unknown/none) 같은 후보 목록이면 같은
+    `tier`가 나온다 — 대상은 `tier` 계산에 끼어들지 않는다."""
+    moves = get_moves(DUNGEONWORLD_LIKE_ID)
+
+    def _tier_for(target_element: dict | None) -> str:
+        payload = [{"move": "parley", "stat": "CHA"}]
+        if target_element is not None:
+            payload.append(target_element)
+        fake_provider.complete_value = json.dumps(payload)
+        return classify(
+            provider=fake_provider,
+            model="fake-model",
+            ctx=_ctx(),
+            raw_text="문장",
+            moves=moves,
+            rulebook_display_name="Dungeonworld-like",
+            allowed_targets={},
+        ).tier
+
+    tiers = {
+        _tier_for(None),
+        _tier_for({"target": NO_TARGET}),
+        _tier_for({"target": "검은 개", "target_kind": "person"}),
+    }
+    assert tiers == {"single"}
+
+
+def test_classifier_prompt_mentions_target_selection_when_allowed_targets_given():
+    system, _messages = build_classifier_prompt(
+        rulebook_display_name="Dungeonworld-like",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        allowed_targets={"이슬": "우물지기 이슬"},
+    )
+    permanent_text = system[0]["text"]
+    assert NO_TARGET in permanent_text
+    assert "target_kind" in permanent_text
+
+
+def test_classifier_prompt_omits_target_selection_when_allowed_targets_is_none():
+    system, _messages = build_classifier_prompt(
+        rulebook_display_name="Dungeonworld-like",
+        moves=get_moves(DUNGEONWORLD_LIKE_ID),
+        ctx=_ctx(),
+        raw_text="아무 문장",
+        allowed_targets=None,
+    )
+    permanent_text = system[0]["text"]
+    assert "target_kind" not in permanent_text

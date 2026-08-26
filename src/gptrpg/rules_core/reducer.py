@@ -112,6 +112,27 @@ class EmergedEntityFold:
 
 
 @dataclass(frozen=True)
+class TargetFold:
+    """대상 지목 하나가 접힌 결과 — `action_classified` 사건의 대상 세
+    칸을 그대로 옮긴다(판 14+, Phase 13-05, SCENE-04, D-13①).
+
+    `GameState.declare_targets`가 이 dataclass를 `declare_seq`로 찾는
+    표다 — `ConfirmedDeclareRecord`/`CreationStepFold`와 같은 자리·같은
+    형식이다. `presence == "none"`이면 `name`/`kind`가 둘 다 `None`이다.
+    """
+
+    name: str | None
+    presence: str
+    kind: str | None
+
+
+NO_TARGET_FOLD = TargetFold(name=None, presence="none", kind=None)
+"""`GameState.declare_targets`에 `declare_seq`가 없을 때 쓰는 「대상
+없음」 값(판 14+, D-13①) — `GameState.declare_targets` 도크스트링의
+「모르면 어떻게 하나」 규칙이 돌려주는 값이다."""
+
+
+@dataclass(frozen=True)
 class GameState:
     """사건 기록을 처음부터 훑어 만드는 현재 상태.
 
@@ -188,6 +209,18 @@ class GameState:
     선언이 실제로 `no_check`로 분류됐다는 증거가 없다"는 뜻이고, 그것을
     통과시키면 이 표가 막으려는 구멍(판정이 필요한 선언을 판정 없이 진행)이
     다시 열린다."""
+    declare_targets: dict[int, TargetFold] = field(default_factory=dict)
+    """선언 순번(declare_seq) -> 그 선언이 지목한 대상(판 14+, Phase 13-05,
+    SCENE-04, D-13①). `action_classified` 사건에서만 채워진다 —
+    `declare_no_check`와 같은 사건, 같은 자리다. 확인·진행 시점에 서버가
+    이 표를 다시 읽어 열림/닫힘을 판단한다 — 클라이언트가 보낸 값을
+    믿지 않는다(ASVS V5).
+
+    **`declare_no_check`와 같은 「모르면 어떻게 하나」 규칙:** `declare_seq`가
+    이 표에 없으면 `NO_TARGET_FOLD`(「대상 없음」)로 읽는다(아래 소비부는
+    `.get(declare_seq, NO_TARGET_FOLD)`를 쓴다). 판 14 미만 기록(대상
+    칸이 아예 없던 시절)이 이 표에 들어오지 않는 것이 바로 이 경우다 —
+    「목록 밖을 골랐다」로 읽으면 옛 기록이 전부 즉흥 경로로 새어 든다."""
     character_resource_ops: dict[tuple[str, str], tuple[ResourceOp, ...]] = field(
         default_factory=dict
     )
@@ -467,18 +500,38 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
         # 난 사고).
         return replace(state, last_seq=seq)
     if event_type == "action_classified":
-        # 분류 결정 기록(판 7, 11-06 rework, T-11-29)은 게임 상태를 `declare_no_check`
-        # 표 하나 말고는 바꾸지 않는다 — 판정·실패 누적·시계 어디에도 안 닿는다
-        # (`scene_illustrated`/`safety_flagged` 분기와 같은 최소 모양 + 표 하나).
-        # **그래도 분기가 있어야 한다:** 이 분기가 없으면 이 종류가 하나라도 있는
-        # 세션이 폴링마다 UnknownEventType을 맞고 영구히 안 열린다(08-CONTEXT.md
-        # D-06, 이미 여러 번 난 사고 — 이 판 올리기와 이 분기는 반드시 같은 커밋).
+        # 분류 결정 기록(판 7, 11-06 rework, T-11-29 / 판 14, Phase 13-05
+        # SCENE-04)은 게임 상태를 `declare_no_check`·`declare_targets` 두
+        # 표 말고는 바꾸지 않는다 — 판정·실패 누적·시계 어디에도 안 닿는다
+        # (`scene_illustrated`/`safety_flagged` 분기와 같은 최소 모양 + 표
+        # 둘). **그래도 분기가 있어야 한다:** 이 분기가 없으면 이 종류가
+        # 하나라도 있는 세션이 폴링마다 UnknownEventType을 맞고 영구히 안
+        # 열린다(08-CONTEXT.md D-06, 이미 여러 번 난 사고 — 이 판 올리기와
+        # 이 분기는 반드시 같은 커밋).
         declare_seq = payload.get("caused_by_seq")
         declare_no_check = state.declare_no_check
+        declare_targets = state.declare_targets
         if declare_seq is not None:
             declare_no_check = dict(declare_no_check)
             declare_no_check[declare_seq] = payload["no_check"]
-        return replace(state, last_seq=seq, declare_no_check=declare_no_check)
+            # 판 14 미만 기록에는 target_presence 칸 자체가 없다(get이
+            # None을 돌려준다) — 그런 옛 기록은 이 표에 안 들어간다(위
+            # `GameState.declare_targets` 도크스트링의 「모르면 어떻게
+            # 하나」 규칙과 정합).
+            target_presence = payload.get("target_presence")
+            if target_presence is not None:
+                declare_targets = dict(declare_targets)
+                declare_targets[declare_seq] = TargetFold(
+                    name=payload.get("target_name"),
+                    presence=target_presence,
+                    kind=payload.get("target_kind"),
+                )
+        return replace(
+            state,
+            last_seq=seq,
+            declare_no_check=declare_no_check,
+            declare_targets=declare_targets,
+        )
     if event_type == "resource_changed":
         # 자원 변화 기록(판 8, Phase 12 D-05/D-65)은 「dict 복사 → 갱신 →
         # replace」 모양을 그대로 따른다(`character_occupied` 분기와 같은

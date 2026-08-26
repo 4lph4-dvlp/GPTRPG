@@ -285,6 +285,7 @@
   "creation_step_values": {},
   "declare_no_check": {},
   "declare_owners": {},
+  "declare_targets": {},
   "fails_since_clock": 0,
   "failure_count": 12,
   "last_grade": "strong_hit",

@@ -466,9 +466,16 @@ class RecordActionClassification:
     `_prepare_verify_proceed_eligibility`가 서버 재시작 뒤에도 필요로 하는
     것이 그 값 하나뿐이기 때문이다(`single`/`several`/`unclear` 구분은
     웹 응답의 `tier` 칸이 이미 담당하고, 서버 상태에 중복해서 담지 않는다).
-    """
+
+    `target_name`/`target_presence`/`target_kind`(판 14+, Phase 13-05,
+    SCENE-04, D-13①)는 `action_classifier.TargetClaim`을 그대로 옮긴다 —
+    확인/진행 시점에 서버가 `GameState.declare_targets`에서 이 값을 다시
+    읽는다(클라이언트가 보낸 값을 안 믿는다, ASVS V5)."""
 
     no_check: bool
+    target_name: str | None = None
+    target_presence: str = "none"
+    target_kind: str | None = None
     caused_by_seq: int | None = None
 
 
@@ -544,6 +551,7 @@ _VALID_RESOURCE_CHANGE_SOURCES = frozenset(
     {"outcome_list", "discretionary_ruling", "retro_declaration"}
 )
 _VALID_EMERGED_ENTITY_KINDS = frozenset({"person", "thing"})
+_VALID_TARGET_PRESENCE = frozenset({"known", "unknown", "none"})
 
 _EVENT_CLASSES: dict[str, type] = {
     "action_declared": ActionDeclared,
@@ -1463,14 +1471,39 @@ class SessionActor:
     def _prepare_record_action_classification(
         self, command: RecordActionClassification
     ) -> tuple[str, int | None, dict]:
-        """분류 결정 기록 — 이 명령 자체는 열린 값을 검증할 게 없다
-        (`no_check`는 불리언, `RecordSafetyFlag`류의 닫힌 목록 검증이
-        필요 없다). `caused_by_seq`만 존재하는 순번인지 확인한다."""
+        """분류 결정 기록 — `no_check`는 불리언이라 검증할 게 없지만
+        (`RecordSafetyFlag`류의 닫힌 목록 검증이 필요 없다), 판 14부터
+        늘어난 대상 세 칸은 이제 열린 값을 갖는다(SCENE-04, D-13①):
+        `target_presence`가 닫힌 세 값 밖이면, `target_kind`가 `person`/
+        `thing`/`None` 밖이면, `presence != "none"`인데 `name`이 비었으면
+        각각 `CommandRejected`다. `caused_by_seq`도 존재하는 순번인지
+        확인한다."""
         self._validate_caused_by(command.caused_by_seq)
+        if command.target_presence not in _VALID_TARGET_PRESENCE:
+            raise CommandRejected(
+                f"target_presence는 {sorted(_VALID_TARGET_PRESENCE)} 중 하나여야 한다: "
+                f"{command.target_presence!r}"
+            )
+        if command.target_kind is not None and command.target_kind not in _VALID_EMERGED_ENTITY_KINDS:
+            raise CommandRejected(
+                f"target_kind는 {sorted(_VALID_EMERGED_ENTITY_KINDS)} 또는 None이어야 한다: "
+                f"{command.target_kind!r}"
+            )
+        if command.target_presence != "none" and not (
+            command.target_name and command.target_name.strip()
+        ):
+            raise CommandRejected(
+                "target_presence가 'none'이 아니면 target_name이 비어 있을 수 없다"
+            )
         return (
             "action_classified",
             command.caused_by_seq,
-            {"no_check": command.no_check},
+            {
+                "no_check": command.no_check,
+                "target_name": command.target_name,
+                "target_presence": command.target_presence,
+                "target_kind": command.target_kind,
+            },
         )
 
     def _prepare_verify_proceed_eligibility(

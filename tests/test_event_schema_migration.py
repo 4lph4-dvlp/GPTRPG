@@ -356,11 +356,12 @@ def test_event_schema_version_was_twelve_before_phase_13_04():
     assert EVENT_SCHEMA_VERSION >= 12
 
 
-def test_event_schema_version_is_thirteen():
-    """판 13 못박기(Phase 13-04, D-13②) — 장면 대상 2층 적립
-    (`scene_entity_emerged`)이 사건 형식에 닿게 한 현재 판이다. 누가
-    무심코 판을 또 올리거나 내리면 이 값이 바뀌어 이 시험이 잡는다."""
-    assert EVENT_SCHEMA_VERSION == 13
+def test_event_schema_version_is_fourteen():
+    """판 14 못박기(Phase 13-05, SCENE-04, D-13①) — 대상 지목이
+    `action_classified` 사건에 칸 셋(target_name/target_presence/
+    target_kind)을 늘린 현재 판이다. 누가 무심코 판을 또 올리거나 내리면
+    이 값이 바뀌어 이 시험이 잡는다."""
+    assert EVENT_SCHEMA_VERSION == 14
 
 
 def _tuple_key_to_str(key: tuple) -> str:

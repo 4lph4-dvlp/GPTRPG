@@ -16,6 +16,7 @@ from gptrpg.agents.prompt_assembly import actor_stats, build_classifier_prompt
 from gptrpg.agents.providers.base import Provider
 from gptrpg.rules_core.entities import StatEntry
 from gptrpg.rules_core.rulebook import ResourceAxisDecl
+from gptrpg.rules_core.scenario import normalize_entity_name
 from gptrpg.rulebooks.moves import MoveDecl
 
 ProposalTier = Literal["single", "several", "no_check", "unclear"]
@@ -39,6 +40,14 @@ JSON 배열 안에 `{"no_check": true}` 원소 하나로 이 신호를 낸다 �
 `_parse_candidates`가 이 키를 가진 원소를 후보가 아니라 신호로 읽는다.
 지시문(`prompt_assembly.build_classifier_prompt`)도 이 상수에서 문자열을
 가져와 지시문과 파서가 다른 문자열을 쓰는 사고를 코드로 막는다."""
+
+
+NO_TARGET = "이 행동은 상대가 없다"
+"""모델이 「이 행동은 누구를·무엇을 상대로 하지 않는다」를 표시하는 예약
+문자열(SCENE-04, D-13①) — `agents.context.NO_ITEM_USED`와 같은 성격의
+예약 표식이다. 지시문(`prompt_assembly.build_classifier_prompt`)과
+파서(`_parse_target`)가 이 상수를 공유해 문구가 갈리는 사고를 코드로
+막는다(`NO_CHECK_SIGNAL`이 이미 세운 관례와 같다)."""
 
 
 class UnknownMove(Exception):
@@ -71,6 +80,37 @@ class MoveCandidate:
 
     move: str
     stat: str
+
+
+@dataclass(frozen=True)
+class TargetClaim:
+    """분류기가 낸 「이 행동이 누구를·무엇을 상대로 하는가」 판단 하나
+    (SCENE-04, D-13①) — `ItemUseClaim`(RULE-16, 12-06)과 같은 자리·같은
+    형식이다.
+
+    `presence="none"`이면 상대가 없는 행동이다(`name`/`kind`는 둘 다
+    `None`) — 모델이 `NO_TARGET`을 냈거나, `target` 키 자체가 없거나
+    (침묵을 「없음」으로 읽는다, `_parse_item_use`와 같은 규율), 값이
+    비었거나 공백뿐이다(즉흥 경로로 안 들어간다).
+
+    `presence="known"`이면 이번 세션의 닫힌 목록(1층+2층 `display_name`)에
+    정규화 뒤 완전 일치로 있었다는 뜻이고, `name`은 **모델이 낸 문자열이
+    아니라 목록에 있던 원본 이름**이다 — 「우물지기 이슬」과 「이슬」이
+    갈라지는 것을 구조로 막는다(D-19). `kind`는 이때 `None`이다 — 1층
+    시나리오 선언에는 종류 개념이 없다(`rules_core.scenario.RosterRow.kind`
+    도크스트링과 같은 이유).
+
+    `presence="unknown"`이면 닫힌 목록 밖을 지목했다는 뜻이다 — **이것은
+    계약 위반이 아니라 SCENE-04가 다루라고 요구하는 정당한 갈래다**
+    (아래 `_parse_target` 도크스트링 참조, `_parse_item_use`와의 핵심
+    차이). `name`은 모델이 낸 이름(정규화만 거친 값)이고, `kind`는 모델이
+    함께 낸 `"person"`/`"thing"` 중 하나 — 둘 중 하나도 아니거나 아예
+    없으면 `None`이다(그 처리는 대상 판단 헬퍼가 시나리오의 열림/닫힘
+    선언을 보고 정한다, Task 2)."""
+
+    name: str | None
+    presence: Literal["known", "unknown", "none"]
+    kind: Literal["person", "thing"] | None
 
 
 @dataclass(frozen=True)
@@ -107,6 +147,19 @@ class Proposal:
     `if not result.ok` 분기)가 이 칸을 건드리지 않고도 자동으로
     `tier == "unclear"`가 되게 한다 — 응답이 없는 상황이 "판정 없이
     진행해도 됨"으로 새지 않는다(T-11-17)."""
+    target: "TargetClaim" = TargetClaim(name=None, presence="none", kind=None)
+    """이 행동이 「누구를·무엇을 상대로」 하는지(SCENE-04, D-13①) — 소지품
+    사용(`item_use`, RULE-16, 12-06)이 세운 선례 그대로 새 AI 역할을 만들지
+    않고 이 분류기 출력에 칸 하나를 더한 것이다. `tier` 계산에 끼어들지
+    않는다 — 대상이 무엇이든 후보 개수와 `unknown_move`/`no_check`가 정하는
+    네 값이 그대로다.
+
+    **`item_use`와 다르게 「목록 밖」이 예외 흡수가 아니다.** `_parse_item_use`는
+    목록 밖 이름을 `UnknownItemFromAI`로 던져 「안 씀」으로 흡수한다 —
+    소지품은 목록 밖이 곧 계약 위반이기 때문이다. **대상은 다르다** — 목록
+    밖 지목은 SCENE-04가 명시적으로 다루라고 요구하는 정당한 갈래다. 그래서
+    `_parse_target`은 예외를 던지지 않고 `presence="unknown"`을 정상
+    반환한다."""
 
     @property
     def tier(self) -> ProposalTier:
@@ -229,6 +282,49 @@ def _parse_item_use(raw_text: str, allowed_items: frozenset[str]) -> ItemUseClai
     return ItemUseClaim(item=None, kind="none")
 
 
+def _parse_target(raw_text: str, allowed_targets: dict[str, str]) -> TargetClaim:
+    """모델이 돌려준 텍스트에서 `{"target": "...", "target_kind": "..."}`
+    원소를 찾아 `TargetClaim`으로 바꾼다(SCENE-04, D-13①).
+
+    값이 `NO_TARGET`이거나 비었거나 공백뿐이면 `presence="none"`. `target`
+    키가 있는 원소가 하나도 없으면(모델이 그 칸을 아예 안 채웠으면) 역시
+    `presence="none"`으로 떨어진다 — 침묵을 "상대 없음"으로 읽는다
+    (`_parse_item_use`와 같은 규율).
+
+    대조는 `rules_core.scenario.normalize_entity_name`으로 한다 — **이
+    함수가 자기 정규화 규칙을 새로 만들지 않는다.** 정규화한 값이
+    `allowed_targets`(정규화된 이름 -> 목록의 원본 이름 사전, 호출부가
+    만들어 넘긴다)에 있으면 `presence="known"`이고 **목록의 원본 이름**을
+    돌려준다(모델이 낸 문자열이 아니다, D-19). 목록 밖이면
+    `presence="unknown"`이고 모델이 낸 이름(정규화된 값)과, 함께 낸
+    `target_kind`가 `"person"`/`"thing"` 중 하나면 그 값을, 아니면 `None`을
+    담는다.
+
+    **`_parse_item_use`와 다르게 목록 밖이 예외 흡수가 아니다** — 이
+    함수는 어떤 경우에도 예외를 던지지 않는다. 소지품은 목록 밖 이름이 곧
+    계약 위반(RULE-16)이라 `UnknownItemFromAI`로 흡수하지만, 대상은
+    다르다 — 목록 밖 지목은 SCENE-04가 명시적으로 다루라고 요구하는
+    정당한 갈래이므로 `presence="unknown"`이 정상적으로 반환된다.
+    """
+    parsed = _try_parse_json_array(raw_text)
+    for entry in parsed:
+        if not isinstance(entry, dict) or "target" not in entry:
+            continue  # 형식이 깨진 원소 하나 때문에 턴 전체가 죽지 않는다
+        value = entry["target"]
+        if not isinstance(value, str):
+            continue
+        stripped = value.strip()
+        if not stripped or stripped == NO_TARGET:
+            return TargetClaim(name=None, presence="none", kind=None)
+        normalized_value = normalize_entity_name(value)
+        if normalized_value in allowed_targets:
+            return TargetClaim(name=allowed_targets[normalized_value], presence="known", kind=None)
+        kind_raw = entry.get("target_kind")
+        kind = kind_raw if kind_raw in ("person", "thing") else None
+        return TargetClaim(name=normalized_value, presence="unknown", kind=kind)
+    return TargetClaim(name=None, presence="none", kind=None)
+
+
 def classify(
     *,
     provider: Provider,
@@ -238,12 +334,20 @@ def classify(
     moves: tuple[MoveDecl, ...],
     rulebook_display_name: str,
     resource_axes: tuple[ResourceAxisDecl, ...] = (),
+    allowed_targets: dict[str, str] | None = None,
 ) -> Proposal:
     """제공자를 불러 후보를 얻는다.
 
     `resource_axes`(11-07)는 그대로 `build_classifier_prompt`로 넘어간다 —
     「안 쓴다」로 선언된 축의 처리 지침을 영구 고정 블록에 싣는 자리다.
     기본값 `()`은 그런 축이 없다는 뜻이다.
+
+    `allowed_targets`(SCENE-04, D-13①)는 정규화된 이름 -> 목록의 원본 이름
+    사전이다 — 호출부가 이번 장면의 닫힌 목록(1층+2층 `display_name`)에서
+    만들어 넘긴다. `None`(기본값)이면 대상 칸이 프롬프트에 **아예 안
+    붙고** 결과는 항상 `presence="none"`이다 — `inventory_items=None`이
+    소지품 칸을 통째로 없애는 것과 정확히 같은 모양이다(`ScenarioDecl.
+    target_check is False`인 시나리오가 이 경로로 D-22를 만족한다).
 
     제공자를 직접 부르지 않고 `call_with_one_retry`(D-27/D-28의 타임아웃·
     재시도 층)를 거친다. 재시도까지 실패하면 예외를 던지지 않고 후보가 빈
@@ -295,6 +399,7 @@ def classify(
         raw_text=raw_text,
         resource_axes=resource_axes,
         inventory_items=inventory_items,
+        allowed_targets=allowed_targets,
     )
 
     def _call_once() -> AgentResult:
@@ -327,6 +432,14 @@ def classify(
             )
             item_use = ItemUseClaim(item=None, kind="none")
 
+    # 대상 판단(SCENE-04, D-13①) — `_parse_target`은 예외를 던지지 않으므로
+    # `item_use`/`candidates`와 달리 흡수 블록이 필요 없다(도크스트링 참조).
+    # 무브 목록 위반(`UnknownMove`)이 나도 이 값은 그대로 살아남는다 —
+    # 대상 판단은 무브 판단과 독립이다.
+    target = TargetClaim(name=None, presence="none", kind=None)
+    if allowed_targets is not None:
+        target = _parse_target(str(result.value), allowed_targets)
+
     known_move_ids = frozenset(move.move_id for move in moves)
     try:
         candidates, no_check = _parse_candidates(str(result.value), known_move_ids)
@@ -343,5 +456,9 @@ def classify(
             "무브 없음으로 흡수한다.",
             file=sys.stderr,
         )
-        return Proposal(candidates=(), ai=result, unknown_move=exc.move_id, item_use=item_use)
-    return Proposal(candidates=candidates, ai=result, no_check=no_check, item_use=item_use)
+        return Proposal(
+            candidates=(), ai=result, unknown_move=exc.move_id, item_use=item_use, target=target
+        )
+    return Proposal(
+        candidates=candidates, ai=result, no_check=no_check, item_use=item_use, target=target
+    )

@@ -424,6 +424,7 @@ def build_classifier_prompt(
     raw_text: str,
     resource_axes: tuple[ResourceAxisDecl, ...] = (),
     inventory_items: tuple[str, ...] | None = None,
+    allowed_targets: dict[str, str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """action_classifier 프롬프트를 조립한다. `(system, messages)` 짝을 돌려준다.
 
@@ -453,8 +454,17 @@ def build_classifier_prompt(
     보는 파티 전체 조립 함수는 이 함수 몸통 어디에서도 부르지 않는다.
     소지품 목록도 같은 원칙이다 — 행위자 자신의 슬롯만 실린다(T-12-31과
     같은 이유의 누출 방지).
+
+    `allowed_targets`(SCENE-04, D-13①)는 정규화된 이름 -> 목록의 원본
+    이름 사전이다 — `None`(기본값)이면 이 시나리오가 대상 검사를 안 쓰는
+    것이라(`ScenarioDecl.target_check is False`, D-22) 대상 칸이 프롬프트에
+    아예 안 붙는다(`inventory_items=None`과 같은 모양). 실제 닫힌 목록
+    내용은 **다시 렌더링하지 않는다** — `_session_block_text(ctx)`가 이미
+    「장면 대상」 아래에 `ctx.scene_entities`를 보여주고, `allowed_targets`는
+    바로 그 목록에서 만들어지므로 같은 내용을 두 번 싣지 않는다(토큰
+    낭비 방지). 지시문(`permanent`)은 그 목록에서 고르는 방법만 적는다.
     """
-    from gptrpg.agents.action_classifier import NO_CHECK_SIGNAL
+    from gptrpg.agents.action_classifier import NO_CHECK_SIGNAL, NO_TARGET
 
     permanent = (
         f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 행동 분류기다. "
@@ -482,6 +492,19 @@ def build_classifier_prompt(
             "고른다. 같은 물건을 다른 이름으로 적었다면 목록에 적힌 이름을 그대로 "
             "고른다 — 목록에 없는 이름을 지어내지 않는다. 위 배열에 "
             '{"item": "..."} 원소 하나를 더해 답한다 — 예: {"item": "장검"}.\n\n'
+        )
+    if allowed_targets is not None:
+        permanent += (
+            "이 행동이 누구를·무엇을 상대로 하는지도 판단한다. 아래 「장면 대상」 "
+            "목록에 있으면 그 이름을 목록에 적힌 그대로 고른다 — 이름을 지어내지 "
+            "않는다. 상대가 없는 행동이면 "
+            f'"{NO_TARGET}"를 고른다. 목록에 없는 것을 상대로 한다면 그 이름을 '
+            '그대로 적고 "target_kind"에 "person"(사람) 또는 "thing"(사물) 중 '
+            "하나를 함께 적는다 — 목록에 없다고 해서 그 지목을 무시하거나 목록에 "
+            "있는 것으로 바꾸지 않는다. 위 배열에 "
+            '{"target": "...", "target_kind": "..."} 원소 하나를 더해 답한다 — '
+            '예: {"target": "우물지기 이슬"} 또는 '
+            '{"target": "검은 개", "target_kind": "person"}.\n\n'
         )
     permanent += NOT_AN_INSTRUCTION_LINE
     session = _session_block_text(ctx)

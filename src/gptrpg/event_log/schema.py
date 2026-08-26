@@ -16,8 +16,25 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
-EVENT_SCHEMA_VERSION = 13
-"""판 12 -> 판 13: 장면 대상 3층 관리(Phase 13-04, SCENE-03/05, D-13②)가
+EVENT_SCHEMA_VERSION = 14
+"""판 13 -> 판 14: 대상 지목(Phase 13-05, SCENE-04, D-13①)이 사건 형식에
+닿았다. **새 사건 종류는 안 늘고** 기존 `ActionClassified`에 칸 셋
+(`target_name: str | None` · `target_presence: str | None` ·
+`target_kind: str | None`)이 늘었을 뿐이다 — 판 10이 `CheckResolved`에
+칸 둘을 더한 것과 **같은 하위 호환 방식**이다: 기본값 있는 선택 칸 +
+`schema_version >= 14`에서만 `target_presence`를 필수로 강제하는 검증기
+(`_require_target_from_schema_14`, `_require_total_from_schema_10` 바로
+옆에 같은 모양으로) — 이라 판 14 미만 기록은 세 칸이 없어도 그대로
+읽힌다.
+
+`ActionClassified` 도크스트링의 「YAGNI, 구분이 필요해지면 그때 넓힌다」
+문단이 가리키던 「그때」가 왔다 — 대상은 확인/진행 시점에 서버가 다시
+읽어야 하는 값이고, 클라이언트가 보낸 것을 믿을 수 없다(ASVS V5).
+
+**`rules_core/reducer.py`의 `action_classified` 분기 갱신은 이 판
+올리기와 반드시 같은 커밋이다**(08-CONTEXT.md D-06).
+
+판 12 -> 판 13: 장면 대상 3층 관리(Phase 13-04, SCENE-03/05, D-13②)가
 사건 형식에 닿았다. 새 사건 종류가 하나 늘었다 — `SceneEntityEmerged`
 (`scene_entity_judge`가 판단한 「이번에 새로 나온 대상」을 처음으로 사건에
 적립한다).
@@ -489,15 +506,40 @@ class ActionClassified(EventEnvelope):
     `no_check` 불리언 하나만 남기고 `single`/`several`/`unclear`를 구분해
     담지 않는다 — 이 안전 검사가 필요로 하는 것이 그 값 하나뿐이고, 화면이
     보여줄 나머지 구분(웹 응답의 `tier` 칸)은 서버 상태에 중복해서 담을
-    이유가 없다(YAGNI, 구분이 필요해지면 그때 넓힌다).
+    이유가 없다(YAGNI, 구분이 필요해지면 그때 넓힌다 — **그때가 판
+    14다**, 아래 세 칸 참조).
 
-    **상태를 그 외에는 하나도 바꾸지 않는다** — `rules_core.reducer.
-    apply_event`의 `action_classified` 분기는 `declare_no_check` 표 하나만
-    채우고 판정·실패 누적·시계 어디에도 닿지 않는다.
+    **상태를 이 세 칸 말고는 바꾸지 않는다** — `rules_core.reducer.
+    apply_event`의 `action_classified` 분기는 `declare_no_check`·
+    `declare_targets` 두 표만 채우고 판정·실패 누적·시계 어디에도
+    닿지 않는다.
     """
 
     event_type: Literal["action_classified"]
     no_check: bool
+    target_name: str | None = None
+    """지목된 대상의 이름(판 14+, Phase 13-05, SCENE-04, D-13①) — 목록
+    안이면 목록의 원본 이름(D-19), 목록 밖이면 모델이 낸 이름,
+    `target_presence == "none"`이면 `None`이다. 판 14부터 확인/진행
+    시점에 서버가 **이 사건에서 다시 읽는다** — 클라이언트가 보낸 값을
+    믿지 않는다(ASVS V5)."""
+    target_presence: str | None = None
+    """`"known"`/`"unknown"`/`"none"` 중 하나(판 14+) — 아래
+    `_require_target_from_schema_14`가 판 14부터 필수로 강제한다. 판 14
+    미만 기록은 이 칸이 없어도 그대로 읽히고, 리듀서는 그런 `declare_seq`를
+    「대상 없음」으로 읽는다(`GameState.declare_targets` 도크스트링의
+    「모르면 어떻게 하나」 규칙 참조)."""
+    target_kind: str | None = None
+    """`"person"`/`"thing"` 중 하나 또는 `None`(판 14+) — `target_presence
+    == "unknown"`일 때만 값이 있을 수 있다. `known`/`none`일 때는 `None`
+    이다(1층 시나리오 선언에는 종류 개념이 없다, `TargetClaim` 도크스트링과
+    같은 이유)."""
+
+    @model_validator(mode="after")
+    def _require_target_from_schema_14(self) -> "ActionClassified":
+        if self.schema_version >= 14 and self.target_presence is None:
+            raise ValueError("판 14부터 target_presence는 필수 칸이다")
+        return self
 
 
 class ResourceChangeRecord(BaseModel):
