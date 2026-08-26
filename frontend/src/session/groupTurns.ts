@@ -27,6 +27,7 @@ import type {
   GameEvent,
   NarrationAppendedEvent,
   SceneIllustratedEvent,
+  TurnVoidedEvent,
 } from "../api/types.ts";
 
 export interface Turn {
@@ -48,6 +49,17 @@ export interface Turn {
    * 그려진 몇 초 뒤에 이 칸이 채워지며 그림이 나타난다.
    */
   illustration: SceneIllustratedEvent | null;
+  /**
+   * 서사 실패로 이 턴 전체가 자동으로 되돌려졌다는 사건(판 15,
+   * D-33/MEAS-02 보완) — `null`이면 되돌려지지 않았다. `turn_voided`
+   * 사건은 `declare_seq`를 직접 싣고 있어(다른 사건들처럼 `caused_by_seq`
+   * 사슬을 거슬러 올라가지 않는다) 아래 `groupTurns`가 이 칸을 바로
+   * 채운다. **폴링으로 도착하는 값이라 이 턴을 낸 사람이 아닌 다른
+   * 사람의 화면에도 똑같이 뜬다** — `ChatPane.tsx`의 즉시 응답
+   * (`ConfirmResponse.turn_voided`)은 행동한 사람에게 보여줄 상태 문구용일
+   * 뿐, 이 칸이 화면에 그려지는 진짜 근거다.
+   */
+  voided: TurnVoidedEvent | null;
 }
 
 /**
@@ -143,12 +155,33 @@ export function groupTurns(events: GameEvent[]): Turn[] {
       clock: null,
       narration: [],
       illustration: null,
+      voided: null,
     });
+  }
+
+  // turn_voided(판 15)는 사슬을 거슬러 올라가지 않는다 — `declare_seq`를
+  // 사건 자신이 직접 싣고 있으므로(위 `Turn.voided` 도크스트링) 그 값을
+  // 바로 쓴다. 아래 사슬 걷기 루프가 `caused_by_seq`로도 같은 뿌리에
+  // 도달하긴 하지만(caused_by_seq가 되돌린 check_resolved를 가리키므로),
+  // 이 사건이 스스로 이름 붙인 뿌리를 신뢰하는 편이 사슬 중간 사건이
+  // 어떤 이유로든 안 보이는 경우에도 더 안전하다.
+  for (const event of events) {
+    if (event.event_type !== "turn_voided") {
+      continue;
+    }
+    const turn = turns.get(event.declare_seq);
+    if (turn !== undefined) {
+      turn.voided = event;
+    }
   }
 
   const memo = new Map<number, number | null>();
   for (const event of events) {
-    if (event.event_type === "action_declared" || event.event_type === "ai_invoked") {
+    if (
+      event.event_type === "action_declared" ||
+      event.event_type === "ai_invoked" ||
+      event.event_type === "turn_voided"
+    ) {
       continue;
     }
     const rootSeq = findRootDeclareSeq(event, bySeq, memo);

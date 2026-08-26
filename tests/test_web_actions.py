@@ -640,6 +640,71 @@ def test_narration_failure_returns_roll_result_and_records_master_gm_ai_call(
     assert illustrated == []
 
 
+def _state(client: TestClient, session_id: str = SESSION_ID) -> dict:
+    response = client.get(f"/api/sessions/{session_id}/events")
+    assert response.status_code == 200
+    return response.json()["state"]
+
+
+def test_narration_failure_automatically_voids_the_whole_turn(
+    web_client_with_fake_provider,
+) -> None:
+    """서사가 끝내 실패하면 이 턴 전체가 자동으로 되돌려진다(판 15,
+    D-33/MEAS-02 보완) — 63aef0c의 「같은 판정을 다시 서술」 전제를
+    대체하는 정정. **이 시험이 증명하는 것은 오직 `FakeProvider`로
+    관측한 사실이다**: `_NarrationRaisingProvider`가 결정적으로 서사를
+    실패시키는 것을 자동 롤백이 알아채고 `turn_voided` 사건을 스스로
+    제출한다는 것 — 실제 제공자가 언제 서사를 실패시키는지는 이 시험이
+    말하지 않는다.
+
+    이 세션의 첫 행동이므로 「되돌린 뒤 상태」는 곧 「선언 전 상태」와
+    같다(check_count/failure_count/fails_since_clock이 전부 0으로) — 이
+    턴이 커밋했던 값(1/1/1 근처)이 아니라 정확히 되돌아간다는 것을 굳이
+    중간값과 비교하지 않고도 확인할 수 있는 가장 단순한 배치다."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = _NarrationRaisingProvider()
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        before = _state(client)
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm", json=_confirm_body(declare_seq)
+        )
+        assert response.status_code == 200
+        body = response.json()
+
+        after = _state(client)
+        voided = _events_of_type(client, "turn_voided")
+        resolved = _events_of_type(client, "check_resolved")
+        confirmed = _events_of_type(client, "action_confirmed")
+
+    # 응답 — 다시 굴린 게 아니라 되돌려졌다는 것이 명시적으로 드러난다.
+    assert body["narration_failed"] is True
+    assert body["turn_voided"] is True
+    # 방금 굴린 눈은 응답에 여전히 실린다(플레이어가 주사위를 봤다가
+    # 취소되는 것을 봐야 한다) — 다만 이제는 취소된 값이라는 뜻이다.
+    assert body["rolls"] is not None
+    # 취소된 턴은 자원 변화 제안을 띄우지 않는다 — 사람이 확인해도 반영할
+    # 대상이 없다(취소된 판정에 진짜 자원 변화가 붙는 모순을 막는다).
+    assert body["pending_resource_changes"] == []
+    assert body["discretionary"]["available"] is False
+
+    # 사건 기록 — check_resolved는 지워지지 않는다(D-12), 그 위에
+    # turn_voided 한 건이 정확히 이 턴을 가리키며 덧붙는다.
+    assert len(resolved) == 1
+    assert len(voided) == 1
+    assert voided[0]["declare_seq"] == declare_seq
+    assert voided[0]["caused_by_seq"] == resolved[0]["seq"]
+    assert voided[0]["counts_as_failure"] == resolved[0]["counts_as_failure"]
+    # action_confirmed 자체는 되돌려지지 않는다(그 사실 자체는 참이다 —
+    # 이 턴은 실제로 확인됐었다. `confirmed_declares` 되짚기 표도 손대지
+    # 않는다는 설계 결정과 짝을 이룬다).
+    assert len(confirmed) == 1
+
+    # 상태 — 선언 전과 정확히 같은 값으로 돌아온다.
+    for key in ("check_count", "failure_count", "fails_since_clock", "clock_segment"):
+        assert after[key] == before[key], f"{key}가 선언 전 값으로 돌아오지 않았다"
+
+
 def test_confirm_response_carries_total_and_calculation(web_client_with_fake_provider) -> None:
     """즉시 응답의 `total`·`rulebook_id`·`calculation`이 저장된 판정 값과
     같다(D-14, 12.2-01이 「후속 계획이 채운다」고 적어 둔 칸). 2d6에서는

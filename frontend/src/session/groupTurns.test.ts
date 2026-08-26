@@ -177,3 +177,81 @@ describe("isVisibleTurn", () => {
     expect(visible.map((turn) => turn.declareSeq)).toEqual([0, 10]);
   });
 });
+
+describe("groupTurns turn_voided (판 15, D-33/MEAS-02 보완)", () => {
+  it("turn_voided 사건이 declare_seq로 그 턴에 붙는다 — 63aef0c의 재시도 단추를 대체", () => {
+    const events: GameEvent[] = [
+      {
+        ...envelope(10, null),
+        event_type: "action_declared",
+        player_id: "bram",
+        raw_text: "문을 부순다",
+        character_id: "bram",
+      },
+      {
+        ...envelope(11, 10),
+        event_type: "action_confirmed",
+        player_id: "bram",
+        move: "hack_and_slash",
+        stat: "STR",
+        system_suggestion: { move: "hack_and_slash", stat: "STR" },
+        player_confirmed: true,
+        character_id: "bram",
+      },
+      {
+        ...envelope(12, 11),
+        event_type: "check_resolved",
+        move: "hack_and_slash",
+        rolls: [4, 5],
+        modifiers: [],
+        target: 10,
+        grade: "miss",
+        counts_as_failure: true,
+        person_id: "bram",
+        character_id: "bram",
+        total: 9,
+        rulebook_id: "dungeonworld_like",
+      },
+      {
+        ...envelope(13, 12),
+        event_type: "turn_voided",
+        declare_seq: 10,
+        counts_as_failure: true,
+        clock_fail_threshold: 3,
+      },
+    ];
+
+    const turns = groupTurns(events);
+    expect(turns).toHaveLength(1);
+    const [turn] = turns;
+    // 판정 사건은 지워지지 않는다(D-12) — 방금 굴린 눈은 여전히 보인다.
+    expect(turn.check).not.toBeNull();
+    expect(turn.voided).not.toBeNull();
+    expect(turn.voided?.declare_seq).toBe(10);
+    // 되돌려진 턴도 여전히 「보이는 턴」이다 — 확인까지 갔던 턴이므로
+    // isVisibleTurn의 ① 경로가 그대로 지킨다(취소됐다고 카드 자체가
+    // 사라지면 안 된다, "withdrawn roll that vanishes silently" 방지).
+    expect(isVisibleTurn(turn)).toBe(true);
+  });
+
+  it("turn_voided이 없는 턴은 voided가 null이다", () => {
+    const events: GameEvent[] = [
+      {
+        ...envelope(0, null),
+        event_type: "action_declared",
+        player_id: "bram",
+        raw_text: "문을 연다",
+        character_id: "bram",
+      },
+      {
+        ...envelope(1, 0),
+        event_type: "narration_appended",
+        text: "문이 삐걱 열린다.",
+        chunk_index: 0,
+      },
+    ];
+
+    const [turn] = groupTurns(events);
+    expect(turn.voided).toBeNull();
+  });
+});

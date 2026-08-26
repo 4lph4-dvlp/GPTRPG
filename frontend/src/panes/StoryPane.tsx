@@ -48,15 +48,14 @@ interface StoryPaneProps {
   nameOf: (playerId: string) => string;
   segmentCount: number;
   justRevealedSeq: number | null;
+  /** 판정이 없는 경로(proceed())에서 서사 요청 자체가 실패했다고 내
+   * 브라우저가 아는 턴들 — 판 15부터 판정이 있는 경로는 `turn.voided`
+   * (사건, 폴링으로 모두에게 온다)를 쓴다(`SessionScreen.tsx`의
+   * `failedDeclareSeqs` 도크스트링 참조). 재시도 단추는 이제 없다 —
+   * 63aef0c의 전제가 틀렸다는 정정 이후, 실패한 턴을 위해 시스템이
+   * 더 하는 일은 없다.
+   */
   failedDeclareSeqs: Set<number>;
-  /** 지금 이 캐릭터(나)의 식별자 — 어느 턴이 「내 턴」인지(재시도 단추가
-   * 뜨는 조건, verify-13-06 결함1) 가리는 유일한 근거다. */
-  myCharacterId: string;
-  /** 지금 재시도가 도는 중인 턴의 declareSeq — `null`이면 아무 재시도도
-   * 안 도는 중이다. */
-  retryingDeclareSeq: number | null;
-  /** 실패한 내 턴의 재시도 단추가 부르는 콜백. */
-  onRetryTurn: (turn: Turn) => void;
   /** 판정 사건의 `seq`로 찾는 계산 줄(Phase 12.2) — `TurnCard`가 이것으로
    * 검산 줄을 그린다(자체 산수 없음). */
   calculations: Map<number, CheckCalculationView>;
@@ -81,9 +80,6 @@ export function StoryPane({
   segmentCount,
   justRevealedSeq,
   failedDeclareSeqs,
-  myCharacterId,
-  retryingDeclareSeq,
-  onRetryTurn,
   calculations,
   opening,
   openingPending,
@@ -172,15 +168,6 @@ export function StoryPane({
                     isLatest={turnIndex === visible.length - 1}
                     justRevealed={justRevealedSeq === turn.check?.seq}
                     failed={failedDeclareSeqs.has(turn.declareSeq)}
-                    mine={turn.playerId === myCharacterId}
-                    onRetry={
-                      failedDeclareSeqs.has(turn.declareSeq) &&
-                      turn.playerId === myCharacterId &&
-                      (retryingDeclareSeq === null || retryingDeclareSeq === turn.declareSeq)
-                        ? () => onRetryTurn(turn)
-                        : null
-                    }
-                    retrying={retryingDeclareSeq === turn.declareSeq}
                     imageUrl={turn.illustration?.image_path ?? null}
                     calculation={
                       turn.check === null ? null : (calculations.get(turn.check.seq) ?? null)

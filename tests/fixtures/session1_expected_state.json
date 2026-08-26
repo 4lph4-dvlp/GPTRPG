@@ -3,19 +3,28 @@
   "cached_prompt_tokens": 0,
   "character_resource_ops": {},
   "check_count": 38,
+  "clock_advance_caused_by": {
+    "423": 424,
+    "546": 547,
+    "735": 736,
+    "85": 86
+  },
+  "clock_advance_seqs": [
+    86,
+    424,
+    547,
+    736
+  ],
   "clock_advances": 4,
   "clock_segment": 4,
   "completion_tokens": 24368,
   "confirm_to_declare": {
-    "2": 0,
-    "18": 16,
-    "40": 38,
-    "66": 64,
-    "84": 82,
     "113": 111,
     "144": 142,
     "163": 161,
+    "18": 16,
     "193": 191,
+    "2": 0,
     "209": 207,
     "232": 230,
     "263": 261,
@@ -24,6 +33,7 @@
     "334": 332,
     "361": 359,
     "391": 389,
+    "40": 38,
     "422": 420,
     "441": 439,
     "458": 456,
@@ -36,6 +46,7 @@
     "599": 597,
     "603": 601,
     "629": 627,
+    "66": 64,
     "673": 671,
     "677": 675,
     "726": 724,
@@ -44,6 +55,7 @@
     "797": 795,
     "801": 799,
     "829": 827,
+    "84": 82,
     "876": 874
   },
   "confirmed_declares": {
@@ -52,30 +64,6 @@
       "move": "defy_danger",
       "resolve_seq": 3,
       "stat": "WIS"
-    },
-    "16": {
-      "confirm_seq": 18,
-      "move": "defy_danger",
-      "resolve_seq": 19,
-      "stat": "WIS"
-    },
-    "38": {
-      "confirm_seq": 40,
-      "move": "defy_danger",
-      "resolve_seq": 41,
-      "stat": "CHA"
-    },
-    "64": {
-      "confirm_seq": 66,
-      "move": "defend",
-      "resolve_seq": 67,
-      "stat": "CON"
-    },
-    "82": {
-      "confirm_seq": 84,
-      "move": "defy_danger",
-      "resolve_seq": 85,
-      "stat": "CON"
     },
     "111": {
       "confirm_seq": 113,
@@ -87,6 +75,12 @@
       "confirm_seq": 144,
       "move": "defy_danger",
       "resolve_seq": 145,
+      "stat": "WIS"
+    },
+    "16": {
+      "confirm_seq": 18,
+      "move": "defy_danger",
+      "resolve_seq": 19,
       "stat": "WIS"
     },
     "161": {
@@ -141,6 +135,12 @@
       "confirm_seq": 361,
       "move": "aid_or_interfere",
       "resolve_seq": 362,
+      "stat": "CHA"
+    },
+    "38": {
+      "confirm_seq": 40,
+      "move": "defy_danger",
+      "resolve_seq": 41,
       "stat": "CHA"
     },
     "389": {
@@ -221,6 +221,12 @@
       "resolve_seq": 630,
       "stat": "CHA"
     },
+    "64": {
+      "confirm_seq": 66,
+      "move": "defend",
+      "resolve_seq": 67,
+      "stat": "CON"
+    },
     "671": {
       "confirm_seq": 673,
       "move": "parley",
@@ -263,6 +269,12 @@
       "resolve_seq": 802,
       "stat": "WIS"
     },
+    "82": {
+      "confirm_seq": 84,
+      "move": "defy_danger",
+      "resolve_seq": 85,
+      "stat": "CON"
+    },
     "827": {
       "confirm_seq": 829,
       "move": "defy_danger",
@@ -302,5 +314,6 @@
   "session_id": "session1",
   "session_scenario_id": null,
   "total_tokens": 112069,
-  "turn_count": 47
+  "turn_count": 47,
+  "voided_declare_seqs": []
 }

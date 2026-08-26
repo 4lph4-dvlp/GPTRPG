@@ -16,8 +16,42 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
-EVENT_SCHEMA_VERSION = 14
-"""판 13 -> 판 14: 대상 지목(Phase 13-05, SCENE-04, D-13①)이 사건 형식에
+EVENT_SCHEMA_VERSION = 15
+"""판 14 -> 판 15: 서사 실패 자동 롤백(Phase 13, D-33/MEAS-02 보완)이 사건
+형식에 닿았다. 새 사건 종류가 하나 늘었다 — `TurnVoided`(서사 생성이 끝내
+실패해 그 턴 전체를 없었던 일로 되돌린다는 보상 사건, D-12 「옛 기록을
+고쳐 쓰지 않는다」를 지키면서 되돌리는 유일한 길).
+
+**왜 새 사건 종류인가(사건을 지우거나 고치지 않는다).** `check_resolved`가
+이미 커밋한 `check_count`/`failure_count`/`fails_since_clock`, 그리고 그
+판정이 직접 돌린 `clock_advanced`(`fail_counter` 촉발)를 지우거나 고쳐
+쓸 수 없다(D-12) — 대신 `TurnVoided`가 **덧붙는** 새 사건으로 그 효과를
+상쇄한다. `caused_by_seq`(봉투 칸)가 되돌릴 `check_resolved` 사건이고,
+`declare_seq`가 이 턴을 일으킨 `action_declared`다 — 이 사건이 스스로
+「어느 턴을 지우는가」를 이름 붙인다(폴더가 결정적이고 옛 기록에도 재생이
+안전하다).
+
+`counts_as_failure`는 되돌릴 그 판정 사건의 같은 칸을 그대로 옮긴 값이다
+— 리듀서가 사건을 다시 훑지 않고도 얼마나 되돌려야 하는지 안다(D-10이
+`total`/`rulebook_id`를 판정 사건에 그대로 옮긴 것과 같은 「사실을
+사건에 복사한다」 관례). `clock_fail_threshold`는 이 되돌리기가 접히는
+순간 `session_actor.actor.AUTO_ADVANCE_FAILURE_THRESHOLD`의 값을 그대로
+싣는다 — `rules_core`는 `session_actor`를 import할 수 없으므로(층
+계약, `rules_core`가 아래층이다) 문턱값 자체를 사건이 실어 날라야
+리듀서가 순수하게 남는다.
+
+**리듀서가 스스로 판단한다.** `TurnVoided`는 "이 판정이 시계를 직접
+돌렸는가"·"그 진행이 아직 가장 최근 진행인가"를 스스로 결정하지 않는다
+— `GameState.clock_advance_caused_by`/`clock_advance_seqs`(이 판이 함께
+늘렸다)를 갖고 `rules_core.reducer`의 `turn_voided` 분기가 스스로
+판단한다. 판단 로직이 두 층에 나뉘면 갈릴 수 있다(RIG-04와 같은 걱정).
+
+**`rules_core/reducer.py`의 신설 분기·`GameState` 신설 칸 셋(`voided_declare_seqs`
+· `clock_advance_seqs` · `clock_advance_caused_by`)은 이 판 올리기와
+반드시 같은 커밋이다**(08-CONTEXT.md D-06, 이미 여러 번 난 사고 —
+이번이 아홉 번째 사례).
+
+판 13 -> 판 14: 대상 지목(Phase 13-05, SCENE-04, D-13①)이 사건 형식에
 닿았다. **새 사건 종류는 안 늘고** 기존 `ActionClassified`에 칸 셋
 (`target_name: str | None` · `target_presence: str | None` ·
 `target_kind: str | None`)이 늘었을 뿐이다 — 판 10이 `CheckResolved`에
@@ -807,6 +841,36 @@ class SceneEntityEmerged(EventEnvelope):
     normalized_name: str
 
 
+class TurnVoided(EventEnvelope):
+    """서사 생성이 끝내 실패해 이 턴 전체를 없었던 일로 되돌린다(판 15,
+    D-33/MEAS-02 보완).
+
+    `caused_by_seq`(봉투 칸)가 되돌릴 `check_resolved` 사건이다 —
+    `resource_changed`/`clock_advanced`가 같은 자리에 `caused_by_seq`를
+    쓰는 것과 같은 관례다. `declare_seq`가 이 턴을 일으킨 `action_declared`
+    사건이다 — 사람이 「다시 시도해 주세요」를 보고 완전히 다른 행동을
+    선언해도(새 declare_seq, 이 프로젝트의 정정된 이해 — 다시 시도가 같은
+    쿼리를 뜻하지 않는다) 되돌릴 대상이 이 사건 하나로 고정된다.
+
+    `counts_as_failure`는 되돌릴 그 `check_resolved` 사건의 같은 칸을
+    그대로 옮긴 값이다 — 리듀서가 사건을 다시 훑지 않고도
+    `failure_count`/`fails_since_clock`을 얼마나 되돌려야 하는지 안다.
+    `clock_fail_threshold`는 이 사건이 접히는 순간의
+    `session_actor.actor.AUTO_ADVANCE_FAILURE_THRESHOLD` 값을 그대로
+    싣는다 — `rules_core`가 `session_actor`를 import할 수 없으므로(층
+    계약) 문턱값 자체를 사건이 실어 날라야 리듀서가 순수 함수로 남는다.
+
+    **멱등이다** — 같은 `declare_seq`로 두 번째 `TurnVoided`가 접혀도
+    (`GameState.voided_declare_seqs`에 이미 있으면) 카운터가 두 번 깎이지
+    않는다(`rules_core.reducer`의 `turn_voided` 분기 참조).
+    """
+
+    event_type: Literal["turn_voided"]
+    declare_seq: int
+    counts_as_failure: bool
+    clock_fail_threshold: int
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -830,6 +894,7 @@ GameEvent = Annotated[
         CreationHostClaimed,
         SceneOpened,
         SceneEntityEmerged,
+        TurnVoided,
     ],
     Field(discriminator="event_type"),
 ]
@@ -859,9 +924,10 @@ _KNOWN_EVENT_TYPES = frozenset(
         "creation_host_claimed",
         "scene_opened",
         "scene_entity_emerged",
+        "turn_voided",
     }
 )
-"""`GameEvent` 판별 유니온이 아는 스물한 사건 종류 — `parse_event`가 이
+"""`GameEvent` 판별 유니온이 아는 스물두 사건 종류 — `parse_event`가 이
 목록 밖의 `event_type`을 `CorruptEventRecord`로 분류하는 데 쓴다."""
 
 

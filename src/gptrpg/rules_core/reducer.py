@@ -306,6 +306,25 @@ class GameState:
     않는다). 한 번 채워지면 다시 `None`으로 돌아가지 않는다(풀리는
     사건이 없다) — `session_scenario_id`와 항상 같은 사건에서 함께
     채워진다."""
+    voided_declare_seqs: frozenset[int] = field(default_factory=frozenset)
+    """자동으로 되돌려진(`turn_voided`) 턴들의 declare_seq 집합(판 15,
+    서사 실패 자동 롤백). `turn_voided` 사건에서만 채워진다. **멱등
+    방벽이다** — 같은 declare_seq로 두 번째 `turn_voided`가 접혀도(사건이
+    실수로 중복 기록되는 방어적 상황을 포함) 이 집합에 이미 있으면
+    카운터가 두 번 깎이지 않는다(`scene_entities_emerged`의
+    `normalized_name` 중복 방어와 같은 자리, 판 13이 세운 관례)."""
+    clock_advance_seqs: tuple[int, ...] = ()
+    """지금까지 접힌 모든 `clock_advanced` 사건의 순번 — 오름차순(판 15).
+    `clock_advanced` 사건에서만 채워진다. `turn_voided`가 「이 시계 진행이
+    아직 가장 최근 진행인가」(`clock_advance_seqs[-1]`과 같은가)를 판단하는
+    자리다 — 이 판정이 시계를 직접 돌렸어도 그 뒤에 다른 판정이 또
+    돌렸다면(다른 플레이어의 판정 등) 되돌리기가 이미 지나간 재설정을
+    건드리지 않는다(안전하게 되돌릴 수 없으면 아예 손대지 않는다)."""
+    clock_advance_caused_by: dict[int, int] = field(default_factory=dict)
+    """caused_by_seq(그 시계 진행을 일으킨 판정 사건의 순번) -> 그
+    `clock_advanced` 사건 자신의 순번(판 15). `resource_change_by_cause`와
+    같은 자리·같은 이유(원인 -> 결과 되짚기 표) — `turn_voided`가 이
+    칸으로 「이 판정이 시계를 직접 돌렸는가」를 되짚는다."""
     scene_entities_emerged: tuple[EmergedEntityFold, ...] = ()
     """장면 대상 3층 중 2층 — 이번 세션에서 나와서 확정된 것(판 13+,
     Phase 13-04, D-13②/D-14). `scene_entity_emerged` 사건에서만 채워진다.
@@ -449,12 +468,92 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
         # trigger 값(fail_counter/condition/ai_choice)과 무관하게 초기화한다 —
         # 어떤 이유로든 시계가 한 칸 갔으면 "다음 강제 진행까지" 세기는
         # 처음부터 다시 시작한다.
+        #
+        # clock_advance_seqs/clock_advance_caused_by(판 15) — `resource_change_by_cause`와
+        # 같은 「원인 -> 결과」 되짚기 표를 여기도 둔다. `turn_voided`가 이
+        # 표들로 「이 판정이 시계를 직접 돌렸는가」·「그 진행이 아직 가장
+        # 최근인가」를 판단한다(트리거 종류를 가리지 않고 전부 기록한다 —
+        # 되돌리려는 판정 이후에 **어떤 이유로든** 재설정이 한 번 더
+        # 일어났으면 안전하게 되돌릴 수 없다는 판단 자체가 트리거를
+        # 가리지 않기 때문이다).
+        clock_advance_seqs = (*state.clock_advance_seqs, seq)
+        clock_advance_caused_by = state.clock_advance_caused_by
+        caused_by_seq = payload.get("caused_by_seq")
+        if caused_by_seq is not None:
+            clock_advance_caused_by = dict(clock_advance_caused_by)
+            clock_advance_caused_by[caused_by_seq] = seq
         return replace(
             state,
             last_seq=seq,
             clock_advances=state.clock_advances + 1,
             clock_segment=payload["segment_index"],
             fails_since_clock=0,
+            clock_advance_seqs=clock_advance_seqs,
+            clock_advance_caused_by=clock_advance_caused_by,
+        )
+    if event_type == "turn_voided":
+        # 서사 실패 자동 롤백(판 15, D-33/MEAS-02 보완) — 이 턴이 커밋한
+        # check_resolved의 효과를 상쇄하는 보상 사건이다(D-12, 사건을
+        # 지우거나 고쳐 쓰지 않는다).
+        declare_seq = payload["declare_seq"]
+        if declare_seq in state.voided_declare_seqs:
+            # 멱등 방벽 — 이미 되돌린 턴이다. 두 번째로 접혀도(사건 중복
+            # 기록을 포함) 카운터를 또 깎지 않는다.
+            return replace(state, last_seq=seq)
+
+        resolve_seq = payload.get("caused_by_seq")
+        counts_as_failure = payload["counts_as_failure"]
+        voided_declare_seqs = state.voided_declare_seqs | {declare_seq}
+        check_count = state.check_count - 1
+        failure_count = state.failure_count - (1 if counts_as_failure else 0)
+
+        clock_advance_seq = (
+            state.clock_advance_caused_by.get(resolve_seq) if resolve_seq is not None else None
+        )
+        latest_clock_advance_seq = (
+            state.clock_advance_seqs[-1] if state.clock_advance_seqs else None
+        )
+        if clock_advance_seq is not None and clock_advance_seq == latest_clock_advance_seq:
+            # 이 판정이 직접 돌린 시계 진행이 아직 가장 최근 진행이다 — 안전하게
+            # 되돌릴 수 있다. `clock_fail_threshold`가 이 판정 자신의 실패가
+            # 문턱을 넘기 **직전**의 fails_since_clock 값(threshold - 1)을 알려준다
+            # — recursion 깊이가 한 겹뿐이라(`_maybe_auto_advance` 도크스트링)
+            # 문턱을 넘는 순간 정확히 한 번만 진행하므로 이 값은 항상 정확하다.
+            # 그 진행 뒤로 쌓인 실패 수(지금 fails_since_clock, 이 진행이 fails_since_clock을
+            # 0으로 되돌린 뒤부터 누적된 값)를 이어 붙인다.
+            threshold = payload["clock_fail_threshold"]
+            return replace(
+                state,
+                last_seq=seq,
+                check_count=check_count,
+                failure_count=failure_count,
+                fails_since_clock=(threshold - 1) + state.fails_since_clock,
+                clock_segment=state.clock_segment - 1,
+                clock_advances=state.clock_advances - 1,
+                clock_advance_seqs=state.clock_advance_seqs[:-1],
+                voided_declare_seqs=voided_declare_seqs,
+            )
+
+        # 이 판정이 시계를 직접 돌리지 않았거나, 돌렸어도 그 뒤에 다른
+        # 진행이 또 있었다(다른 플레이어의 판정 등) — 그 경우 지금
+        # fails_since_clock/clock_segment은 이미 그 나중 진행이 다시 기준을
+        # 잡은 값이라 안전하게 되짚을 수 없다. 시계는 손대지 않는다.
+        # fails_since_clock 자체는, 이 판정 뒤로 재설정이 **한 번도** 없었을
+        # 때만(=아직 이 판정의 실패 몫이 그대로 남아 있을 때만) 되돌린다.
+        no_reset_since = resolve_seq is not None and (
+            latest_clock_advance_seq is None or latest_clock_advance_seq < resolve_seq
+        )
+        return replace(
+            state,
+            last_seq=seq,
+            check_count=check_count,
+            failure_count=failure_count,
+            fails_since_clock=(
+                state.fails_since_clock - (1 if counts_as_failure else 0)
+                if no_reset_since
+                else state.fails_since_clock
+            ),
+            voided_declare_seqs=voided_declare_seqs,
         )
     if event_type == "ai_invoked":
         prompt_tokens = payload["prompt_tokens"]

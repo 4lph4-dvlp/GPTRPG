@@ -120,6 +120,37 @@ def test_one_chunk_then_stream_raises_exits_nonzero_and_keeps_emitted_chunk(
     assert gm_ai_event.completion_tokens == 0
 
 
+def test_cli_narration_failure_also_voids_the_whole_turn(tmp_db_path, monkeypatch):
+    """웹(`test_web_actions.py`)과 같은 자동 롤백이 CLI 경로에서도 일어난다
+    (판 15, 13-05가 닫은 웹/CLI 갈래를 다시 열지 않는다) — `check_resolved`는
+    그대로 기록에 남고(D-12), 그 위에 `turn_voided` 한 건이 정확히 이 턴을
+    가리키며 덧붙는다."""
+    db = str(tmp_db_path)
+    provider = _EmitsOneThenRaisesProvider()
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code != 0
+
+    events = _read_events(db, "s1")
+    declared = [event for event in events if event.event_type == "action_declared"][0]
+    resolved = [event for event in events if event.event_type == "check_resolved"][0]
+    voided = [event for event in events if event.event_type == "turn_voided"]
+
+    assert len(voided) == 1
+    assert voided[0].declare_seq == declared.seq
+    assert voided[0].caused_by_seq == resolved.seq
+    assert voided[0].counts_as_failure == resolved.counts_as_failure
+
+    from gptrpg.session_actor.projection import rebuild_state_from_events
+
+    state = rebuild_state_from_events("s1", events)
+    assert state.check_count == 0
+    assert state.failure_count == 0
+    assert state.fails_since_clock == 0
+    assert declared.seq in state.voided_declare_seqs
+
+
 # ---------------------------------------------------------------------------
 # 시험 2 (UAT 사고 최소 재현): note_result()로 받은 값을 버리고 last_result()가
 # 항상 RuntimeError를 던지는 이중체 — 제공자가 Provider 프로토콜을 어겨도

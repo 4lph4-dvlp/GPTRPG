@@ -109,7 +109,9 @@ from gptrpg.session_actor.actor import (
     ReleaseGmSlot,
     ResolveCheck,
     SceneAlreadyOpened,
+    TurnAlreadyVoided,
     VerifyProceedEligibility,
+    VoidTurn,
 )
 from gptrpg.session_actor.actor import SessionActor
 from gptrpg.session_actor.live_roller import LiveRoller
@@ -677,9 +679,23 @@ class ConfirmResponse(BaseModel):
     target: int | None = None
     narration_chunk_count: int = 0
     narration_failed: bool = False
-    """서사 생성만 실패했다는 표시다(TRUST-06, D-08) — `rolls`/`grade`/`target`은
-    그대로 채워져 있다. 「굴림 실패」(오류 상태 코드, 판정 값 없음)와 구분된다.
-    기본값이 있으므로 기존 응답 조립 자리를 전부 고치지 않아도 된다."""
+    """서사 생성이 실패했다는 표시다(TRUST-06, D-08) — 「굴림 실패」(오류
+    상태 코드, 판정 값 없음)와 구분된다. `rolls`/`grade`/`target`은 이
+    응답에도 채워져 있다(방금 굴린 눈을 화면이 잠깐이라도 보여줘야
+    「나타났다가 사라진」 것이 사람 눈에 보인다) — **그러나 이 판정은
+    되돌려졌다**(아래 `turn_voided` 참조). 두 칸이 다 참인 이유는 하나가
+    다른 하나의 원인이기 때문이다: 서사가 끝내 실패하면 이 턴 전체가
+    자동으로 되돌려진다(더 이상 「같은 판정을 다시 서술」하지 않는다 —
+    그 전제 자체가 틀렸다, 63aef0c의 정정)."""
+    turn_voided: bool = False
+    """서사 실패로 이 턴 전체가 자동으로 되돌려졌다는 표시다(판 15,
+    D-33/MEAS-02 보완). 참이면 `rolls`/`grade`/`target`에 실린 값은
+    **이미 취소된 판정**이다 — 화면은 이 값을 「방금 굴렸다가 취소된
+    눈」으로 보여줘야지 유효한 결과로 보여주면 안 된다. 서버 상태의
+    실제 되돌림(카운터·시계)은 이 응답이 아니라 폴링이 나르는
+    `turn_voided` 사건이 진실이다(이 필드는 이 요청을 보낸 사람에게
+    보여줄 즉시 상태 문구용일 뿐이다 — `ChatPane.tsx`가 이미 지키는
+    「이야기는 폴링에서만 그린다」 규율과 같다)."""
     modifiers: list[ModifierView] = []
     """이 판정에 실제로 실린 수정치 전부 — `check_event.modifiers`를 그대로
     옮긴다(D-04 검산 근거). 능력치·난이도 수정치가 여기 실린 채로 화면에
@@ -1192,16 +1208,37 @@ async def confirm(
     )
 
     if narration_error is not None or not gm_result.ok:
-        # D-08/TRUST-06 — 서사만 실패했다. 이미 기록된 판정 결과를 버리지
-        # 않는다: 200을 돌려주고 `rolls`/`grade`/`target`은 되읽은 판정
-        # 사건에서 그대로 채운 채 `narration_failed=True`로 실패를 알린다.
-        # 액터·저장소 결함(이벤트 스키마·I/O)은 이 분기가 아니라 그 위 호출부에서
-        # 그대로 500으로 올라간다(다른 원인이므로 다른 상태 코드, 502 분기가
-        # 아니다) — 「굴림 실패」와 「서사 실패」의 구분이 여기서 코드 구조로
-        # 남는다.
-        # total/rulebook_id/calculation은 정상 분기와 반드시 같은 커밋에서
-        # 같이 바뀐다 — 서사가 실패한 턴만 검산이 다른 값을 보이는 비대칭
-        # 결함을 막는다(D-14, T-12.2-05).
+        # D-08/TRUST-06 — 서사가 실패했다. 옛 설계(63aef0c 이전, D-33/MEAS-02
+        # 원안)는 「이미 굴린 판정은 유효하게 두고 다시 시도가 재사용한다」
+        # 였지만, 그 전제가 틀렸다는 것이 사용자의 정정으로 드러났다 —
+        # 「다시 시도해 주세요」는 같은 쿼리를 다시 준다는 뜻이 아니다.
+        # 이제는 **이 턴 전체를 자동으로 되돌린다**(판 15) — 판정이 남긴
+        # 카운터·시계 효과를 상쇄하는 `turn_voided` 사건을 남기고, 사건
+        # 자체(check_resolved)는 지우거나 고쳐 쓰지 않는다(D-12). 200을
+        # 그대로 돌려준다 — `rolls`/`grade`/`target`은 「방금 굴렸다가
+        # 취소된 눈」으로 화면에 보여줄 값이지 유효한 판정이 아니다
+        # (`turn_voided=True`가 그 뜻을 명시한다).
+        #
+        # `TurnAlreadyVoided`도 성공으로 읽는다 — 같은 확인 요청이 두 번
+        # (네트워크 재시도 등) 들어와 서사가 두 번 다 실패해도, 두 번째
+        # 되돌리기는 멱등하게 끝난다(`_prepare_void_turn` 도크스트링).
+        try:
+            await actor.submit(
+                VoidTurn(
+                    declare_seq=body.declare_seq,
+                    resolve_seq=resolve_seq,
+                    counts_as_failure=check_event.counts_as_failure,
+                )
+            )
+        except TurnAlreadyVoided:
+            pass
+        # pending_resource_changes/discretionary를 비운다 — 되돌려진 턴의
+        # 결과 목록/재량 판정 제안을 사람이 확인해 실제로 반영해 버리면
+        # (`POST .../confirm-resource-change`), 되돌려진 판정이 진짜
+        # 자원 변화를 남기는 모순이 생긴다. 아직 사건으로 안 쌓인 「제안」
+        # 뿐이므로(D-09, 이 두 자리 어디에도 `RecordResourceChange`
+        # 제출이 없다) 되돌릴 사건을 새로 만들 필요 없이 제안 자체를
+        # 거두면 충분하다.
         return ConfirmResponse(
             confirmed=True,
             confirm_seq=confirm_seq,
@@ -1211,6 +1248,7 @@ async def confirm(
             target=check_event.target,
             narration_chunk_count=chunk_index,
             narration_failed=True,
+            turn_voided=True,
             modifiers=[
                 ModifierView(type=m.type, value=m.value, source=m.source)
                 for m in check_event.modifiers
@@ -1218,8 +1256,8 @@ async def confirm(
             total=check_event.total,
             rulebook_id=check_event.rulebook_id,
             calculation=calculation_view_for(check_event),
-            pending_resource_changes=pending_resource_changes,
-            discretionary=discretionary,
+            pending_resource_changes=[],
+            discretionary=DiscretionaryProposalView(),
         )
 
     # 시계 조건 검사 배경 등록 — 관문 신호가 참일 때만 건다(ARCH-03/D-01).
@@ -1547,9 +1585,16 @@ class ProceedResponse(BaseModel):
     proceeded: bool
     narration_chunk_count: int = 0
     narration_failed: bool = False
-    """서사 생성만 실패했다는 표시다 — `ConfirmResponse.narration_failed`와
+    """서사 생성이 실패했다는 표시다 — `ConfirmResponse.narration_failed`와
     같은 뜻·같은 기본값이다(TRUST-06, D-08). 판정이 애초에 없는 경로라
     `rolls`/`grade`/`target` 칸 자체가 없다."""
+    turn_voided: bool = False
+    """이 경로에는 애초에 판정이 없다(D-10 ②갈래) — `check_count`/
+    `failure_count`/`fails_since_clock`/시계 어디에도 카운터 효과가 없으므로
+    되돌릴 `turn_voided` 사건 자체가 필요 없다(`VoidTurn`을 제출하지
+    않는다). 그래도 이 칸을 `True`로 보낸다 — 화면 문구를 `ConfirmResponse`와
+    통일하기 위해서다(「이 턴은 없었던 일이다, 새로 선언해도 된다」).
+    """
 
 
 @router.post("/sessions/{session_id}/proceed", response_model=ProceedResponse)
@@ -1835,12 +1880,15 @@ async def proceed(
 
     if narration_error is not None or not gm_result.ok:
         # D-08/TRUST-06과 같은 이유 — 이 경로는 애초에 판정이 없으므로
-        # 버릴 굴림 결과 자체가 없다. 200을 돌려주고 narration_failed로
-        # 실패를 알린다.
+        # 버릴 굴림 결과도, 되돌릴 카운터·시계 효과도 없다(`ConfirmResponse`
+        # 분기와 달리 `VoidTurn`을 제출하지 않는다 — `ProceedResponse.
+        # turn_voided` 도크스트링 참조). 200을 돌려주고 narration_failed/
+        # turn_voided로 실패를 알린다.
         return ProceedResponse(
             proceeded=True,
             narration_chunk_count=chunk_index,
             narration_failed=True,
+            turn_voided=True,
         )
 
     # 시계 조건 검사 배경 등록 — `confirm()`과 같은 자리·같은 조건

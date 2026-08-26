@@ -151,12 +151,14 @@ export function ChatPane({
         suggestion,
         confirmed,
       );
-      // 서사만 실패하면 응답은 200이지만 `narration_failed`가 참이다(TRUST-06,
-      // D-08) — 판정 값은 이미 화면에 붙었으니(폴링) 이 실패는 조용히
-      // 사라지면 안 된다. 이미 있는 실패 표시 경로를 그대로 탄다.
-      if (response.narration_failed) {
-        onTurnFailed(pending.declare_seq);
-        setStatus({ text: COPY.narrationFailed, error: true });
+      // 서사가 실패하면 응답은 200이지만 `turn_voided`가 참이다(판 15,
+      // TRUST-06/D-08 보완) — 이 턴 전체가 자동으로 되돌려졌다는 뜻이다.
+      // `onTurnFailed`(클라이언트 쪽 표시)는 부르지 않는다 — 되돌림 표시의
+      // 진짜 근거는 폴링으로 오는 `turn_voided` 사건(`groupTurns.ts`가
+      // `Turn.voided`로 접는다)이고, 이 상태 문구는 지금 이 요청을 보낸
+      // 사람에게만 즉시 보여줄 안내일 뿐이다.
+      if (response.turn_voided) {
+        setStatus({ text: COPY.turnVoided, error: true });
       } else {
         setStatus(null);
       }
@@ -244,11 +246,17 @@ export function ChatPane({
     setStatus({ text: COPY.narrating, error: false });
     try {
       const response = await proceed(sessionId, characterId, characterId, pending.declare_seq);
-      // `confirmAction`의 `narration_failed` 처리와 같은 규칙(TRUST-06,
-      // D-08) — 판정이 없는 경로에도 서사 실패는 조용히 사라지면 안 된다.
-      if (response.narration_failed) {
+      // 이 경로에는 애초에 판정이 없어 `turn_voided` 사건 자체가 안 남는다
+      // (`VoidTurn`을 제출할 대상이 없다, `web/routes_actions.py`의
+      // `ProceedResponse.turn_voided` 도크스트링) — 그래서 `confirmAction`
+      // 분기와 달리 폴링(사건)에 기댈 수 없고, 이 즉시 응답이 유일한
+      // 신호다. `onTurnFailed`(클라이언트 쪽 표시, `TurnCard.failed`)를
+      // 그대로 쓴다 — 판정이 없는 턴이므로 일반 실패 문구
+      // (`COPY.turnFailed`)가 정확하다("주사위도 취소됐어요"는 여기서는
+      // 성립하지 않는 말이다).
+      if (response.turn_voided) {
         onTurnFailed(pending.declare_seq);
-        setStatus({ text: COPY.narrationFailed, error: true });
+        setStatus({ text: COPY.turnFailed, error: true });
       } else {
         setStatus(null);
       }

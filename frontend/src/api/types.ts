@@ -301,6 +301,21 @@ export interface SceneOpenedEvent extends EventEnvelope {
   source: "scripted" | "sketch" | "fallback";
 }
 
+/**
+ * 서사 생성이 끝내 실패해 이 턴 전체를 없었던 일로 되돌린다(판 15,
+ * D-33/MEAS-02 보완) — `schema.py::TurnVoided`. `caused_by_seq`가 되돌린
+ * `check_resolved` 사건이고, `declare_seq`가 이 턴을 일으킨
+ * `action_declared` 사건이다 — `session/groupTurns.ts`가 이 사건을
+ * `declare_seq`로 그 턴에 붙인다(다른 사건들처럼 사슬을 거슬러 올라가지
+ * 않는다 — 이 사건은 스스로 뿌리를 이름 붙인다).
+ */
+export interface TurnVoidedEvent extends EventEnvelope {
+  event_type: "turn_voided";
+  declare_seq: number;
+  counts_as_failure: boolean;
+  clock_fail_threshold: number;
+}
+
 export type GameEvent =
   | ActionDeclaredEvent
   | ActionConfirmedEvent
@@ -321,7 +336,8 @@ export type GameEvent =
   | CreationGmSpokeEvent
   | CreationConsentRecordedEvent
   | CreationHostClaimedEvent
-  | SceneOpenedEvent;
+  | SceneOpenedEvent
+  | TurnVoidedEvent;
 
 /** 완성된 캐릭터 하나(D-04) — `consented`/`required_steps_filled`는
  * 서버가 이미 하는 판단을 그대로 옮긴 것이지 화면이 다시 계산하지 않는다. */
@@ -534,11 +550,22 @@ export interface ConfirmResponse {
   target: number | null;
   narration_chunk_count: number;
   /**
-   * 서사 생성만 실패했다는 표시다(TRUST-06, D-08) — 이때도 `rolls`/`grade`/
-   * `target`은 이미 채워져 있다. 응답 자체는 200이므로 `catch`가 아니라 이
-   * 칸을 화면이 직접 읽어야 실패가 조용히 사라지지 않는다.
+   * 서사 생성이 실패했다는 표시다(TRUST-06, D-08) — 이때도 `rolls`/`grade`/
+   * `target`은 이미 채워져 있다(방금 굴린 눈을 화면이 잠깐 보여줘야 하기
+   * 때문이다). 응답 자체는 200이므로 `catch`가 아니라 이 칸을 화면이 직접
+   * 읽어야 실패가 조용히 사라지지 않는다. **이제는 항상 `turn_voided`와
+   * 함께 온다** — 서사가 실패하면 이 턴 전체가 자동으로 되돌려진다(판
+   * 15, 63aef0c의 「같은 판정 재사용」 전제를 대체하는 정정).
    */
   narration_failed: boolean;
+  /**
+   * 이 턴 전체가 자동으로 되돌려졌다는 표시다(판 15). 참이면
+   * `rolls`/`grade`/`target`은 「방금 굴렸다가 취소된 눈」이다 — 화면은
+   * 이 값을 유효한 결과로 그리면 안 된다(`turn_voided` 사건이 폴링으로도
+   * 도착해 `groupTurns.ts`가 `Turn.voided`로 접어 주므로, 다른 사람의
+   * 화면에서도 같은 취소 표시가 뜬다).
+   */
+  turn_voided?: boolean;
   /**
    * 이 판정에 실제로 실린 수정치 전부(D-04). 서버가 기본값 `[]`를 갖고
    * 보내므로 선택 칸으로 둔다 — 판정이 없는 응답(`confirmed: false`)에는
@@ -721,9 +748,13 @@ export interface ProceedResponse {
   proceeded: boolean;
   narration_chunk_count: number;
   /**
-   * 서사 생성만 실패했다는 표시다(TRUST-06, D-08) — `ConfirmResponse.narration_failed`와
+   * 서사 생성이 실패했다는 표시다(TRUST-06, D-08) — `ConfirmResponse.narration_failed`와
    * 같은 뜻·같은 기본값이다. 이 경로는 애초에 판정이 없으므로 `rolls`/`grade`/
    * `target` 칸 자체가 없다.
    */
   narration_failed: boolean;
+  /** 이 경로는 애초에 판정이 없어 되돌릴 카운터·시계 효과가 없지만
+   * (`turn_voided` 사건 자체를 안 남긴다), 화면 문구를 `ConfirmResponse`와
+   * 통일하기 위해 이 칸도 `true`로 온다. */
+  turn_voided?: boolean;
 }

@@ -44,7 +44,9 @@ from gptrpg.session_actor.actor import (
     ResolveCheck,
     SessionActor,
     SessionRegistry,
+    TurnAlreadyVoided,
     VerifyProceedEligibility,
+    VoidTurn,
 )
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
@@ -491,12 +493,19 @@ async def _proceed_without_check(
         return 1
 
     if narration_error is not None or not gm_result.ok:
+        # 이 경로는 애초에 판정이 없다(D-10 ②갈래) — 되돌릴 카운터·시계
+        # 효과가 없으므로 `VoidTurn`을 제출하지 않는다(`web/routes_actions.py`의
+        # `proceed()`와 같은 이유, `ProceedResponse.turn_voided` 도크스트링).
+        # 이 턴은 애초부터 없었던 일이다 — 새로 선언해도 된다.
         reason = (
             str(narration_error)
             if narration_error is not None
             else "제공자가 last_result() 규약을 어겼다"
         )
-        print(f"오류: 서사가 끝까지 나오지 못했다 — {reason}", file=sys.stderr)
+        print(
+            f"오류: 서사가 끝까지 나오지 못했다 — 이 턴은 없었던 일이다, 새로 선언해도 된다 — {reason}",
+            file=sys.stderr,
+        )
         return 1
 
     if judgments.clock.should_check and clock_provider is not None:
@@ -1010,12 +1019,35 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
         return 1
 
     if narration_error is not None or not gm_result.ok:
+        # 서사가 끝내 실패했다 — 웹의 `confirm()`과 같은 이유로 이 턴
+        # 전체를 자동으로 되돌린다(판 15, D-33/MEAS-02 보완). 옛 설계
+        # (63aef0c 이전)의 「이미 굴린 판정은 유효하게 둔다」는 전제가
+        # 틀렸다는 것이 사용자의 정정으로 드러났으므로, CLI도 같은
+        # `VoidTurn`을 제출한다(13-05가 닫은 웹/CLI 갈래를 다시 열지
+        # 않는다). `TurnAlreadyVoided`도 성공으로 읽는다(멱등).
+        try:
+            await actor.submit(
+                VoidTurn(
+                    declare_seq=declare_seq,
+                    resolve_seq=resolve_seq,
+                    counts_as_failure=check_event.counts_as_failure,
+                )
+            )
+        except TurnAlreadyVoided:
+            pass
+        except Exception as exc:  # noqa: BLE001 - WR-02, 이 제출 실패도 raw traceback으로 새면 안 된다
+            print(f"오류: 턴 되돌리기 사건 제출이 실패했다 — {exc}", file=sys.stderr)
+            return 1
         # 「무브 없음」 문구를 재사용하지 않는다 — 여기까지 왔다는 것은 무브가
         # 확인됐고 판정이 실제로 굴러갔고 그 결과 줄이 이미 화면에 찍혔다는
-        # 뜻이다. 서사만 실패했다는 것이 드러나는 문구를 쓴다. 예외 객체의
+        # 뜻이다. 서사가 실패해 이 턴이 되돌려졌다는 것이 드러나는 문구를
+        # 쓴다 — 방금 찍힌 판정 결과 줄은 취소됐다는 뜻이다. 예외 객체의
         # 메시지만 붙인다 — 호출 스택이나 제공자 설정을 화면에 쏟지 않는다.
         reason = str(narration_error) if narration_error is not None else "제공자가 last_result() 규약을 어겼다"
-        print(f"오류: 서사가 끝까지 나오지 못했다 — {reason}", file=sys.stderr)
+        print(
+            f"오류: 서사가 끝까지 나오지 못해 이 턴을 되돌렸다(방금 판정 결과는 취소됐다) — {reason}",
+            file=sys.stderr,
+        )
         return 1
 
     if judgments.clock.should_check and clock_provider is not None:

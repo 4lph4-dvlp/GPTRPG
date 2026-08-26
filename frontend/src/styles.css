@@ -745,6 +745,14 @@ details.record > summary::-webkit-details-marker {
   animation: check-flash 1600ms ease-out;
 }
 
+/* 취소된 판정(판 15, D-33/MEAS-02 보완) — `.calc-segment--discarded`가
+   이미 쓰는 「버려진 눈」 흐림 언어를 그대로 재사용한다(새 경고 표면을
+   만들지 않는다). 색만으로 뜻을 전하지 않는다 — 옆에 짧은 글자 꼬리표
+   (`.calc-segment__discarded-tag`, `TurnCard.tsx`)가 항상 같이 붙는다. */
+.check--voided {
+  opacity: 0.45;
+}
+
 @keyframes check-flash {
   0% {
     background: rgba(201, 162, 39, 0.16);

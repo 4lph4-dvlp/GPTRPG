@@ -356,12 +356,19 @@ def test_event_schema_version_was_twelve_before_phase_13_04():
     assert EVENT_SCHEMA_VERSION >= 12
 
 
-def test_event_schema_version_is_fourteen():
-    """판 14 못박기(Phase 13-05, SCENE-04, D-13①) — 대상 지목이
-    `action_classified` 사건에 칸 셋(target_name/target_presence/
-    target_kind)을 늘린 현재 판이다. 누가 무심코 판을 또 올리거나 내리면
-    이 값이 바뀌어 이 시험이 잡는다."""
-    assert EVENT_SCHEMA_VERSION == 14
+def test_event_schema_version_was_fourteen_before_phase_13_uat():
+    """판 14 시절의 사실만 남긴다(Phase 13-05, SCENE-04, D-13①) — 대상
+    지목이 `action_classified` 사건에 칸 셋(target_name/target_presence/
+    target_kind)을 늘렸을 때의 판이다. 그 이후 13-06-uat(서사 실패 자동
+    롤백)이 `turn_voided` 사건으로 판을 15로 올렸다(아래 시험)."""
+    assert EVENT_SCHEMA_VERSION >= 14
+
+
+def test_event_schema_version_is_fifteen():
+    """판 15 못박기(Phase 13, D-33/MEAS-02 보완) — 서사 실패 자동 롤백이
+    `turn_voided` 사건을 늘린 현재 판이다. 누가 무심코 판을 또 올리거나
+    내리면 이 값이 바뀌어 이 시험이 잡는다."""
+    assert EVENT_SCHEMA_VERSION == 15
 
 
 def _tuple_key_to_str(key: tuple) -> str:

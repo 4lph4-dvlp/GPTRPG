@@ -28,20 +28,13 @@ interface TurnCardProps {
   isLatest: boolean;
   /** 방금 주사위 모달이 내려간 턴이면 판정 줄을 잠깐 강조한다. */
   justRevealed: boolean;
-  /** 이 턴의 서사 요청이 실패했다고 내 브라우저가 아는 경우. */
+  /**
+   * 서사 요청 자체가 실패했다고 내 브라우저가 아는 경우(403/409/503 등,
+   * `turn.voided`로는 안 잡히는 네트워크·권한 오류) — `turn.voided`가
+   * 있으면 이 칸을 보지 않는다(아래 컴포넌트 본문 참조, 되돌림 문구가
+   * 우선한다).
+   */
   failed: boolean;
-  /** 이 턴을 낸 사람이 나인가 — 재시도 단추는 남의 턴에는 안 뜬다
-   * (서버가 그 캐릭터의 쿠키를 든 브라우저만 확인/진행을 받아들이므로,
-   * 남에게 단추를 보여 봤자 403만 받는다, verify-13-06 결함1). */
-  mine: boolean;
-  /** 재시도 단추의 콜백 — `null`이면 단추를 안 그린다. `failed && mine`
-   * 일 때만 실제 함수가 온다(호출부가 그 조합을 판단한다, D-04 — 판단은
-   * 한 자리). */
-  onRetry: (() => void) | null;
-  /** 지금 이 턴을 재시도하는 요청이 도는 중인가 — 단추를 비활성화하고
-   * 문구를 바꾼다(사라지게 하지 않는다, 단추가 있다가 없어지면 다시
-   * 시도할 방법을 잃은 것처럼 보인다). */
-  retrying: boolean;
   imageUrl?: string | null;
   /** 이 턴의 판정 계산 줄(Phase 12.2) — `null`이면 판 10 미만 기록이라
    * `COPY.checkTotalMissing`을 보인다(D-05). */
@@ -59,6 +52,7 @@ function CheckLine({
   justRevealed: boolean;
   calculation: CheckCalculationView | null;
 }) {
+  const voided = turn.voided !== null;
   const check = turn.check;
   if (check === null) {
     if (turn.confirmed === null) {
@@ -102,9 +96,20 @@ function CheckLine({
   // (D-08/D-09/D-14).
   const summary = buildCheckSummary(check, calculation);
 
+  // 취소된 판정(판 15, D-33/MEAS-02 보완) — 방금 굴린 눈은 그대로
+  // 보여주되(WITHDRAWN한 것이 사람 눈에 보여야 한다), 흐리게 하고
+  // (`.calc-segment--discarded`가 이미 쓰는 「버려진 눈」 시각 언어를
+  // 그대로 재사용한다) 옆에 짧은 꼬리표를 붙인다 — 색만으로 뜻을 전하지
+  // 않는다는 이 파일의 기존 규율(같은 파일 위쪽 주석)과 같다.
   return (
     <div
-      className={justRevealed ? "check check--just-revealed" : "check"}
+      className={
+        voided
+          ? "check check--voided"
+          : justRevealed
+            ? "check check--just-revealed"
+            : "check"
+      }
       role="status"
       aria-live="polite"
     >
@@ -115,6 +120,9 @@ function CheckLine({
           </span>
         ))}
       </span>
+      {voided ? (
+        <span className="calc-segment__discarded-tag">{COPY.turnVoidedTag}</span>
+      ) : null}
       {summary.totalMissing ? (
         <span className="check__total check__total--missing">{COPY.checkTotalMissing}</span>
       ) : (
@@ -161,14 +169,12 @@ export function TurnCard({
   isLatest,
   justRevealed,
   failed,
-  mine,
-  onRetry,
-  retrying,
   imageUrl,
   calculation,
 }: TurnCardProps) {
   const confirmed = turn.confirmed;
   const hasNarration = turn.narration.length > 0;
+  const voided = turn.voided !== null;
 
   return (
     <article className="turn">
@@ -209,7 +215,7 @@ export function TurnCard({
             <p key={chunk.seq}>{chunk.text}</p>
           ))}
         </div>
-      ) : turn.check !== null && !failed ? (
+      ) : turn.check !== null && !failed && !voided ? (
         <div className="narration">
           <span className="narration__waiting">
             <span className="dots">
@@ -222,26 +228,15 @@ export function TurnCard({
         </div>
       ) : null}
 
-      {failed ? (
-        <>
-          <p className="turn__error">{COPY.turnFailed}</p>
-          {/* 재시도는 이 턴을 낸 사람만 누를 수 있다(mine) — 서버가 남의
-              캐릭터로 온 확인/진행 요청을 403으로 거절하므로, 남에게
-              단추를 보여 봤자 실패만 한다. 누르면 새 선언(declareAction)이
-              아니라 같은 declare_seq로 confirm()/proceed()를 다시
-              부른다(`session/turnRetry.ts`) — 이미 굴린 주사위가 있으면
-              그것을 그대로 두고 이야기만 다시 쓴다(verify-13-06 결함1). */}
-          {mine && onRetry !== null ? (
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={retrying}
-              onClick={onRetry}
-            >
-              {retrying ? COPY.turnRetrying : COPY.turnRetryButton}
-            </button>
-          ) : null}
-        </>
+      {/* 되돌려진 턴(판 15)이 실패 문구보다 우선한다 — 그 결과 turn_voided를
+          이미 아는 경우 낡은 `narration_failed` 문구("판정 결과는 그대로")를
+          동시에 보여주지 않는다. 63aef0c의 재시도 단추는 여기 없다 — 「다시
+          시도해 주세요」는 이제 그냥 새로 선언하라는 뜻이고, 시스템은
+          아무것도 더 하지 않는다(그 자체가 이 정정의 핵심이다). */}
+      {voided ? (
+        <p className="turn__error">{COPY.turnVoided}</p>
+      ) : failed ? (
+        <p className="turn__error">{COPY.turnFailed}</p>
       ) : null}
     </article>
   );

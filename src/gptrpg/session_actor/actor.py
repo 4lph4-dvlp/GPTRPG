@@ -38,6 +38,7 @@ from gptrpg.event_log.schema import (
     SceneEntityEmerged,
     SceneIllustrated,
     SceneOpened,
+    TurnVoided,
     utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
@@ -400,6 +401,33 @@ class AdvanceClock:
 
 
 @dataclass(frozen=True)
+class VoidTurn:
+    """서사 생성이 끝내 실패해 이 턴 전체를 없었던 일로 되돌리는 명령(판
+    15, D-33/MEAS-02 보완).
+
+    **이것은 「같은 판정 다시 서술하기」가 아니다** — 그 전제(63aef0c)는
+    틀렸다. 「다시 시도해 주세요」는 플레이어가 반드시 같은 쿼리를 다시
+    주는 것을 뜻하지 않는다(마음이 바뀐 사용자는 완전히 다른 행동을
+    선언할 수 있고, 그러면 다른 무게·다른 주사위가 필요하다) — 필요한
+    것은 「두 번 굴리기 방지」가 아니라 「서사에 실패한 행동의 롤백」이다.
+    이 명령은 그 판정이 커밋한 모든 효과(check_count/failure_count/
+    fails_since_clock, 그 판정이 직접 돌린 시계 진행)를 상쇄하는
+    `turn_voided` 사건 하나를 남긴다 — 판정 사건 자체는 지우거나 고쳐
+    쓰지 않는다(D-12).
+
+    `resolve_seq`는 되돌릴 `check_resolved` 사건의 순번이다 — 호출부
+    (`web/routes_actions.py`·`cli/turn_flow.py`)가 이미 손에 들고 있는
+    값을 그대로 넘긴다(그 자리가 `check_event.counts_as_failure`도 함께
+    읽으므로, `_prepare_void_turn`이 저장소를 다시 읽지 않아도 된다 —
+    다른 모든 `_prepare_*`가 지키는 「검증만, 저장소 I/O 없음」 계약과
+    같다)."""
+
+    declare_seq: int
+    resolve_seq: int
+    counts_as_failure: bool
+
+
+@dataclass(frozen=True)
 class RecordAiCall:
     """AI를 한 번 불렀다는 사실을 기록하는 명령.
 
@@ -539,6 +567,7 @@ Command = (
     | ReleaseGmSlot
     | OpenScene
     | RecordEmergedEntity
+    | VoidTurn
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
@@ -575,6 +604,7 @@ _EVENT_CLASSES: dict[str, type] = {
     "creation_host_claimed": CreationHostClaimed,
     "scene_opened": SceneOpened,
     "scene_entity_emerged": SceneEntityEmerged,
+    "turn_voided": TurnVoided,
 }
 
 
@@ -712,6 +742,14 @@ class EntityAlreadyEmerged(CommandRejected):
     def __init__(self, prior: EmergedEntityFold) -> None:
         super().__init__("이미 같은 이름으로 적립된 장면 대상이다")
         self.prior = prior
+
+
+class TurnAlreadyVoided(CommandRejected):
+    """이 declare_seq는 이미 되돌려졌다(판 15) — 두 번째 되돌리기 요청도
+    성공으로 해석한다(`AlreadyChanged`/`EntityAlreadyEmerged`와 같은 자리
+    — 사건이 이미 있으면 새로 쌓지 않고 그 사실 자체를 성공으로 읽는다).
+    `CommandRejected`의 하위 클래스라 기존 `except CommandRejected` 경로가
+    그대로 잡는다 — 재사용이 필요한 자리에서만 이 클래스를 먼저 잡는다."""
 
 
 class RosterAlreadyLocked(CommandRejected):
@@ -1071,6 +1109,8 @@ class SessionActor:
             return self._prepare_open_scene(command)
         if isinstance(command, RecordEmergedEntity):
             return self._prepare_emerged_entity(command)
+        if isinstance(command, VoidTurn):
+            return self._prepare_void_turn(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -1337,6 +1377,35 @@ class SessionActor:
                 "clock_id": command.clock_id,
                 "segment_index": command.segment_index,
                 "trigger": command.trigger,
+            },
+        )
+
+    def _prepare_void_turn(self, command: VoidTurn) -> tuple[str, int | None, dict]:
+        """이 턴을 없었던 일로 되돌린다(판 15, D-33/MEAS-02 보완).
+
+        멱등 방벽이 두 겹이다 — 여기서 `self.state.voided_declare_seqs`로
+        먼저 막고(사건을 아예 새로 안 쌓는다), 리듀서(`turn_voided` 분기)가
+        한 번 더 막는다(`AlreadyChanged`가 `resource_change_by_cause`로
+        막는 것과 같은 이중화). `declare_seq`/`resolve_seq`가 실제로 이
+        세션에서 확인·판정까지 간 짝인지(`confirmed_declares`) 대조한다 —
+        호출부가 넘긴 값을 그대로 믿지 않는다(ASVS V5, `_prepare_confirm`의
+        소유권 검사와 같은 신중함).
+        """
+        if command.declare_seq in self.state.voided_declare_seqs:
+            raise TurnAlreadyVoided("이미 되돌려진 턴이다")
+        self._validate_caused_by(command.resolve_seq)
+        prior = self.state.confirmed_declares.get(command.declare_seq)
+        if prior is None or prior.resolve_seq != command.resolve_seq:
+            raise CommandRejected(
+                "declare_seq/resolve_seq 짝이 이 세션의 확인된 판정과 맞지 않는다"
+            )
+        return (
+            "turn_voided",
+            command.resolve_seq,
+            {
+                "declare_seq": command.declare_seq,
+                "counts_as_failure": command.counts_as_failure,
+                "clock_fail_threshold": AUTO_ADVANCE_FAILURE_THRESHOLD,
             },
         )
 
