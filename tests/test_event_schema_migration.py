@@ -348,11 +348,19 @@ def test_event_schema_version_was_ten_before_phase_12_3():
     assert EVENT_SCHEMA_VERSION >= 10
 
 
-def test_event_schema_version_is_twelve():
-    """판 12 못박기(Phase 13, D-01/D-02/D-06) — 장면 오프닝(`scene_opened`)이
-    사건 형식에 닿게 한 현재 판이다. 누가 무심코 판을 또 올리거나 내리면
-    이 값이 바뀌어 이 시험이 잡는다."""
-    assert EVENT_SCHEMA_VERSION == 12
+def test_event_schema_version_was_twelve_before_phase_13_04():
+    """판 12 시절의 사실만 남긴다(Phase 13, D-01/D-02/D-06) — 장면
+    오프닝(`scene_opened`)이 사건 형식에 닿았을 때의 판이다. 그 이후
+    13-04가 장면 대상 2층 적립(`scene_entity_emerged`)으로 판을 13으로
+    올렸다(아래 시험)."""
+    assert EVENT_SCHEMA_VERSION >= 12
+
+
+def test_event_schema_version_is_thirteen():
+    """판 13 못박기(Phase 13-04, D-13②) — 장면 대상 2층 적립
+    (`scene_entity_emerged`)이 사건 형식에 닿게 한 현재 판이다. 누가
+    무심코 판을 또 올리거나 내리면 이 값이 바뀌어 이 시험이 잡는다."""
+    assert EVENT_SCHEMA_VERSION == 13
 
 
 def _tuple_key_to_str(key: tuple) -> str:

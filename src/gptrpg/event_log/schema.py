@@ -16,8 +16,29 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
-EVENT_SCHEMA_VERSION = 12
-"""판 11 -> 판 12: 장면 오프닝(Phase 13, SCENE-01/02, D-01~D-09)이 사건
+EVENT_SCHEMA_VERSION = 13
+"""판 12 -> 판 13: 장면 대상 3층 관리(Phase 13-04, SCENE-03/05, D-13②)가
+사건 형식에 닿았다. 새 사건 종류가 하나 늘었다 — `SceneEntityEmerged`
+(`scene_entity_judge`가 판단한 「이번에 새로 나온 대상」을 처음으로 사건에
+적립한다).
+
+Phase 9(`agents/scene_entity_judge.py`)부터 이 판단은 매 턴 불렸지만
+결과가 서술에 넘겨지고 버려지기만 했다 — 모듈 도크스트링이 스스로 「장면
+대상·캐릭터 상태 관리는 Phase 11·12 소관이다」라고 적었는데 둘 다 안
+받았다. 이 판이 그 받는 쪽을 연다.
+
+`SceneEntityEmerged.name`/`.kind`(닫힌 두 값 `person`/`thing`)가 원본
+값이고, `.normalized_name`은 **사건에 함께 적는** 정규화 결과다(NFC +
+공백 제거) — 정규화 규칙이 나중에 바뀌어도 이미 쓴 기록의 「그때 이
+이름은 무엇으로 대조됐나」가 보존된다(이미 쓴 기록을 손대지 않는다는
+D-12 규약이 정규화에도 적용된다). `caused_by_seq`는 그 턴의 판정/선언
+사건이다.
+
+**`rules_core/reducer.py`의 신설 분기는 이 판 올리기와 반드시 같은
+커밋이다**(08-CONTEXT.md D-06, 이미 여러 번 난 사고 — 이번이 여덟 번째
+사례).
+
+판 11 -> 판 12: 장면 오프닝(Phase 13, SCENE-01/02, D-01~D-09)이 사건
 형식에 닿았다. 새 사건 종류가 하나 늘었다 — `SceneOpened`(판정 없이 장면을
 여는 서사, `declare_seq` 없이 기록되는 세 번째 진입점).
 
@@ -727,6 +748,23 @@ class SceneOpened(EventEnvelope):
     source: Literal["scripted", "sketch", "fallback"]
 
 
+class SceneEntityEmerged(EventEnvelope):
+    """`scene_entity_judge`가 판단한 「이번에 새로 나온 대상」을 사건으로
+    적립한다(D-13②, 판 13, SCENE-03/SCENE-05).
+
+    `kind`는 닫힌 두 값(`person`/`thing`)뿐이다 — 액터
+    (`session_actor.actor.RecordEmergedEntity`)가 이 밖의 값을 거부한다.
+    `normalized_name`은 정규화(NFC + 공백 제거) 결과를 **사건에 함께
+    적는다** — 정규화 규칙이 나중에 바뀌어도 이 기록이 「그때 어떻게
+    대조됐나」를 보존한다. `name`은 원본 표시 이름이다.
+    """
+
+    event_type: Literal["scene_entity_emerged"]
+    name: str
+    kind: Literal["person", "thing"]
+    normalized_name: str
+
+
 GameEvent = Annotated[
     Union[
         ActionDeclared,
@@ -749,6 +787,7 @@ GameEvent = Annotated[
         CreationConsentRecorded,
         CreationHostClaimed,
         SceneOpened,
+        SceneEntityEmerged,
     ],
     Field(discriminator="event_type"),
 ]
@@ -777,9 +816,10 @@ _KNOWN_EVENT_TYPES = frozenset(
         "creation_consent_recorded",
         "creation_host_claimed",
         "scene_opened",
+        "scene_entity_emerged",
     }
 )
-"""`GameEvent` 판별 유니온이 아는 스무 사건 종류 — `parse_event`가 이
+"""`GameEvent` 판별 유니온이 아는 스물한 사건 종류 — `parse_event`가 이
 목록 밖의 `event_type`을 `CorruptEventRecord`로 분류하는 데 쓴다."""
 
 

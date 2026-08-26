@@ -35,6 +35,7 @@ from gptrpg.event_log.schema import (
     PartySizeFixed,
     ResourceChanged,
     SafetyFlagged,
+    SceneEntityEmerged,
     SceneIllustrated,
     SceneOpened,
     utc_now_iso,
@@ -46,9 +47,11 @@ from gptrpg.rules_core.grading import DEFAULT_TARGET
 from gptrpg.rules_core.reducer import (
     ConfirmedDeclareRecord,
     CreationGmLineFold,
+    EmergedEntityFold,
     GameState,
     apply_event,
 )
+from gptrpg.rules_core.scenario import normalize_entity_name
 from gptrpg.rules_core.resolution import (
     Modifier,
     StatNotUsableInChecks,
@@ -260,6 +263,22 @@ class OpenScene:
     scenario_id: str
     text: str
     source: str
+
+
+@dataclass(frozen=True)
+class RecordEmergedEntity:
+    """`scene_entity_judge`가 판단한 「이번에 새로 나온 대상」 하나를
+    사건으로 적립한다(D-13②, 판 13, Phase 13-04).
+
+    **시나리오 캐스트(1층)와 겹치는지는 여기서 안 본다** — 액터는
+    시나리오를 모른다(`rulebooks`를 import하지 않는다, 층 계약).
+    1층 겹침 거르기는 호출부(`turn.record_emerged_entities`)와
+    `scene_entity_judge`의 `existing_names`가 이미 한다. **이 명령이
+    보는 것은 오직 이미 적립된 것(2층)과의 중복뿐이다.**"""
+
+    name: str
+    kind: str
+    caused_by_seq: int | None = None
 
 
 @dataclass(frozen=True)
@@ -512,6 +531,7 @@ Command = (
     | ClaimGmSlot
     | ReleaseGmSlot
     | OpenScene
+    | RecordEmergedEntity
 )
 
 _VALID_CLOCK_TRIGGERS = frozenset({"fail_counter", "condition", "ai_choice"})
@@ -523,6 +543,7 @@ _VALID_SAFETY_FLAG_DISPOSITIONS = frozenset({"blocked", "flagged"})
 _VALID_RESOURCE_CHANGE_SOURCES = frozenset(
     {"outcome_list", "discretionary_ruling", "retro_declaration"}
 )
+_VALID_EMERGED_ENTITY_KINDS = frozenset({"person", "thing"})
 
 _EVENT_CLASSES: dict[str, type] = {
     "action_declared": ActionDeclared,
@@ -545,6 +566,7 @@ _EVENT_CLASSES: dict[str, type] = {
     "creation_consent_recorded": CreationConsentRecorded,
     "creation_host_claimed": CreationHostClaimed,
     "scene_opened": SceneOpened,
+    "scene_entity_emerged": SceneEntityEmerged,
 }
 
 
@@ -668,6 +690,20 @@ class SceneAlreadyOpened(CommandRejected):
     def __init__(self, prior_seq: int) -> None:
         super().__init__("이미 장면이 열렸다")
         self.prior_seq = prior_seq
+
+
+class EntityAlreadyEmerged(CommandRejected):
+    """이미 같은 정규화 이름으로 적립된 `scene_entity_emerged` 사건이
+    있다(D-13②/D-14, 판 13). `.prior`가 이미 기록된 `EmergedEntityFold`를
+    들고 있다 — `AlreadyGmSpoken`/`AlreadyChanged`와 같은 자리·같은
+    모양이다. **호출부가 이 예외를 「성공(이미 있음)」으로 읽는다** —
+    같은 이름이 다시 나오면 명부에 두 번 안 들어가는 것이 정상 동작이다.
+    `CommandRejected`의 하위 클래스라 기존 `except CommandRejected`
+    경로가 그대로 잡는다."""
+
+    def __init__(self, prior: EmergedEntityFold) -> None:
+        super().__init__("이미 같은 이름으로 적립된 장면 대상이다")
+        self.prior = prior
 
 
 class RosterAlreadyLocked(CommandRejected):
@@ -1025,6 +1061,8 @@ class SessionActor:
             return self._prepare_release_gm_slot(command)
         if isinstance(command, OpenScene):
             return self._prepare_open_scene(command)
+        if isinstance(command, RecordEmergedEntity):
+            return self._prepare_emerged_entity(command)
         raise CommandRejected(f"알 수 없는 명령: {command!r}")
 
     def _validate_caused_by(self, caused_by_seq: int | None) -> None:
@@ -2112,6 +2150,48 @@ class SessionActor:
                 "scenario_id": command.scenario_id,
                 "text": command.text,
                 "source": command.source,
+            },
+        )
+
+    def _prepare_emerged_entity(
+        self, command: RecordEmergedEntity
+    ) -> tuple[str, int | None, dict]:
+        """이번에 나와서 확정된 대상 하나를 적립한다(D-13②/D-14, 판 13).
+
+        검증 순서:
+        ① 빈 이름은 거부한다 — 빈 이름이 명부에 안 들어간다.
+        ② `kind`가 닫힌 두 값(`person`/`thing`) 밖이면 거부한다 —
+           닫힌 목록 규율(SAFE-07과 같은 성격).
+        ③ 정규화한 이름이 이미 `state.scene_entities_emerged`에 있으면
+           `EntityAlreadyEmerged(prior)`(호출부가 성공으로 읽는다) —
+           `AlreadyGmSpoken`/`AlreadyChanged`와 같은 자리·같은 이유(큐
+           안 재검사가 없으면 겹친 두 요청이 같은 이름을 두 번 적립할
+           수 있다).
+
+        **시나리오 캐스트(1층)와 겹치는지는 여기서 안 본다** — 위
+        `RecordEmergedEntity` 도크스트링 참조. 이 액터는 `rulebooks`를
+        모른다(층 계약).
+        """
+        name = command.name.strip()
+        if not name:
+            raise CommandRejected("name은 비어 있을 수 없다")
+        if command.kind not in _VALID_EMERGED_ENTITY_KINDS:
+            raise CommandRejected(
+                f"kind는 {sorted(_VALID_EMERGED_ENTITY_KINDS)} 중 하나여야 한다: "
+                f"{command.kind!r}"
+            )
+        self._validate_caused_by(command.caused_by_seq)
+        normalized = normalize_entity_name(name)
+        for prior in self.state.scene_entities_emerged:
+            if prior.normalized_name == normalized:
+                raise EntityAlreadyEmerged(prior)
+        return (
+            "scene_entity_emerged",
+            command.caused_by_seq,
+            {
+                "name": name,
+                "kind": command.kind,
+                "normalized_name": normalized,
             },
         )
 

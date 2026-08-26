@@ -10,10 +10,12 @@
 하는 것과 같은 최소 구조 검사(빈 문자열 거부)뿐이다.
 """
 
+import unicodedata
 from dataclasses import dataclass
 from typing import Literal
 
 from gptrpg.rules_core.entities import Entity
+from gptrpg.rules_core.reducer import EmergedEntityFold
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,119 @@ class ScenarioDecl:
             raise InvalidScenarioDecl(
                 "display_name이 비었다", scenario_id=self.scenario_id
             )
+
+
+SceneLayer = Literal["scenario", "emerged", "outside"]
+"""장면 대상 3층 조회의 답(D-13②/SCENE-03) — 시나리오가 적어 둔 것
+(`"scenario"`, 1층) · 이번에 나와서 확정된 것(`"emerged"`, 2층) · 그 밖
+(`"outside"`, 3층). **평가 순서는 항상 이 순서다** — 같은 이름이
+`scenario`와 `emerged` 둘 다에 있으면 `scenario`가 이긴다(선언된
+우선순위, SCENE-03 adjacency). 같은 입력에는 언제나 같은 답이 나온다."""
+
+
+@dataclass(frozen=True)
+class SceneLayerHit:
+    """`resolve_scene_layers`가 돌려주는 답 하나.
+
+    `layer == "outside"`이면 `name`/`kind`는 둘 다 `None`이다 — 찾은
+    것이 없으므로 담을 것이 없다. `cast`/`emerged`가 둘 다 비어 있어도
+    이 결과로 결정론적으로 끝난다(`None`도 예외도 아니다, SCENE-03
+    empty)."""
+
+    layer: SceneLayer
+    name: str | None
+    kind: str | None
+
+
+@dataclass(frozen=True)
+class RosterRow:
+    """명부 한 행 — 이름·종류·출생 셋뿐이다(D-17).
+
+    시나리오가 미리 적은 인물(1층)과 도중에 즉흥으로 생긴 인물(2층)이
+    **같은 목록**에 있고 `origin` 칸 하나로만 갈린다 — 찾는 곳은 하나로
+    남는다.
+
+    **이 dataclass에 칸을 더하는 것은 Phase 14(관계 장부, MEM-02)를
+    침범하는 일이다.** 「그 인물과 무슨 일이 있었는지」는 여기 안
+    들어온다 — 지금 넣으면 두 단계가 같은 것을 두 번 만들어 나중에
+    충돌한다.
+    """
+
+    name: str
+    kind: str | None
+    """`None`은 「이 시나리오 선언에 종류 개념이 없다」다(1층 — 시나리오
+    선언이 종류를 안 적는다) — 「모른다」가 아니다(`Rulebook`의 칸
+    관례 그대로). 2층 행은 `scene_entity_judge`가 준 `person`/`thing`을
+    그대로 담는다."""
+    origin: SceneLayer
+
+
+def normalize_entity_name(name: str) -> str:
+    """이름 대조의 **유일한** 규칙 — NFC 정규화 뒤 앞뒤 공백 제거, 그 뒤
+    **완전 일치**로만 비교한다(D-19/SCENE-05 encoding).
+
+    분해형으로 쓴 같은 한글 이름과 조합형이 이 함수를 거치면 같은 값이
+    된다. 앞뒤 공백만 다른 두 이름도 같은 값이 된다.
+
+    **왜 완전 일치인가:** 편집 거리·부분 겹침으로 합치면 서로 다른
+    인물이 조용히 하나가 되고, 그 합침을 아무도 못 본다 — 그래서 가운데
+    공백이 다르면(「우물 지기」 vs 「우물지기」) **다른 값**이다. 「우물지기
+    이슬」과 「이슬」이 갈라지는 것을 막는 것은 이 함수가 아니라 **AI가
+    닫힌 목록에서 고르게 하는 것**(D-19, 13-05)이다 — 두 방식을 섞지
+    않는다.
+    """
+    return unicodedata.normalize("NFC", name).strip()
+
+
+def resolve_scene_layers(
+    name: str,
+    *,
+    cast: tuple[Entity, ...],
+    emerged: tuple[EmergedEntityFold, ...],
+) -> SceneLayerHit:
+    """장면 대상 3층 조회 — **고정된 순서**(시나리오 → 확정 → 밖)로
+    평가하고, 같은 입력에 언제나 같은 답을 돌려준다(SCENE-03 ordering).
+
+    이름이 `cast`(1층)에 있으면 그 결과. `emerged`(2층)에만 있으면 그
+    결과. **둘 다에 있으면 1층이 이긴다**(SCENE-03 adjacency, 결과는
+    언제나 하나다). 어느 층에도 없으면 3층 결과 — `cast`와 `emerged`가
+    둘 다 비어 있어도 3층 결과로 결정론적으로 끝난다(SCENE-03 empty).
+    """
+    target = normalize_entity_name(name)
+    for entity in cast:
+        if normalize_entity_name(entity.display_name) == target:
+            return SceneLayerHit(layer="scenario", name=entity.display_name, kind=None)
+    for fold in emerged:
+        if fold.normalized_name == target:
+            return SceneLayerHit(layer="emerged", name=fold.name, kind=fold.kind)
+    return SceneLayerHit(layer="outside", name=None, kind=None)
+
+
+def roster_rows(
+    cast: tuple[Entity, ...],
+    emerged: tuple[EmergedEntityFold, ...],
+) -> tuple[RosterRow, ...]:
+    """명부 한 벌(D-17) — 1층 먼저, 그 다음 2층(등장 순서, 사건 순번
+    오름차순 — `emerged`가 이미 그 순서로 접혀 있다).
+
+    두 층에 같은 이름이 있으면 행이 하나(1층 것)다. 빈 명부(`cast`·
+    `emerged` 둘 다 빈 튜플)에서는 빈 튜플이 나온다 — 「없음」이라는
+    명시적 결과이지 오류도 지어낸 인물도 아니다(SCENE-05 empty).
+    """
+    rows: list[RosterRow] = []
+    seen: set[str] = set()
+    for entity in cast:
+        normalized = normalize_entity_name(entity.display_name)
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        rows.append(RosterRow(name=entity.display_name, kind=None, origin="scenario"))
+    for fold in emerged:
+        if fold.normalized_name in seen:
+            continue
+        seen.add(fold.normalized_name)
+        rows.append(RosterRow(name=fold.name, kind=fold.kind, origin="emerged"))
+    return tuple(rows)
 
 
 def render_scripted_opening(opening: OpeningDecl) -> str:

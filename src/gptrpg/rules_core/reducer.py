@@ -89,6 +89,29 @@ class CreationGmLineFold:
 
 
 @dataclass(frozen=True)
+class EmergedEntityFold:
+    """장면에 이번에 나와서 확정된 대상 하나 — 접힌 결과(판 13+, Phase
+    13-04, D-13②/D-14).
+
+    `CreationInterjectionFold`와 같은 자리·같은 형식이다 —
+    `GameState.scene_entities_emerged`가 이 dataclass의 **순번 오름차순
+    튜플**이다(딕셔너리가 아니어야 등장 순서가 「최근」의 기준(D-12
+    Claude's Discretion)으로 보존된다).
+
+    `normalized_name`은 이 대상이 **처음 적립될 때** 대조에 쓰인 정규화
+    결과를 그대로 옮긴 것이다 — 정규화 규칙이 나중에 바뀌어도 이미 접힌
+    이 값은 안 바뀐다(D-12 「이미 쓴 기록을 손대지 않는다」가 정규화에도
+    적용된다). 3층 조회(`rules_core.scenario.resolve_scene_layers`)가 이
+    칸으로 대조한다 — 매번 다시 정규화하지 않는다.
+    """
+
+    seq: int
+    name: str
+    kind: str
+    normalized_name: str
+
+
+@dataclass(frozen=True)
 class GameState:
     """사건 기록을 처음부터 훑어 만드는 현재 상태.
 
@@ -250,6 +273,18 @@ class GameState:
     않는다). 한 번 채워지면 다시 `None`으로 돌아가지 않는다(풀리는
     사건이 없다) — `session_scenario_id`와 항상 같은 사건에서 함께
     채워진다."""
+    scene_entities_emerged: tuple[EmergedEntityFold, ...] = ()
+    """장면 대상 3층 중 2층 — 이번 세션에서 나와서 확정된 것(판 13+,
+    Phase 13-04, D-13②/D-14). `scene_entity_emerged` 사건에서만 채워진다.
+
+    **순번 오름차순 튜플이다** — `creation_interjections`와 같은 모양,
+    딕셔너리가 아니다(등장 순서가 보존돼야 「최근 것」을 자를 수 있다,
+    D-12). **수명은 세션 전체다**(D-11) — 장면 전환 개념을 이 단계에서
+    만들지 않으므로 풀리는 사건이 없고, 세션 내내 쌓이기만 한다.
+
+    **칸을 더하지 않는다(D-17)** — 「그 인물과 무슨 일이 있었는지」는
+    Phase 14(관계 장부, MEM-02)의 몫이다. 지금 넣으면 두 단계가 같은
+    것을 두 번 만들어 나중에 충돌한다."""
 
 
 def initial_state(session_id: str) -> GameState:
@@ -620,6 +655,31 @@ def apply_event(state: GameState, event_type: str, payload: Mapping) -> GameStat
             last_seq=seq,
             session_scenario_id=payload["scenario_id"],
             scene_opened_seq=seq,
+        )
+    if event_type == "scene_entity_emerged":
+        # 2층 적립(판 13, D-13②/D-14) — 이미 같은 normalized_name이 있으면
+        # 더하지 않는다(리듀서가 마지막 방어선이다, 액터의 `EntityAlreadyEmerged`
+        # 단락과 이중 방어). **그래도 분기가 있어야 한다:** 이 분기가 없으면
+        # 이 종류가 하나라도 있는 세션이 폴링마다 UnknownEventType을 맞고
+        # 영구히 안 열린다(위 여러 분기가 같은 사고를 반복해서 기록해 두었다
+        # — 이 판 올리기와 이 분기는 반드시 같은 커밋).
+        normalized_name = payload["normalized_name"]
+        if any(
+            item.normalized_name == normalized_name for item in state.scene_entities_emerged
+        ):
+            return replace(state, last_seq=seq)
+        return replace(
+            state,
+            last_seq=seq,
+            scene_entities_emerged=(
+                *state.scene_entities_emerged,
+                EmergedEntityFold(
+                    seq=seq,
+                    name=payload["name"],
+                    kind=payload["kind"],
+                    normalized_name=normalized_name,
+                ),
+            ),
         )
     raise UnknownEventType(event_type)
 

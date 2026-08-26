@@ -296,6 +296,7 @@
   "prompt_tokens": 87701,
   "reopened_creation_steps": [],
   "resource_change_by_cause": {},
+  "scene_entities_emerged": [],
   "scene_opened_seq": null,
   "session_id": "session1",
   "session_scenario_id": null,
