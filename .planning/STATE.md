@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 13
 current_phase_name: 장면 — 오프닝과 대상
 status: executing
-stopped_at: Completed 13-01-PLAN.md
-last_updated: "2026-08-26T01:28:40.394Z"
+stopped_at: Completed 13-02-PLAN.md
+last_updated: "2026-08-26T01:56:56.872Z"
 last_activity: 2026-08-25
 last_activity_desc: Phase 13 execution started
-state_head: d64eee2f844f6f48135d73742e12bc67ae8de3b9
+state_head: e94d7859db5627beaee53a322b185aae3c7207c1
 progress:
   total_phases: 14
   completed_phases: 7
   total_plans: 64
-  completed_plans: 59
+  completed_plans: 60
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 13 (장면 — 오프닝과 대상) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-08-25 — Phase 13 execution started
 
@@ -182,6 +182,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P19 | ~15min | 2 tasks | 1 files |
 | Phase 12.3 P20 | ~25min | 3 tasks | 3 files |
 | Phase 13 P01 | multi-session (spans 2026-08-25 02:50 to 2026-08-26 10:06, incl. checkpoint wait) | 3 tasks | 25 files |
+| Phase 13 P02 | ~90min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -392,6 +393,7 @@ Progress: [██████████] 100%
 - [Phase 13]: 13-01: OpeningRequest.scenario_id defaults to LAMPLIGHT_VIGIL_ID (approved deviation) — 13-03 must re-judge when it registers the well scenario
 - [Phase 13]: 13-01: D-10 premise corrected — creation GM line (creation_gm_spoke) does not survive to play screen; StatusPane identity block is what satisfies D-10
 - [Phase 13]: 13-01: fixed opening auto-fire effect dep bug (feed.state?.party_roster !== null collapsed undefined/locked cases) via hasLockedRoster(state) — opening had never fired for anyone except the last creation finisher
+- [Phase 13]: 13-02: 만들기 GM 호출 네 곳(announce/nominate/follow_up/wrap_up)을 13-01의 ClaimGmSlot/ReleaseGmSlot 슬롯 뒤로 옮겼다 — 다섯 GM 자리가 같은 슬롯 하나를 공유한다(D-02/D-03). tests/test_gm_slot.py가 사건 개수가 아니라 제공자 호출 횟수를 세는 시험으로 고정했다. — 12.3-14가 첫 안내를 자동 발동으로 바꾼 뒤 참가자 넷이면 네 번이 기본값이 됐다(2026-08-23 todo). 13-01이 오프닝을 다섯 번째 자동 발동 호출로 뚫으며 세운 슬롯을 이 계획이 기존 네 자리로 넓혀 D-03을 닫았다.
 
 ### Pending Todos
 
@@ -449,8 +451,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-26T01:28:40.149Z
-Stopped at: Completed 13-01-PLAN.md
+Last session: 2026-08-26T01:56:56.621Z
+Stopped at: Completed 13-02-PLAN.md
 Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —

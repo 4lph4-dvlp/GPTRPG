@@ -752,7 +752,7 @@ Plans:
 
   5. 만난 인물이 장면이 바뀌어도 명부에 남아, 재등장했을 때 같은 인물로 인식된다
 
-**Plans**: 1/6 plans executed
+**Plans**: 2/6 plans executed
 
 Plans:
 **Wave 1**
@@ -761,7 +761,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 13-02-PLAN.md — 겹친 GM 호출이 AI를 두 번 부르는 구멍을 다섯 자리에서 닫는다 (D-03)
+- [x] 13-02-PLAN.md — 겹친 GM 호출이 AI를 두 번 부르는 구멍을 다섯 자리에서 닫는다 (D-03)
 - [ ] 13-03-PLAN.md — 메모형 오프닝(상황 판단이 좁혀 넘긴다) + 기존 시나리오를 등록소로 이관
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -1054,7 +1054,7 @@ Phase 12.1은 Phase 8의 점유 규칙과 Phase 11·12의 그릇·쓰기 경로�
 | 12.1. 캐릭터 만들기 — 7가지 동작과 애착 장치 (D22) (INSERTED) | v1.1 | 6/6 | Complete    | 2026-08-19 |
 | 12.2. 판정 합계를 서버가 보낸다 (INSERTED) | v1.1 | 3/3 | Complete    | 2026-08-20 |
 | 12.3. 캐릭터 만들기 화면 (INSERTED) | v1.1 | 20/20 | Complete    | 2026-08-24 |
-| 13. 장면 — 오프닝과 대상 | v1.1 | 1/6 | In Progress|  |
+| 13. 장면 — 오프닝과 대상 | v1.1 | 2/6 | In Progress|  |
 | 13.1. GM이 이야기를 이끈다 — 행동과 필연적 지점을 잇는다 (INSERTED) | v1.1 | 0/TBD | Not started | - |
 | 14. 기억 유지 — 관계 장부 · 문맥 압축기 · 저장소 색인 | v1.1 | 0/TBD | Not started | - |
 | 15. 위협 시계 — 이야기에 반응한다 | v1.1 | 0/TBD | Not started | - |
