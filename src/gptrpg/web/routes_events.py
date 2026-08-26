@@ -34,8 +34,10 @@ from gptrpg.event_log.schema import (
     GameEvent,
 )
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
+from gptrpg.rulebooks.scenarios import DEFAULT_SCENARIO_ID, UnknownScenario, get_scenario
 from gptrpg.rules_core.reducer import GameState
 from gptrpg.rules_core.rulebook import Rulebook
+from gptrpg.rules_core.scenario import roster_rows
 from gptrpg.session_actor.actor import AUTO_ADVANCE_FAILURE_THRESHOLD
 from gptrpg.session_actor.projection import rebuild_state_from_events
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT
@@ -57,6 +59,21 @@ class CreationCharacterView(BaseModel):
     display_name: str
     consented: bool
     required_steps_filled: bool
+
+
+class RosterEntryView(BaseModel):
+    """명부 한 행(D-17, Phase 13-06) — `rules_core.scenario.RosterRow`의
+    화면용 얇은 거울. `CreationCharacterView`와 같은 자리·같은 모양으로
+    선언한다.
+
+    **이 모델에 칸을 더하는 것은 Phase 14(관계 장부, MEM-02)를 침범하는
+    일이다.** 「그 인물과 무슨 일이 있었는지」는 여기 안 들어온다 —
+    지금 넣으면 두 단계가 같은 것을 두 번 만들어 나중에 충돌한다.
+    """
+
+    name: str
+    kind: str | None
+    origin: str
 
 
 class CreationReopenedStepView(BaseModel):
@@ -171,6 +188,21 @@ class GameStateView(BaseModel):
     자리가 없고, 안 쓰는 값을 응답에 싣는 것은 나중에 「화면이 시나리오를
     고른다」로 잘못 자라는 씨앗이다."""
 
+    roster: list[RosterEntryView]
+    """지금까지 나온 것 한 벌(D-17, Phase 13-06, SCENE-05) — 시나리오가
+    미리 적어 둔 것(1층)과 이번 세션에서 나와서 확정된 것(2층)을 합친
+    것이다. **접는 일은 이 응답이 하지 않는다** — 13-04의 순수 함수
+    한 자리(`_roster_views` 참고)에서 이미 접힌 결과를 그대로 옮긴다
+    (D-04 규율, Phase 12.2가 고친 사고를 반복하지 않는다).
+
+    **상한을 걸지 않는다** — 화면은 사람이 보는 것이라 AI에게 넘기는
+    상한(장면 대상 2층 문맥 주입 상한, `agents/context.py`)과는 **다른
+    규율**이다(D-26이 「같은 상수로 묶지 말 것」을 명시적으로 경고했다).
+    이 응답은 전부 싣는다.
+
+    **빈 목록과 「아직 없다」가 같은 뜻이다** — `None`을 쓰지 않는다.
+    빈 배열이면 화면이 줄 자체를 안 그린다(D-25)."""
+
 
 def _creation_character_views(
     game_state: GameState, rulebook: Rulebook | None
@@ -212,6 +244,29 @@ def _creation_current_speaker_id(game_state: GameState) -> str | None:
     if creation_state.forfeited_nominee(game_state, game_state.session_id) == nominee:
         return None
     return nominee
+
+
+def _roster_views(game_state: GameState) -> list[RosterEntryView]:
+    """명부 한 벌(D-17, SCENE-05)을 화면용 얇은 거울로 옮긴다.
+
+    `session_scenario_id`(오프닝이 열렸으면 그 시나리오, 아직이면
+    `None`)가 없으면 `DEFAULT_SCENARIO_ID`로 떨어진다 — `web/routes_actions.
+    py`의 `_current_scenario`와 같은 규율(SCENE-04가 이미 세운 것)이라
+    명부도 1층을 오프닝 전부터 보여준다.
+
+    **시나리오 조회 실패가 폴링을 500으로 만들지 않는다** — 룰북 조회가
+    이미 쓰는 방어(T-12.3-09)와 같은 자리·같은 이유(세션 전체가 이 응답
+    하나에 걸려 있다)로, 등록되지 않은 시나리오는 1층을 빈 튜플로 두고
+    2층(확정 목록)만 싣는다."""
+    scenario_id = game_state.session_scenario_id or DEFAULT_SCENARIO_ID
+    try:
+        cast = get_scenario(scenario_id).cast
+    except UnknownScenario:
+        cast = ()
+    return [
+        RosterEntryView(name=row.name, kind=row.kind, origin=row.origin)
+        for row in roster_rows(cast=cast, emerged=game_state.scene_entities_emerged)
+    ]
 
 
 def _creation_step_value_views(game_state: GameState) -> list[CreationStepValueView]:
@@ -369,5 +424,6 @@ async def poll_events(
         creation_step_values=_creation_step_value_views(game_state),
         creation_host_claimed=game_state.creation_host_browser_id is not None,
         scene_opened_seq=game_state.scene_opened_seq,
+        roster=_roster_views(game_state),
     )
     return PollResponse(events=events, state=state_view, check_calculations=check_calculations)

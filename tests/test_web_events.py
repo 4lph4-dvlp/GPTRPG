@@ -10,14 +10,19 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from gptrpg.agents.context import SCENE_ENTITY_LIMIT
 from gptrpg.event_log.schema import (
     ActionDeclared,
     CheckResolved,
     EVENT_SCHEMA_VERSION,
     ModifierRecord,
+    SceneEntityEmerged,
+    SceneOpened,
     utc_now_iso,
 )
 from gptrpg.event_log.store import EventStore
+from gptrpg.rules_core.scenario import normalize_entity_name
+from gptrpg.rulebooks.threat_clocks import THREAT_CAST
 from gptrpg.session_actor.actor import AUTO_ADVANCE_FAILURE_THRESHOLD
 
 
@@ -30,6 +35,34 @@ def _declared(session_id: str, seq: int, text: str) -> ActionDeclared:
         seq=seq,
         schema_version=EVENT_SCHEMA_VERSION,
         recorded_at=utc_now_iso(),
+    )
+
+
+def _emerged(session_id: str, seq: int, name: str, kind: str = "person") -> SceneEntityEmerged:
+    return SceneEntityEmerged(
+        event_type="scene_entity_emerged",
+        session_id=session_id,
+        seq=seq,
+        schema_version=EVENT_SCHEMA_VERSION,
+        recorded_at=utc_now_iso(),
+        caused_by_seq=None,
+        name=name,
+        kind=kind,
+        normalized_name=normalize_entity_name(name),
+    )
+
+
+def _opened(session_id: str, seq: int, scenario_id: str) -> SceneOpened:
+    return SceneOpened(
+        event_type="scene_opened",
+        session_id=session_id,
+        seq=seq,
+        schema_version=EVENT_SCHEMA_VERSION,
+        recorded_at=utc_now_iso(),
+        caused_by_seq=None,
+        scenario_id=scenario_id,
+        text="시나리오 원문",
+        source="scripted",
     )
 
 
@@ -203,3 +236,112 @@ def test_poll_events_check_calculations_empty_when_no_checks(web_client: TestCli
 
     assert response.status_code == 200
     assert response.json()["check_calculations"] == []
+
+
+# ---------------------------------------------------------------------------
+# 명부(`roster`, D-17/D-23~D-26, Phase 13-06, SCENE-05) — 폴링 응답이
+# `rules_core.scenario.roster_rows`(13-04)가 접은 결과를 상한 없이
+# 그대로 싣는지 확인한다.
+# ---------------------------------------------------------------------------
+
+
+def test_roster_contains_scenario_cast_before_any_encounter(web_client: TestClient) -> None:
+    """아무 사건도 없는 세션도 `roster`에 기본 시나리오(`well_below`)의
+    캐스트가 1층으로 처음부터 담긴다 — 오프닝이 아직 안 열려도 명부의
+    1층은 시작부터 있다."""
+    response = web_client.get("/api/sessions/never-seen/events", params={"from_seq": 0})
+
+    assert response.status_code == 200
+    roster = response.json()["state"]["roster"]
+    names = {row["name"] for row in roster}
+    assert names == {entity.display_name for entity in THREAT_CAST}
+    assert all(row["origin"] == "scenario" for row in roster)
+
+
+def test_roster_includes_emerged_entity_with_origin_emerged(
+    tmp_db_path: Path, web_client: TestClient
+) -> None:
+    """층 밖 대상이 확정된 뒤에는 그 이름이 `origin == "emerged"`로
+    명부에 들어 있다."""
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    store.append(_emerged("s1", 0, "낯선 떠돌이 상인", kind="person"))
+    store.close()
+
+    response = web_client.get("/api/sessions/s1/events", params={"from_seq": 0})
+
+    assert response.status_code == 200
+    roster = response.json()["state"]["roster"]
+    matches = [row for row in roster if row["name"] == "낯선 떠돌이 상인"]
+    assert len(matches) == 1
+    assert matches[0]["origin"] == "emerged"
+    assert matches[0]["kind"] == "person"
+
+
+def test_roster_deduplicates_when_emerged_name_overlaps_cast(
+    tmp_db_path: Path, web_client: TestClient
+) -> None:
+    """같은 이름이 1층(시나리오)과 2층(확정)에 둘 다 있으면 명부 항목이
+    하나다 — `roster_rows`의 접는 규칙이 서버 한 자리에만 있다는 것의
+    증거."""
+    cast_name = THREAT_CAST[0].display_name
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    store.append(_emerged("s1", 0, cast_name, kind="person"))
+    store.close()
+
+    response = web_client.get("/api/sessions/s1/events", params={"from_seq": 0})
+
+    assert response.status_code == 200
+    roster = response.json()["state"]["roster"]
+    matches = [row for row in roster if row["name"] == cast_name]
+    assert len(matches) == 1
+    assert matches[0]["origin"] == "scenario"
+
+
+def test_roster_carries_every_entry_beyond_ai_scene_entity_limit(
+    tmp_db_path: Path, web_client: TestClient
+) -> None:
+    """확정 목록이 AI 상한(`SCENE_ENTITY_LIMIT`)보다 훨씬 많아도 `roster`는
+    전부 담는다(D-26) — 화면은 안 자른다. 이 시험이 D-26의 유일한 기계적
+    증거다."""
+    count = SCENE_ENTITY_LIMIT * 3
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    for seq in range(count):
+        store.append(_emerged("s1", seq, f"즉흥대상{seq}", kind="thing"))
+    store.close()
+
+    response = web_client.get("/api/sessions/s1/events", params={"from_seq": 0})
+
+    assert response.status_code == 200
+    roster = response.json()["state"]["roster"]
+    emerged_rows = [row for row in roster if row["origin"] == "emerged"]
+    assert len(emerged_rows) == count > SCENE_ENTITY_LIMIT
+
+
+def test_roster_survives_unknown_scenario_id_without_500(
+    tmp_db_path: Path, web_client: TestClient
+) -> None:
+    """등록되지 않은 시나리오 id로 오프닝이 열린 세션에서도 폴링이
+    200이다 — 시나리오 조회 실패가 폴링을 500으로 만들지 않는다
+    (T-13-31, T-12.3-09와 같은 방어)."""
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    store.append(_opened("s1", 0, "no-such-scenario"))
+    store.append(_emerged("s1", 1, "즉흥 손님", kind="person"))
+    store.close()
+
+    response = web_client.get("/api/sessions/s1/events", params={"from_seq": 0})
+
+    assert response.status_code == 200
+    roster = response.json()["state"]["roster"]
+    assert [row["name"] for row in roster] == ["즉흥 손님"]
+
+
+def test_roster_entry_view_has_exactly_three_fields() -> None:
+    """`RosterEntryView`의 칸이 정확히 셋이다(D-17 경계) — 이 모델에 칸을
+    더하는 것은 Phase 14(관계 장부)를 침범하는 일이다."""
+    from gptrpg.web.routes_events import RosterEntryView
+
+    assert set(RosterEntryView.model_fields) == {"name", "kind", "origin"}
