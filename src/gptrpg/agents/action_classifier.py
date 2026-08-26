@@ -33,6 +33,27 @@ MAX_CANDIDATES = 3
 """화면에 나란히 놓을 수 있는 후보 상한 (§4.7 "후보 2~3개"). `classify`가
 모델 출력을 이 개수로 자른다 — 넷 이상 와도 화면은 항상 최대 셋이다."""
 
+MAX_CLASSIFIER_TOKENS = 4096
+"""`classify()`가 `provider.complete()`에 넘기는 완성 토큰 상한
+(verify-13-06 결함2, 2026-08-26에 1024에서 올린 값).
+
+**근거.** `classify()` 도크스트링이 예전에 "한 번 4096으로 올려 봤다가
+근거 없이 되돌렸다"고 적어 뒀던 자리다 — 이제 근거가 있다. verify-13-06
+세션에서 사람이 긴 문장을 쳤을 때(seq 106/109) 대상 지목이 두 번 다
+빠졌고, 짧게 줄인 같은 내용(seq 112)만 맞았다. 실제 원문을 그대로
+재생해 보니(`.gptrpg/agents.json`의 `nvidia/nemotron-3-super-120b-a12b`,
+1024 토큰 상한 그대로) 응답이 `'['` 한 글자에서 잘리거나 두 시도 다
+시간 안에 못 들어왔다 — 화면에 보이는 JSON은 60~90자로 짧은데
+`completion_tokens`는 680~1045개나 썼다(`.content`에는 안 보이는 내부
+추론이 완성 토큰 예산을 먼저 먹는다). 상한을 4096으로 올리자 같은 세
+문장 전부 `target: "우물"`을 정확히 냈다(아래 SUMMARY의 재현 스크립트
+결과 참조). **13-05가 분류기 프롬프트에 대상 지목을 더한 뒤부터
+1024로는 이 모델의 내부 추론이 다 못 끝난다는 뜻이다** — 프롬프트가
+길어져서가 아니라(프롬프트 자체 토큰 수는 1400 안팎으로 크지 않다)
+판단할 것이 하나 늘어서다. `CLASSIFIER_TIMEOUT_S`(`invoke.py`)도 같은
+실측으로 같이 올렸다 — 상한만 올리고 시간을 안 늘리면 늘어난 완성이
+타임아웃에 다시 잘린다."""
+
 NO_CHECK_SIGNAL = "no_check"
 """모델이 "이 행동은 판정이 필요 없다"를 표시하는 예약 키(RULE-15).
 
@@ -385,11 +406,14 @@ def classify(
     목록 밖 이름(`UnknownItemFromAI`)은 `UnknownMove`와 같은 자리에서 같은
     방식으로 흡수한다 — "안 쓴다"로 안전하게 떨어진다.
 
-    `max_tokens=1024`. (03-04 Task 3 라이브 검증 중 한 번 4096으로 올려
-    봤다가 근거 없이 되돌렸다 — 실제 문제는 토큰 부족에 의한 잘림이
-    아니라 `call_with_one_retry`가 두 시도 다 예외로 실패하는 것이었다는
-    증거가 나왔고, 값을 바꿔 봐도 그 실패를 고치지 못했다. 진짜 실패
-    사유는 `invoke.py`의 stderr 경고 줄로 확인해야 한다.)
+    `max_tokens=MAX_CLASSIFIER_TOKENS`(2026-08-26부터 4096, verify-13-06
+    결함2 — 위 상수 도크스트링 참조). 03-04 Task 3 때는 4096으로 한 번
+    올려 봤다가 근거 없이 되돌렸다 — 그때 실제 문제는 `call_with_one_retry`가
+    두 시도 다 예외로 실패하는 것이었고 값을 바꿔도 그 실패는 안 고쳐졌다.
+    **이번은 다르다** — verify-13-06은 응답이 오긴 오는데(`ok=True`도
+    있었다) 내용이 잘리는 사고였고, 재생 스크립트로 토큰 상한을 실제로
+    바꿔 가며 확인했다. 진짜 실패 사유는 여전히 `invoke.py`의 stderr
+    경고 줄로 확인해야 한다.
     """
     inventory_items = _inventory_slot_items(actor_stats(ctx))
     system, messages = build_classifier_prompt(
@@ -407,7 +431,7 @@ def classify(
             model=model,
             system=system,
             messages=messages,
-            max_tokens=1024,
+            max_tokens=MAX_CLASSIFIER_TOKENS,
             timeout_s=CLASSIFIER_TIMEOUT_S,
         )
 
