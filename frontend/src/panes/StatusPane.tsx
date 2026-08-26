@@ -17,7 +17,12 @@
 import { ResourceChangeBadge } from "../components/ResourceChangeBadge.tsx";
 import { ThreatClock } from "../components/ThreatClock.tsx";
 import { COPY, statLabel } from "../labels.ts";
-import type { CharacterSheet, CharacterSummary, GameStateView } from "../api/types.ts";
+import type {
+  CharacterSheet,
+  CharacterSummary,
+  GameStateView,
+  RosterEntry,
+} from "../api/types.ts";
 
 /** 방금 이 축에서 일어난 변화 하나 — `SessionScreen`이 `resource_changed`
  * 사건과 다시 불러온 시트로 `changeIntensity`를 계산해 채운다(D-19). 축
@@ -130,6 +135,13 @@ function UsageDie({
       <span className="stat-row__value">{current === 0 ? COPY.usageDieSpent : `d${current}`}</span>
     </div>
   );
+}
+
+/** 명부 한 줄의 출생 표시(D-24) — `origin`은 서버가 보낸 두 값
+ * (`"scenario"` | `"emerged"`) 중 하나다. 화면은 이 값으로 문구를
+ * 고르기만 하고 다시 판단하지 않는다(D-04 규율). */
+function rosterOriginLabel(origin: string): string {
+  return origin === "scenario" ? COPY.rosterOriginScenario : COPY.rosterOriginEmerged;
 }
 
 function StatRows({
@@ -350,6 +362,36 @@ export function StatusPane({
             <b>{state.total_tokens.toLocaleString("ko-KR")}</b>
             <span>마지막 순번</span>
             <b>{state.last_seq}</b>
+          </div>
+        </details>
+      ) : null}
+
+      {/*
+       * 명부(D-23~D-26, Phase 13-06, SCENE-05) — 왼쪽 상태칸 맨 아래
+       * 접힌 줄 하나. 목록이 비어 있으면 이 블록 자체를 안 그린다(D-25,
+       * 「아직 없음」 빈 칸을 두지 않는다) — 줄이 생기는 것 자체가
+       * 「뭔가 나왔다」는 신호다. 평소엔 접혀 있다(`open` 속성을 안 준다)
+       * — 항상 펼쳐 두면 인물이 열 명 넘어갈 때 위협 시계·실패 카운터가
+       * 아래로 밀린다(D-23). **자르지 않는다** — 화면과 AI에게 넘기는
+       * 양은 서로 다른 상한 규율이라 여기서 AI 상한 상수를 import하지
+       * 않는다(D-26). 사람·사물을 `kind`로 거르지 않는다 — 거르면
+       * 「목록에는 있는데 화면에는 안 보임」 틈이 생기고 지어낸 사물 쪽
+       * 사고를 놓친다(D-24). 별도 로딩·오류 표시를 만들지 않는다 —
+       * 상태칸 전체가 이미 타는 `state !== null` 조건부 렌더 경로를
+       * 그대로 공유한다.
+       */}
+      {state !== null && state.roster.length > 0 ? (
+        <details className="status-block">
+          <summary className="t-caps">{COPY.rosterLabel}</summary>
+          <div>
+            {state.roster.map((entry: RosterEntry) => (
+              <div className="party-row" key={entry.name}>
+                <span className="party-row__dot" />
+                <span className="party-row__name">
+                  {entry.name} · {rosterOriginLabel(entry.origin)}
+                </span>
+              </div>
+            ))}
           </div>
         </details>
       ) : null}

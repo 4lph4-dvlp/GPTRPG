@@ -350,6 +350,22 @@ export interface CreationStepValueView {
   seq: number;
 }
 
+/** 명부 한 행(D-17, Phase 13-06, SCENE-05) — `origin`이 「시나리오가
+ * 미리 적어 둔 것인가, 이번에 생긴 것인가」를 나른다. **그것이 이 목록의
+ * 존재 이유다(D-24)** — 「이 인물이 원래 있던 인물인가 AI가 방금
+ * 지어낸 인물인가」를 화면에서 구분할 수 없으면 이름만 나열된 목록은
+ * 세션1의 사고를 못 잡는다. */
+export interface RosterEntry {
+  name: string;
+  /** 서버 명부 1층 행은 이 시나리오 선언에 종류 개념이 없다는 뜻으로
+   * `null`이다 — 화면은 이 칸을 안 쓴다(D-24, 사람·사물을 화면에서
+   * 거르지 않는다). */
+  kind: string | null;
+  /** `"scenario"` | `"emerged"` — 화면은 이 값으로 `COPY.rosterOriginScenario`
+   * / `rosterOriginEmerged`를 고른다. */
+  origin: string;
+}
+
 export interface GameStateView {
   session_id: string;
   last_seq: number;
@@ -393,6 +409,10 @@ export interface GameStateView {
    * `null`은 「아직 안 열렸다」다. 화면이 이 값을 다시 계산하지 않는다
    * (D-04) — 오프닝 자동 발동 조건(`shouldOpenScene`)이 그대로 읽는다. */
   scene_opened_seq: number | null;
+  /** 지금까지 나온 것 한 벌(D-17, Phase 13-06, SCENE-05) — 서버의
+   * `roster_rows`가 이미 접은 결과를 상한 없이 그대로 옮긴다(D-26).
+   * 화면은 이 목록을 다시 합치거나 자르지 않는다(D-04 규율). */
+  roster: RosterEntry[];
 }
 
 export interface PollResponse {

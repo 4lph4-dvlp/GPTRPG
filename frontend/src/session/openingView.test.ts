@@ -36,6 +36,7 @@ function baseState(overrides: Partial<GameStateView> = {}): GameStateView {
     creation_step_values: [],
     creation_host_claimed: false,
     scene_opened_seq: null,
+    roster: [],
     ...overrides,
   };
 }
