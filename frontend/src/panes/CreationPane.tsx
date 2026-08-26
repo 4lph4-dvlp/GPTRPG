@@ -41,6 +41,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  ApiError,
   completeCreation,
   completeCreationStep,
   creationFollowUp,
@@ -639,7 +640,17 @@ export function CreationPane({
     nominatingRef.current = true;
     void nominateCreationSpeaker(sessionId, rulebookId)
       .then(() => pollNow())
-      .catch(() => undefined)
+      .catch((nominateError: unknown) => {
+        if (nominateError instanceof ApiError && nominateError.status === 409) {
+          // 409는 실패가 아니라 「같은 세션의 다른 탭이 지금 지목을
+          // 만들고 있다」이고, 그 결과는 사건으로 남아 폴링이 실어 온다
+          // (D-02). 이 자리는 원래도 오류를 화면에 안 그렸으므로 그대로
+          // 삼킨다 — 다만 이제 그 이유가 409에 한해 명시적이다.
+          return;
+        }
+        // 409가 아닌 실패는 지금까지도 조용히 삼켰다 — 이 계획은 그
+        // 동작을 안 바꾼다(D-13, 자동 재시도 고리를 새로 만들지 않는다).
+      })
       .finally(() => {
         nominatingRef.current = false;
       });
@@ -669,9 +680,17 @@ export function CreationPane({
         gmAnswered: response.gm_answered,
       });
       pollNow();
+      setBusy(false);
     } catch (askError) {
+      if (askError instanceof ApiError && askError.status === 409) {
+        // 409는 실패가 아니라 「같은 세션의 다른 탭이 지금 되묻기를
+        // 만들고 있다」이고, 그 결과는 사건으로 남아 폴링이 실어 온다
+        // (D-02). error를 안 채우고 대기 표시(busy)를 그대로 유지한다 —
+        // 이것을 오류로 그리면 사람이 「내가 눌러야 하나」로 돌아간다
+        // (12.3-14가 없앤 바로 그 혼동).
+        return;
+      }
       setError(creationErrorMessage(askError));
-    } finally {
       setBusy(false);
     }
   }
@@ -704,9 +723,15 @@ export function CreationPane({
     try {
       await wrapUpCreation(sessionId, rulebookId);
       pollNow();
+      setBusy(false);
     } catch (wrapUpError) {
+      if (wrapUpError instanceof ApiError && wrapUpError.status === 409) {
+        // 409는 실패가 아니라 「같은 세션의 다른 탭이 지금 정리를 만들고
+        // 있다」이고, 그 결과는 사건으로 남아 폴링이 실어 온다(D-02).
+        // error를 안 채우고 대기 표시(busy)를 그대로 유지한다.
+        return;
+      }
       setError(creationErrorMessage(wrapUpError));
-    } finally {
       setBusy(false);
     }
   }

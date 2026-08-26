@@ -44,7 +44,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { announceCreation, claimCreationHost, fetchCreationDeclaration, fixPartySize } from "../api/client.ts";
+import {
+  ApiError,
+  announceCreation,
+  claimCreationHost,
+  fetchCreationDeclaration,
+  fixPartySize,
+} from "../api/client.ts";
 import type { CreationStepView, GameEvent, PartySizeRangeView } from "../api/types.ts";
 import { DiceModal } from "../components/DiceModal.tsx";
 import { Waiting } from "../components/Waiting.tsx";
@@ -364,14 +370,20 @@ export function CreationScreen({ sessionId, onEntered }: CreationScreenProps) {
       await announceCreation(sessionId, rulebookId ?? DEFAULT_RULEBOOK_ID);
       if (announceAliveRef.current) {
         feed.pollNow();
+        setPending(false);
       }
     } catch (err) {
-      if (announceAliveRef.current) {
-        setError(creationErrorMessage(err));
+      if (err instanceof ApiError && err.status === 409) {
+        // 409는 실패가 아니라 「같은 세션의 다른 탭이 지금 그 말을 만들고
+        // 있다」이고, 그 결과는 사건으로 남아 폴링이 실어 온다(D-02: 아무나
+        // 부르되 서버가 한 번만 낸다). error를 안 채우고 대기 표시를 그대로
+        // 유지한다 — 이것을 오류로 그리면 사람이 「내가 눌러야 하나」로
+        // 돌아간다(12.3-14가 없앤 바로 그 혼동).
+        return;
       }
-    } finally {
       if (announceAliveRef.current) {
         setPending(false);
+        setError(creationErrorMessage(err));
       }
     }
   }, [sessionId, rulebookId, feed.pollNow]);
