@@ -12,8 +12,10 @@ from gptrpg.agents import narration_guard, prompt_assembly
 from gptrpg.agents.context import NarrationFacts
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
+from gptrpg.rulebooks.lamplight_vigil import LAMPLIGHT_VIGIL
 from gptrpg.rulebooks.threat_clocks import THREAT_CAST
 from gptrpg.rules_core.entities import Entity, StatEntry
+from gptrpg.rules_core.scenario import OpeningDecl, render_scripted_opening
 
 _CHECK_SUMMARY = "hack_and_slash 판정 결과 miss (목표 10)"
 
@@ -739,3 +741,102 @@ def test_narrate_blocks_narration_that_quotes_permanent_block_verbatim():
     assert chunks[3].text == narration_guard.NOTICE_GAVE_UP
     assert chunks[3].reason == "source_overlap"
     assert provider.last_result().ok is False
+
+
+# ---------------------------------------------------------------------------
+# inspect_opening_completeness — 초대 검사(verify-13-06 결함3). 2026-08-26
+# well_below 실측(session verify-13-06, scene_opened seq 51)에서 실제로 난
+# 오프닝은 SCENE-02의 다섯째 요소("규칙 용어 없는 열린 초대")를 통째로
+# 빠뜨렸다 — 분위기만 있고 플레이어에게 아무것도 쥐여 주지 않았다. 기존
+# hook_terms 검사는 통과했다("우물"이 본문에 있었으므로) — 그래서 사람이
+# 걸어 봐야 잡히는 사고였다.
+# ---------------------------------------------------------------------------
+
+# 실측에서 그대로 옮긴 실패 오프닝(seq 51) — hook_terms는 통과하지만
+# 초대가 없다.
+_FAILING_WELL_BELOW_OPENING_TEXT = (
+    "회색 안개가 마을을 삼킨 지 사흘째, 해가 뜨지 않는다. 담녹 촌장의 마당에 모인 세 사람 "
+    "앞에는 꺼진 화덕만 덩그러니 남았고, 우물가에서 물을 길던 이슬은 두레박 줄을 놓친 채 "
+    "허공만 응시한다. 순찰대장 곽서리는 투구 끈을 고쳐 매며 마을 어귀 쪽을 노려보는데, 그의 "
+    "시선 끝에 서 있는 나울은 눈동자가 검게 가라앉은 채 제자리에서 꼼짝도 하지 않는다. "
+    "아이의 입술이 달싹일 때마다 안개가 잠시 일렁였다가 다시 내려앉는다. 촌장의 마당 담벼락 "
+    "너머로는 아무도 오지 않는 길이 뻗어 있다."
+)
+
+
+def test_has_invitation_signal_rejects_the_actual_failing_well_below_opening():
+    assert narration_guard._has_invitation_signal(_FAILING_WELL_BELOW_OPENING_TEXT) is False
+
+
+def test_has_invitation_signal_accepts_the_scripted_lamplight_vigil_opening():
+    """`lamplight_vigil`의 실제 초대("당신들은 지금 무엇을 하시겠습니까?")로
+    끝나는 낭독문형 오프닝 전문 — 실제 `render_scripted_opening`으로 조립해
+    이 파일이 별도 사본을 들고 있지 않게 한다."""
+    full_text = render_scripted_opening(LAMPLIGHT_VIGIL.opening)
+    assert "당신들은 지금 무엇을 하시겠습니까?" in full_text
+    assert narration_guard._has_invitation_signal(full_text) is True
+
+
+def test_has_invitation_signal_accepts_address_term_without_question_mark():
+    """물음표 없이 호칭만으로도 초대로 인정한다 — 사장님의 예("물음표로
+    끝나는 문장")를 유일한 신호로 삼지 않았다는 것을 고정한다."""
+    assert narration_guard._has_invitation_signal("이제 당신 차례다.") is True
+
+
+def test_has_invitation_signal_accepts_question_mark_without_address_term():
+    """호칭이 생략된(한국어 pro-drop) 존댓말 질문도 물음표 신호로 잡는다."""
+    assert narration_guard._has_invitation_signal("지금 무엇을 하시겠습니까?") is True
+
+
+def test_has_invitation_signal_documents_its_ceiling_on_bare_imperatives():
+    """이 검사가 정직하게 놓치는 자리 — 호칭도 물음표도 없는 명령형은
+    통과로 잘못 읽힌다. 이 시험은 그 한계를 코드로 못박아 두는 것이지
+    바람직한 동작이라고 주장하는 것이 아니다."""
+    assert narration_guard._has_invitation_signal("행동을 정하라.") is False
+
+
+def test_inspect_opening_completeness_flags_missing_invitation_when_hook_term_present():
+    """hook_terms 검사는 통과하는데(실마리 낱말이 실제로 있다) 초대만
+    빠진 경우를 갈라 잡는다 — 결함3이 hook_terms 검사로는 안 잡혔던
+    바로 그 모양."""
+    opening = OpeningDecl(
+        who_you_are="촌장의 마당에 모인 사람들",
+        what_you_sense="꺼진 화덕과 마른 우물",
+        why_it_matters="안개가 사흘째 걷히지 않는다",
+        hooks=("우물 아래에서 들려오는 소리",),
+        invitation="이제 무엇을 할지는 당신들에게 달렸다.",
+        hook_terms=("우물",),
+    )
+    assert narration_guard.inspect_opening_completeness(
+        _FAILING_WELL_BELOW_OPENING_TEXT, opening
+    ) == ("missing_invitation",)
+
+
+def test_inspect_opening_completeness_passes_when_hook_term_and_invitation_both_present():
+    opening = OpeningDecl(
+        who_you_are="촌장의 마당에 모인 사람들",
+        what_you_sense="꺼진 화덕과 마른 우물",
+        why_it_matters="안개가 사흘째 걷히지 않는다",
+        hooks=("우물 아래에서 들려오는 소리",),
+        invitation="이제 무엇을 할지는 당신들에게 달렸다.",
+        hook_terms=("우물",),
+    )
+    text = _FAILING_WELL_BELOW_OPENING_TEXT + " 이제 무엇을 할지는 당신들에게 달렸다."
+    assert narration_guard.inspect_opening_completeness(text, opening) == ()
+
+
+def test_inspect_opening_completeness_hook_term_check_still_wins_when_both_missing():
+    """hook_terms와 초대가 둘 다 빠지면 기존 순서대로 hook_term 위반이
+    먼저 보고된다(각 호출은 첫 위반 하나만 돌려준다) — 이 순서가 바뀌면
+    안 된다는 것을 고정한다."""
+    opening = OpeningDecl(
+        who_you_are="촌장의 마당에 모인 사람들",
+        what_you_sense="꺼진 화덕과 마른 우물",
+        why_it_matters="안개가 사흘째 걷히지 않는다",
+        hooks=("발자국 소리",),
+        invitation="이제 무엇을 할지는 당신들에게 달렸다.",
+        hook_terms=("발자국",),
+    )
+    assert narration_guard.inspect_opening_completeness(
+        _FAILING_WELL_BELOW_OPENING_TEXT, opening
+    ) == ("missing_hook_term",)

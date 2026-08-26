@@ -706,6 +706,20 @@ def build_opening_situation_prompt(
     파티 전원)은 그대로 `_session_block_text_with_party(ctx)`로 싣는다 —
     상황판단은 지금 행동한 사람 하나가 아니라 파티 전원의 상태를 볼
     자격이 있는 역할이다(`build_situation_prompt`와 같은 이유).
+
+    **초대 보존 지시(verify-13-06 결함3, 2026-08-26 추가).** 실제 사람
+    확인에서 「열린 초대」가 분위기 서술에 묻혀 사라진 오프닝이 났다 —
+    `narrate()`는 `OpeningDecl.invitation` 원문을 절대 못 본다(ARCH-02),
+    그러니 이 함수가 만드는 `scene_summary`가 초대를 안 실으면 서술
+    담당은 그것을 되살릴 방법이 없다. 그래서 영구 고정 블록에 "초대가
+    다섯 재료 중 하나가 아니라 오프닝이 존재하는 이유"라는 문장과
+    "`scene_summary`의 마지막 문장이 지금 무엇을 할 수 있는지 분명히
+    남기게 하라"는 지시를 더했다. **이것은 보조 수단이다** —
+    `inspect_opening_completeness`의 `missing_invitation` 기계 검사가
+    실제 방어선이고(D-08 재생성·D-09 폴백을 그대로 탄다), 이 지시문은
+    애초에 검사에 걸릴 일을 줄이는 것뿐이다. 프롬프트 지시만으로는
+    조용히 다시 무너질 수 있다는 것이 이 결함이 처음 난 이유이기도
+    하다 — 사장님이 기계 검사를 primary로 정한 근거다.
     """
     permanent = (
         f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 상황판단 담당이다. "
@@ -718,7 +732,13 @@ def build_opening_situation_prompt(
         '"facts": ["경비병이 쓰러졌다"]}]. `scene_summary`는 서술이 이번 장면을 '
         "쓰는 데 필요한 한두 문장이다. `facts`는 지금 이 장면에 이미 참인 것만 "
         f"문자열 배열로 담는다 — 최대 {SITUATION_FACTS_LIMIT}개, 시나리오 원문을 "
-        "그대로 옮겨 적지 않는다. 설명 문장을 덧붙이지 않는다.\n\n"
+        "그대로 옮겨 적지 않는다. 설명 문장을 덧붙이지 않는다. 아래 재료의 "
+        "「열린 초대」는 다섯 재료 중 하나가 아니라 이 오프닝이 존재하는 "
+        "이유다 — 분위기만 남기고 흐리지 않는다. `scene_summary`가 이 초대를 "
+        "빠뜨리면 서술 담당은 그것을 되살릴 방법이 없다(초대 원문을 직접 "
+        "못 본다) — 그러니 `scene_summary`의 마지막 문장이 사람이 지금 무엇을 "
+        "할 수 있는지 분명히 남기게 하라. 무브·능력치·판정 같은 규칙 용어는 "
+        "쓰지 않는다.\n\n"
     )
     resource_treatment = _format_resource_treatment(resource_axes)
     if resource_treatment:

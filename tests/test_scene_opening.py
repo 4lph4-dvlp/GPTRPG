@@ -180,11 +180,19 @@ class _StreamFailingProvider:
 def test_sketch_opening_succeeds_records_ai_generated_text_with_sketch_source(
     web_client_with_fake_provider,
 ):
-    """상황판단·서술 둘 다 성공하고 생성된 글이 저자의 실마리 낱말을 실제로
-    담으면 `source == "sketch"`이고 그 생성된 글이 그대로 기록된다."""
+    """상황판단·서술 둘 다 성공하고 생성된 글이 저자의 실마리 낱말과 초대를
+    실제로 담으면 `source == "sketch"`이고 그 생성된 글이 그대로 기록된다.
+
+    2026-08-26 verify-13-06 결함3 이후 `inspect_opening_completeness`가
+    초대 신호(`missing_invitation`)도 보므로, 이 성공 경로의 이중체
+    텍스트는 실마리 낱말("우물")과 초대(물음표로 끝나는 질문) 둘 다
+    담아야 한다 — 하나라도 빠지면 D-09 폴백으로 떨어져 이 시험이 보려던
+    "성공 경로"가 아니게 된다."""
     action_classifier = FakeProvider(complete_value="[]")
     situation_judge = _situation_judge_provider()
-    master_gm = FakeProvider(stream_text="우물 속에서 무언가 부드럽게 움직인다. 다들 숨을 죽이고 지켜본다.")
+    master_gm = FakeProvider(
+        stream_text="우물 속에서 무언가 부드럽게 움직인다. 다들 숨을 죽이고 지켜본다. 이제 무엇을 하겠는가?"
+    )
     session_id = SESSION_ID + "-sketch-ok"
     with web_client_with_fake_provider(
         action_classifier=action_classifier, situation_judge=situation_judge, master_gm=master_gm
