@@ -612,6 +612,35 @@ def test_idle_host_is_succeeded_by_another_browser_and_cannot_reclaim(web_client
     assert len(_events_of_type(client, "creation_host_claimed", session_id=session_id)) == 2
 
 
+def test_host_idle_gap_within_verify_13_06_evidence_does_not_trigger_succession(web_client):
+    """verify-13-06 결함3 회귀 — 방장이 174초 동안 재실 신호를 못 보내도
+    (실측 seq0→seq20 간격, 배경 탭 스로틀링으로 설명됨, D-11 재판단)
+    승계가 안 나야 한다. 옛 문턱(30초)에서는 이 간격에서 이미 승계가
+    났다 — 그것이 정확히 이 결함이었다. `HOST_IDLE_S`(240초)로 올린
+    뒤에는 174초 < 240초이므로 그대로 방장이다."""
+    client = web_client
+    session_id = SESSION_ID + "-host-realistic-gap-no-succession"
+
+    assert _claim_host(client, "browser-a", session_id=session_id).status_code == 200
+
+    # 실측(verify-13-06)과 같은 간격 — 174초. HOST_IDLE_S(240초)보다
+    # 작으므로 유휴 판정에 안 걸려야 한다.
+    creation_state._browser_last_seen[(session_id, "browser-a")] = (
+        time.monotonic() - 174.0
+    )
+
+    still_host = _claim_host(client, "browser-b", session_id=session_id)
+    assert still_host.status_code == 200
+    assert still_host.json()["you_are_host"] is False
+    assert still_host.json()["changed"] is False
+
+    events = _events_of_type(client, "creation_host_claimed", session_id=session_id)
+    assert len(events) == 1, (
+        f"{len(events)}건이 났다 — 174초 유휴만으로 방장이 넘어갔다(verify-13-06 결함3)"
+    )
+    assert events[0]["reason"] == "first"
+
+
 def test_non_host_browser_cannot_fix_party_size_and_records_no_event(web_client):
     client = web_client
     session_id = SESSION_ID + "-host-gate-403"
