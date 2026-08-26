@@ -26,6 +26,7 @@ from gptrpg.session_actor.actor import (
     RecordEmergedEntity,
     SessionActor,
 )
+from gptrpg.turn.context import build_turn_context
 
 
 class _FixedRoller:
@@ -252,3 +253,92 @@ def test_reducer_scene_entity_emerged_preserves_appearance_order():
         {"seq": 2, "name": "떠돌이 상인", "kind": "person", "normalized_name": "떠돌이 상인"},
     )
     assert [item.name for item in state.scene_entities_emerged] == ["검은 개", "떠돌이 상인"]
+
+
+# ---------------------------------------------------------------------------
+# build_turn_context 3층 조립 — Task 2 (SCENE-03 adjacency/회귀)
+# ---------------------------------------------------------------------------
+
+
+def test_build_turn_context_scenario_none_emerged_none_is_byte_identical_regression(
+    tmp_db_path,
+):
+    # scenario=None·emerged_entities=None이면(기존 CLI 경로) 지금과 한
+    # 글자도 다르지 않은 TurnContext가 나온다(Task 2 회귀 증거).
+    store = EventStore(str(tmp_db_path))
+    store.initialize()
+    try:
+        ctx = build_turn_context(store, "s1", "dungeonworld_like")
+    finally:
+        store.close()
+
+    from gptrpg.rulebooks import threat_clocks
+
+    assert ctx.scene_entities == threat_clocks.THREAT_CAST
+
+
+def test_build_turn_context_merges_cast_and_emerged_without_scenario(tmp_db_path):
+    store = EventStore(str(tmp_db_path))
+    store.initialize()
+    try:
+        emerged = (_fold(1, "검은 개", "thing"),)
+        ctx = build_turn_context(
+            store, "s1", "dungeonworld_like", emerged_entities=emerged
+        )
+    finally:
+        store.close()
+
+    from gptrpg.rulebooks import threat_clocks
+
+    names = [entity.display_name for entity in ctx.scene_entities]
+    assert names == [*[e.display_name for e in threat_clocks.THREAT_CAST], "검은 개"]
+
+
+def test_build_turn_context_drops_emerged_entity_overlapping_cast_name(tmp_db_path):
+    from gptrpg.rulebooks import threat_clocks
+
+    overlapping_name = threat_clocks.THREAT_CAST[0].display_name
+    store = EventStore(str(tmp_db_path))
+    store.initialize()
+    try:
+        emerged = (_fold(1, overlapping_name, "person"),)
+        ctx = build_turn_context(
+            store, "s1", "dungeonworld_like", emerged_entities=emerged
+        )
+    finally:
+        store.close()
+
+    # SCENE-03 adjacency가 조립부에서도 성립한다 — 이름이 정확히 한 번만
+    # 나온다.
+    matching = [e for e in ctx.scene_entities if e.display_name == overlapping_name]
+    assert len(matching) == 1
+
+
+def test_build_turn_context_over_scene_entity_limit_keeps_the_latest_emerged(
+    tmp_db_path,
+):
+    from gptrpg.agents.context import SCENE_ENTITY_LIMIT
+    from gptrpg.rulebooks import threat_clocks
+
+    remaining_budget = SCENE_ENTITY_LIMIT - len(threat_clocks.THREAT_CAST)
+    assert remaining_budget > 0, "이 시험은 캐스트가 상한보다 작다고 전제한다"
+    emerged = tuple(
+        _fold(i, f"즉흥대상{i}", "thing") for i in range(remaining_budget + 3)
+    )
+    store = EventStore(str(tmp_db_path))
+    store.initialize()
+    try:
+        ctx = build_turn_context(
+            store, "s1", "dungeonworld_like", emerged_entities=emerged
+        )
+    finally:
+        store.close()
+
+    emerged_names_in_ctx = [
+        e.display_name
+        for e in ctx.scene_entities
+        if e.display_name.startswith("즉흥대상")
+    ]
+    expected_latest = [fold.name for fold in emerged[-remaining_budget:]]
+    assert emerged_names_in_ctx == expected_latest
+    assert len(ctx.scene_entities) == SCENE_ENTITY_LIMIT

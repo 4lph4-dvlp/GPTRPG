@@ -167,6 +167,10 @@ class TurnContext:
             raise TooMuchContext(len(self.recent_turns))
         if len(self.party_state) > PARTY_MEMBER_LIMIT:
             raise ContextCapExceeded("party_state", len(self.party_state), PARTY_MEMBER_LIMIT)
+        if len(self.scene_entities) > SCENE_ENTITY_LIMIT:
+            raise ContextCapExceeded(
+                "scene_entities", len(self.scene_entities), SCENE_ENTITY_LIMIT
+            )
 
 
 # 칸이 정확히 다섯임을 코드로도 고정한다 — `entities.py`의 `ENTITY_FIELD_NAMES`
@@ -282,6 +286,25 @@ NEW_ENTITY_LIMIT = 3
 """한 턴에 서술이 새로 소개할 수 있는 대상(인물·사물) 개수 상한.
 `action_classifier.MAX_CANDIDATES = 3`과 같은 이유의 상한이다 — 상한이
 없으면 모델이 장면을 통째로 새로 짓는 우회로가 열린다."""
+
+SCENE_ENTITY_LIMIT = 8
+"""`TurnContext.scene_entities`(1층 시나리오 캐스트 + 2층 확정 목록)의
+전체 개수 상한(D-12/D-20, ARCH-06, Phase 13-04). `PARTY_MEMBER_LIMIT`(8)과
+같은 자리수 — **「한 장면에 동시에 등장해 있을 법한 대상 수」이지 「명부에
+쌓일 수 있는 총량」이 아니다.** 명부(`rules_core.scenario.roster_rows`)는
+기록에 전부 남고 화면(13-06)도 이 상수를 안 쓴다(D-26이 「AI에게 넘기는
+상한과 사람이 보는 화면의 상한을 같은 상수로 묶지 말 것」을 명시적으로
+경고했다) — **이 상한은 AI에게 넘기는 양에만 걸린다.**
+
+**자르는 책임이 어디 있는가:** `TurnContext.__post_init__`(아래)은 넘치면
+예외를 던지는 **마지막 방어선**이지 정상적으로 자르는 자리가 아니다
+(`NarrationFacts.new_entities`가 `NEW_ENTITY_LIMIT`에 대해 이미 같은
+분업을 쓴다). 정상적으로 자르는 것은 `turn.context.build_turn_context`다
+— 1층(시나리오 캐스트)은 안 자르고, 2층(확정 목록)만 이 상한 안으로
+들어오도록 등장 순서 기준 최신 것부터 남긴다. 그래서 이 값은 정상
+시나리오(현재 캐스트 최대 4명)가 2층과 합쳐져도 여유가 남도록 고른
+작은 수다 — 캐스트 자체가 이 상한을 넘는 비정상 시나리오에서만 이
+예외가 실제로 발화한다."""
 
 
 @dataclass(frozen=True)

@@ -8,11 +8,12 @@
 `event_log`/`session_actor`를 import할 수 없다는 계약, contract:3).
 """
 
-from gptrpg.agents.context import ClockState, RECENT_TURNS_LIMIT, TurnContext
+from gptrpg.agents.context import ClockState, RECENT_TURNS_LIMIT, SCENE_ENTITY_LIMIT, TurnContext
 from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.entities import Entity
-from gptrpg.rules_core.scenario import ScenarioDecl
+from gptrpg.rules_core.reducer import EmergedEntityFold
+from gptrpg.rules_core.scenario import ScenarioDecl, resolve_scene_layers
 from gptrpg.rulebooks import threat_clocks
 from gptrpg.rulebooks.dungeonworld_like import EXAMPLE_SINGLE_STAT_FOE
 from gptrpg.session_actor.projection import rebuild_state_from_events
@@ -51,6 +52,7 @@ def build_turn_context(
     rulebook_id: str,
     *,
     scenario: ScenarioDecl | None = None,
+    emerged_entities: tuple[EmergedEntityFold, ...] | None = None,
     party_state: tuple[Entity, ...] | None = None,
     actor_character_id: str | None = None,
     character_names: dict[str, str] | None = None,
@@ -61,18 +63,35 @@ def build_turn_context(
     「몇 번째 칸인가」를, 시나리오의 위협 시계 선언에서 이야기 내용(이름·
     정체·원하는 것·칸 설명·파국)을 채운다. 최근 턴은 저장소에서 읽은
     사건 중 선언·서사 텍스트만 뽑아 마지막 `RECENT_TURNS_LIMIT`개로
-    잘라서, 장면 대상은 시나리오 캐스트 전체로 채운다(D-48 — 국면별로
-    걸러내는 로직은 두지 않는다, 매 턴 캐스트 전체가 그대로 들어간다).
+    잘라서 채운다.
 
-    **`scenario`가 주어지면(13-03, D-18) 시계 내용·장면 대상 둘 다 그
-    `ScenarioDecl`의 것으로 채운다** — `scenario.cast`가 장면 대상, 등록
-    시점 검사(`validate_registered_scenarios`)가 이미 `threat_clock`이
-    `None`이 아님을 보장했으므로 그대로 위협 시계 내용의 출처가 된다.
-    `scenario`를 생략하면(기존 CLI 경로, 그리고 이 계획이 아직 안 고친
-    웹 호출부 — `scenario`를 실제로 넘기기 시작하는 것은 Task 3과
-    13-04다) 지금까지처럼 `rulebooks.threat_clocks`의 시나리오 캐스트
-    상수·위협 시계 내용 상수를 그대로 쓴다 — **이 함수 하나만으로는
-    실행 중 동작이 안 바뀐다**(회귀 위험이 0이다).
+    **`scenario`가 주어지면(13-03, D-18) 시계 내용의 출처가 그
+    `ScenarioDecl`의 것이 된다** — 등록 시점 검사
+    (`validate_registered_scenarios`)가 이미 `threat_clock`이 `None`이
+    아님을 보장했으므로 그대로 위협 시계 내용의 출처가 된다. `scenario`를
+    생략하면(기존 CLI 경로) 지금까지처럼 `rulebooks.threat_clocks`의
+    위협 시계 내용 상수를 그대로 쓴다.
+
+    **장면 대상(`scene_entities`)은 이제 세 층으로 조립된다(Phase 13-04,
+    SCENE-03) — 시나리오 캐스트 상수를 그대로 대입하던 하드코딩이 있던
+    자리다.** 1층은 `scenario.cast`(`scenario`가 `None`이면 지금 그대로
+    `rulebooks.threat_clocks`의 캐스트 상수, 기존 CLI 경로 무변경) —
+    **1층은 자르지 않는다**, 시나리오가 적어 둔 캐스트는 매 턴 전체가
+    들어가는 것이 D-48의 확정이고 자르면 시나리오가 조용히 반쪽이 된다.
+    2층은
+    `emerged_entities`(`GameState.scene_entities_emerged`, D-13②)를
+    `Entity`로 만든 것 — `entity_id`는 `"emerged."` 접두사 + 정규화된
+    이름, `display_name`은 저장된 원본 이름, `rulebook_id`는 이 세션의
+    룰북, `stats=()`(`Entity`를 안 고치고 2층을 표현하는 방법, 13-RESEARCH
+    A3의 ①). 1층과 이름이 겹치는 2층 항목은 빠진다
+    (`resolve_scene_layers`의 우선순위와 같은 규칙을 두 번 쓰지 않도록
+    그 함수를 그대로 부른다). **상한(`agents.context.SCENE_ENTITY_LIMIT`)은
+    2층에만 걸린다** — 남는 자리만큼 등장 순서 기준 최신 것부터 채운다
+    (「최근」의 기준은 등장 순서다, D-12 Claude's Discretion). 3층(그
+    밖)은 「없다」이므로 목록에 안 들어간다.
+
+    `scenario=None`·`emerged_entities=None`이면(기존 CLI 경로) 이 함수
+    하나만으로는 실행 중 동작이 안 바뀐다(회귀 위험이 0이다).
 
     **파티 상태는 `party_state`가 주어지면 그것으로, 아니면 예시 개체
     하나짜리 파티(`EXAMPLE_SINGLE_STAT_FOE`)로 채운다(12-05, D-17/D-18).**
@@ -153,10 +172,38 @@ def build_turn_context(
             "등록된 시나리오는 threat_clock을 선언한다(D-18,"
             " validate_registered_scenarios가 이미 보장)"
         )
-        scene_entities = scenario.cast
+        cast = scenario.cast
     else:
         clock_content = threat_clocks.M0_THREAT_CLOCK
-        scene_entities = threat_clocks.THREAT_CAST
+        cast = threat_clocks.THREAT_CAST
+
+    # 세 층 조립(Phase 13-04, SCENE-03) — 1층(cast)은 안 자른다. 2층
+    # (emerged_entities)만 겹침을 뺀 뒤 상한 안으로 잘라 넣는다. 자르는
+    # 책임은 여기다(`SCENE_ENTITY_LIMIT` 도크스트링 — `TurnContext.
+    # __post_init__`은 넘치면 예외를 던지는 마지막 방어선이지 정상적으로
+    # 자르는 자리가 아니다).
+    emerged_layer = emerged_entities if emerged_entities is not None else ()
+    non_overlapping_emerged = tuple(
+        fold
+        for fold in emerged_layer
+        if resolve_scene_layers(fold.name, cast=cast, emerged=()).layer == "outside"
+    )
+    remaining_budget = max(0, SCENE_ENTITY_LIMIT - len(cast))
+    # 「최근」의 기준은 등장 순서다(D-12 Claude's Discretion) — 늦게
+    # 등장한 것이 남도록 뒤에서부터 자른다.
+    kept_emerged = (
+        non_overlapping_emerged[-remaining_budget:] if remaining_budget > 0 else ()
+    )
+    emerged_as_entities = tuple(
+        Entity(
+            entity_id=f"emerged.{fold.normalized_name}",
+            display_name=fold.name,
+            rulebook_id=rulebook_id,
+            stats=(),
+        )
+        for fold in kept_emerged
+    )
+    scene_entities = (*cast, *emerged_as_entities)
 
     clock_state = ClockState(
         clock_id="threat",

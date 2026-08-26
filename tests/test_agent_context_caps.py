@@ -25,14 +25,17 @@ from gptrpg.agents.context import (
     NEW_ENTITY_LIMIT,
     PARTY_MEMBER_LIMIT,
     RECENT_TURNS_LIMIT,
+    SCENE_ENTITY_LIMIT,
     SITUATION_FACTS_LIMIT,
     TooMuchContext,
     TurnContext,
 )
-from gptrpg.event_log.schema import ActionDeclared, EVENT_SCHEMA_VERSION
+from gptrpg.event_log.schema import ActionDeclared, EVENT_SCHEMA_VERSION, SceneEntityEmerged
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.entities import Entity
 from gptrpg.rules_core.rulebook import ResourceAxisDecl
+from gptrpg.rules_core.scenario import normalize_entity_name
+from gptrpg.session_actor.projection import rebuild_state_from_events
 from gptrpg.turn import judgments as judgments_module
 from gptrpg.turn.clock_condition import build_clock_judge_context
 from gptrpg.turn.context import build_turn_context
@@ -46,10 +49,13 @@ _SESSION_ID = "caps-test"
 
 
 def _turn_context(
-    *, recent_turns: tuple[str, ...], party_state: tuple[Entity, ...] = ()
+    *,
+    recent_turns: tuple[str, ...],
+    party_state: tuple[Entity, ...] = (),
+    scene_entities: tuple[Entity, ...] = (),
 ) -> TurnContext:
     return TurnContext(
-        scene_entities=(),
+        scene_entities=scene_entities,
         party_state=party_state,
         actor_character_id=None,
         clock_state=ClockState(clock_id="threat", segment_index=0, segment_count=4),
@@ -151,6 +157,26 @@ def _party_of(count: int) -> tuple[Entity, ...]:
         )
         for i in range(count)
     )
+
+
+def _scene_entities_of(count: int) -> tuple[Entity, ...]:
+    return tuple(
+        Entity(
+            entity_id=f"scene.member{i}",
+            display_name=f"장면대상{i}",
+            rulebook_id="dungeonworld_like",
+        )
+        for i in range(count)
+    )
+
+
+def test_turn_context_raises_context_cap_exceeded_over_scene_entity_limit():
+    with pytest.raises(ContextCapExceeded):
+        _turn_context(recent_turns=(), scene_entities=_scene_entities_of(SCENE_ENTITY_LIMIT + 1))
+
+
+def test_turn_context_at_scene_entity_limit_does_not_raise():
+    _turn_context(recent_turns=(), scene_entities=_scene_entities_of(SCENE_ENTITY_LIMIT))
 
 
 def test_turn_context_raises_context_cap_exceeded_over_party_member_limit():
@@ -375,6 +401,71 @@ def test_derived_context_recent_turns_do_not_grow_when_event_count_doubles(tmp_d
         store.close()
 
     assert counts_after == counts_before
+
+
+# ---------------------------------------------------------------------------
+# 장면 대상 2층(SCENE_ENTITY_LIMIT, D-12/D-20, Phase 13-04) — 확정 목록이
+# 세션 길이(사건 개수)와 무관하게 AI에게 넘기는 양은 고정 상한 안쪽으로
+# 묶인다. 기록(사건)에는 전부 남지만(별도로 확인, test_scene_layers.py) 이
+# 시험은 build_turn_context()가 조립한 TurnContext.scene_entities만 본다.
+# ---------------------------------------------------------------------------
+
+
+def _append_many_scene_entity_emerged(store: EventStore, session_id: str, count: int) -> None:
+    start_seq = store.next_seq(session_id)
+    for i in range(count):
+        seq = start_seq + i
+        # 이름을 seq로 고유하게 만든다 — 같은 세션에 두 번째로 부르면
+        # (session-length 증가 시험) 이름이 겹쳐 리듀서 중복 방지에
+        # 걸러지고 실제로는 하나도 안 늘어나는 거짓 통과를 막는다.
+        name = f"즉흥대상{seq}"
+        store.append(
+            SceneEntityEmerged(
+                event_type="scene_entity_emerged",
+                session_id=session_id,
+                seq=seq,
+                schema_version=EVENT_SCHEMA_VERSION,
+                recorded_at=f"2026-01-01T00:00:{seq % 60:02d}.000Z",
+                caused_by_seq=None,
+                name=name,
+                kind="thing",
+                normalized_name=normalize_entity_name(name),
+            )
+        )
+
+
+def test_scene_entities_emerged_layer_stays_bounded_regardless_of_session_length(
+    tmp_db_path,
+):
+    session_id = "scene-entity-caps-test"
+    store = EventStore(str(tmp_db_path))
+    store.initialize()
+    try:
+        _append_many_scene_entity_emerged(store, session_id, SCENE_ENTITY_LIMIT * 5)
+        state = rebuild_state_from_events(session_id, store.read_events(session_id))
+        ctx_small = build_turn_context(
+            store, session_id, "dungeonworld_like", emerged_entities=state.scene_entities_emerged
+        )
+
+        _append_many_scene_entity_emerged(store, session_id + "-more", SCENE_ENTITY_LIMIT * 20)
+        _append_many_scene_entity_emerged(store, session_id, SCENE_ENTITY_LIMIT * 5)
+        state_after = rebuild_state_from_events(session_id, store.read_events(session_id))
+        ctx_large = build_turn_context(
+            store,
+            session_id,
+            "dungeonworld_like",
+            emerged_entities=state_after.scene_entities_emerged,
+        )
+    finally:
+        store.close()
+
+    # 이 호출에는 scenario=None(1층은 기존 THREAT_CAST) — 2층만 늘어나도
+    # 최종 scene_entities 길이가 SCENE_ENTITY_LIMIT 이하로 묶인다.
+    assert len(ctx_small.scene_entities) <= SCENE_ENTITY_LIMIT
+    assert len(ctx_large.scene_entities) <= SCENE_ENTITY_LIMIT
+    # 사건 자체는 세션이 커질수록 늘어난다 — 잘리는 것은 AI에게 넘기는
+    # 양뿐이지 기록이 아니다(D-12/D-20).
+    assert len(state_after.scene_entities_emerged) > len(state.scene_entities_emerged)
 
 
 # ---------------------------------------------------------------------------
