@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 13
 current_phase_name: 장면 — 오프닝과 대상
 status: executing
-stopped_at: Completed 13-04-PLAN.md
-last_updated: "2026-08-26T04:10:54.419Z"
+stopped_at: Completed 13-05-PLAN.md
+last_updated: "2026-08-26T04:59:29.419Z"
 last_activity: 2026-08-25
 last_activity_desc: Phase 13 execution started
-state_head: 25afb36a1d2da5ca44fdd360c003e739f9c9be21
+state_head: 7d4154c553eab619bc4dfd2e7dff7354a23e7f95
 progress:
   total_phases: 14
   completed_phases: 7
   total_plans: 64
-  completed_plans: 62
+  completed_plans: 63
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-05)
 ## Current Position
 
 Phase: 13 (장면 — 오프닝과 대상) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-08-25 — Phase 13 execution started
 
@@ -185,6 +185,7 @@ Progress: [██████████] 100%
 | Phase 13 P02 | ~90min | 2 tasks | 5 files |
 | Phase 13 P03 | continuation session | 3 tasks | 14 files |
 | Phase 13 P04 | ~2h | 3 tasks | 17 files |
+| Phase 13-scene-opening-and-targets P05 | 2h30m | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -399,6 +400,8 @@ Progress: [██████████] 100%
 - [Phase 13]: 13-03 Task 1(D-08 오프닝 다섯 요소 검사) 사장님 선택: 옵션 (a) — 등록 시점 구조 검사 + 실마리 낱말(hook_terms) 최소 출력 대조. 새 AI 역할을 안 만든다(AGENT_ROLES 변경 없음). "왜 중요한지" 등 나머지 넷은 이 검사가 못 잡는다는 한계를 명시적으로 받아들임. — 옵션 (b)는 D-05(오프닝 전용 AI 역할 신설 거부)를 다시 뒤집어야 하고, 옵션 (c)는 이 프로젝트가 반복해서 겪은 "확인 안 한 것을 통과로 접는" 실패 모양이다. (a)는 비용 0으로 가장 흔한 실패(실마리 통째 누락)를 잡는다.
 - [Phase 13]: 13-04: Wired emerged_entities=actor.state.scene_entities_emerged into confirm()/proceed()/CLI build_turn_context() calls beyond the plan's literal per-task text (Rule 2 — the plan's own truth "즉흥으로 생긴 것이 다음 턴에도 있다" required it; without this, emerged entities would be recorded but never actually appear in any turn's scene_entities).
 - [Phase 13]: 13-04: SCENE_ENTITY_LIMIT (=8) truncates the 2nd scene-entity layer to whatever budget remains after the 1st layer (scenario cast, never truncated) fills the total — not a flat per-layer count. This is the only design that keeps "1층은 안 자른다" and "TurnContext.__post_init__ compares the total against the same constant" simultaneously true without the safety valve tripping on every ordinary turn.
+- [Phase 13-scene-opening-and-targets]: 13-05: classifier now picks a target alongside move/stat (SCENE-04) — out-of-list targets branch on scenario improv_people/improv_things (person/thing gated independently), never on an AI role added; server re-reads GameState.declare_targets at confirm/proceed instead of trusting the client.
+- [Phase 13-scene-opening-and-targets]: 13-05: declare()'s build_turn_context now passes scenario=+emerged_entities= (13-04 deliberately deferred this) — classifier's closed-list target selection is built from ctx.scene_entities rather than a separately rendered list.
 
 ### Pending Todos
 
@@ -456,8 +459,8 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-26T04:10:40.847Z
-Stopped at: Completed 13-04-PLAN.md
+Last session: 2026-08-26T04:59:17.215Z
+Stopped at: Completed 13-05-PLAN.md
 Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
