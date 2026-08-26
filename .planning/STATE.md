@@ -5,16 +5,16 @@ milestone_name: 돌아가는 프로토타입
 current_phase: 13
 current_phase_name: 장면 — 오프닝과 대상
 status: executing
-stopped_at: Phase 13 명부 화면 확정 (D-23~D-26) — UI 계약 막힘 해제, 계획 대기
-last_updated: "2026-08-24T17:05:09.284Z"
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-08-26T01:28:40.394Z"
 last_activity: 2026-08-25
-last_activity_desc: Phase 13 명부 화면 확정 (D-23~D-26). 1차 논의 22건 + 4건 = 26건. UI 계약 blocked_on 해제
-state_head: c1cad1080d3568c267973ea92441101eedc38ba1
+last_activity_desc: Phase 13 execution started
+state_head: d64eee2f844f6f48135d73742e12bc67ae8de3b9
 progress:
   total_phases: 14
   completed_phases: 7
   total_plans: 64
-  completed_plans: 58
+  completed_plans: 59
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-05)
 
 **Core value:** 이야기가 어떻게 끝나는지 보고 싶어서 일주일 뒤에 다시 접속한다
-**Current focus:** Phase 13 — 장면: 오프닝과 대상
+**Current focus:** Phase 13 — 장면 — 오프닝과 대상
 
 > ⚠️ **킬 크리테리아 실험은 보류다 (D-62).** 세션1(2026-08-04)이 답한 것은 「재미있나」가 아니라 「도구가 망가져서 잴 수가 없다」였다. EXP·HYP를 로드맵에서 내리고 코어 완성에 집중한다. 자동 계측은 코드에 그대로 남아 관찰값으로 쌓인다. 근거는 `docs/session1-code-review.md`.
 
 ## Current Position
 
-Phase: 13 (장면 — 오프닝과 대상) — READY TO EXECUTE
-Plan: Not started
+Phase: 13 (장면 — 오프닝과 대상) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-08-25 — Phase 13 명부 화면 논의 완료 (결정 26건). 다음: /gsd-plan-phase 13
+Last activity: 2026-08-25 — Phase 13 execution started
 
 > 계획 번호 참고: `Plan: N of 11`의 카운터는 phase 초기 계획 수(10개)에
 > gap-closure로 추가된 12.3-11 한 건이 더해진 실제 파일 개수(11)를 따른다 —
@@ -181,6 +181,7 @@ Progress: [██████████] 100%
 | Phase 12.3 P18 | ~65min | 3 tasks | 3 files |
 | Phase 12.3 P19 | ~15min | 2 tasks | 1 files |
 | Phase 12.3 P20 | ~25min | 3 tasks | 3 files |
+| Phase 13 P01 | multi-session (spans 2026-08-25 02:50 to 2026-08-26 10:06, incl. checkpoint wait) | 3 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -388,6 +389,9 @@ Progress: [██████████] 100%
 - [Phase 12.3]: 12.3-19: 조작 요소(TOUCH_TARGETS) 선택자가 하나도 못 찾으면 extract_measurements()가 판정 없이 종료 코드 2로 끝나는 빈 값 경계 추가 — G-12.3-32 종료. 전0→후2→원복0 실증 완료
 - [Phase 12.3]: 12.3-19: 이름 감시 목록(REQUIRED_SOURCE_CLASS_NAMES)에 composer__row·composer__input·candidate·btn 추가 — 조작 요소 조합 선택자가 쓰는 낱말까지 감시. select·input[type=number]는 태그/속성 선택자라 목록에 못 넣음을 주석으로 명시
 - [Phase 12.3]: 12.3-20: --self-test가 함정마다 겨눈 단언의 표식을 사유 문장에서 대조 — 통과 여부만 보면 옆 단언이 대신 빨강을 내줘도 죽은 단언이 통과로 보이던 것을 닫음(TRAPS 넷째 칸 + _validate_trap_markers) — 12.3-REVIEW.md WR-01 실측 — pixel-floor/starved-story 두 함정이 겨눈 단언 말고 다른 단언과 함께 빨강을 내 겨눈 단언이 죽어도 통과를 찍을 수 있었다
+- [Phase 13]: 13-01: OpeningRequest.scenario_id defaults to LAMPLIGHT_VIGIL_ID (approved deviation) — 13-03 must re-judge when it registers the well scenario
+- [Phase 13]: 13-01: D-10 premise corrected — creation GM line (creation_gm_spoke) does not survive to play screen; StatusPane identity block is what satisfies D-10
+- [Phase 13]: 13-01: fixed opening auto-fire effect dep bug (feed.state?.party_roster !== null collapsed undefined/locked cases) via hasLockedRoster(state) — opening had never fired for anyone except the last creation finisher
 
 ### Pending Todos
 
@@ -445,9 +449,9 @@ Phase 11). **M1에 남는 것:** M1-01~08 · M1-10(폴링 읽기 비용) · M1-1
 
 ## Session Continuity
 
-Last session: 2026-08-24T15:55:10.765Z
-Stopped at: Phase 13 명부 화면 확정 (D-23~D-26) — UI 계약 막힘 해제, 계획 대기
-Resume file: .planning/phases/13-scene-opening-and-targets/13-CONTEXT.md
+Last session: 2026-08-26T01:28:40.149Z
+Stopped at: Completed 13-01-PLAN.md
+Resume file: None
 
 **다음 행동:** `/gsd-execute-phase 12`로 12-02 실행(주사위 양·나머지 여섯 자원 형태 —
 `resource_change.py`의 `ResourceOperation` Literal을 12-01이 `"delta"` 하나로 열어 뒀고
