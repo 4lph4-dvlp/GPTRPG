@@ -22,7 +22,7 @@ from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import narrate
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore
-from gptrpg.rulebooks import get_rulebook
+from gptrpg.rulebooks import get_rulebook, threat_clocks
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rules_core.rulebook import (
     GradeBand,
@@ -46,6 +46,7 @@ from gptrpg.session_actor.actor import (
 )
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
+from gptrpg.turn.emerged_entities import record_emerged_entities
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
 
 _T = TypeVar("_T")
@@ -274,7 +275,9 @@ async def _proceed_without_check(
     # 앉을 자리가 없다. 그래서 12.1의 예외 판단이 12.3에서도 그대로
     # 유지된다 — 그것을 바꾸려면 명령줄에 신원 개념을 먼저 만들어야 하고,
     # 그것은 계정이 생기는 다음 마일스톤의 몫이다.
-    ctx = _build_turn_context(store, args.session, args.rulebook)
+    ctx = _build_turn_context(
+        store, args.session, args.rulebook, emerged_entities=actor.state.scene_entities_emerged
+    )
 
     # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
     # 병렬로 부른다 — `_turn_flow`의 판정 뒤 구간과 같은 구조·같은 이유
@@ -345,6 +348,17 @@ async def _proceed_without_check(
             latency_ms=judgments.entity.ai.elapsed_ms,
             caused_by_seq=declare_seq,
         )
+    )
+    # scene_entity_judge가 만든 판단을 받는다(D-13②, Phase 13-04) — 웹의
+    # confirm()/proceed()와 같은 커밋에서 닫힌다(대상 판단 적립은 판정 턴
+    # 안이라 명령줄에도 있다). 전체 설명은
+    # `turn.emerged_entities.record_emerged_entities` 도크스트링 참조.
+    await record_emerged_entities(
+        actor,
+        judgments,
+        cast=threat_clocks.THREAT_CAST,
+        emerged=actor.state.scene_entities_emerged,
+        caused_by_seq=declare_seq,
     )
     await actor.submit(
         RecordAiCall(
@@ -647,7 +661,9 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     # 넘기면 이 판정 자신이 옮긴 시계 위치를 놓친 채로 판단하게 된다 — 웹과
     # 똑같이 여기서도 다시 접어 뒤 구간에 넘긴다. 파티 인자는 여전히 안
     # 넘긴다(12-05) — 명령줄에는 캐릭터 선택 개념이 없다는 전제는 그대로다.
-    ctx = _build_turn_context(store, args.session, args.rulebook)
+    ctx = _build_turn_context(
+        store, args.session, args.rulebook, emerged_entities=actor.state.scene_entities_emerged
+    )
 
     # 상황판단·장면 신규 대상 판단·시계 신호 관문을 narrate() 호출 **전**에
     # 병렬로 부른다(ARCH-04). 웹과 달리 여기서는 이벤트 루프를 막아도 되는
@@ -733,6 +749,16 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             latency_ms=judgments.entity.ai.elapsed_ms,
             caused_by_seq=confirm_seq,
         )
+    )
+    # scene_entity_judge가 만든 판단을 받는다(D-13②, Phase 13-04) — 웹의
+    # confirm()/proceed()와 같은 커밋에서 닫힌다. 전체 설명은
+    # `turn.emerged_entities.record_emerged_entities` 도크스트링 참조.
+    await record_emerged_entities(
+        actor,
+        judgments,
+        cast=threat_clocks.THREAT_CAST,
+        emerged=actor.state.scene_entities_emerged,
+        caused_by_seq=confirm_seq,
     )
     await actor.submit(
         RecordAiCall(

@@ -547,6 +547,84 @@ def test_scene_entity_judge_both_attempts_fail_narration_still_completes_and_tur
 
 
 # ---------------------------------------------------------------------------
+# 13-04 Task 3: 명령줄 판정 턴도 scene_entity_judge의 판단을 받는다
+# (D-13②) — 웹의 confirm()/proceed()와 같은 커밋에서 닫힌다.
+# ---------------------------------------------------------------------------
+
+
+class _SceneEntityJudgeReturnsNewEntityProvider:
+    """`_SceneEntityJudgeAlwaysFailsProvider`와 같은 모양 — 역할 지시문
+    텍스트로 장면 신규 대상 판단 호출만 골라 새 대상 하나를 낸다."""
+
+    name = "scene-entity-judge-returns-new-entity"
+
+    def __init__(self) -> None:
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["fake-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        combined = " ".join(block.get("text", "") for block in system)
+        if "장면 신규 대상 판단자" in combined:
+            return AgentResult(
+                ok=True,
+                value=json.dumps([{"name": "검은 개", "kind": "thing"}]),
+                elapsed_ms=1,
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+        if "상황판단 담당" in combined:
+            return AgentResult(
+                ok=True,
+                value=json.dumps([{"scene_summary": "장면.", "facts": []}]),
+                elapsed_ms=1,
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+        if "위협 시계 관문 판단자" in combined:
+            return AgentResult(
+                ok=True,
+                value=json.dumps([{"signal": "skip", "why": "이번 턴은 무관하다"}]),
+                elapsed_ms=1,
+                prompt_tokens=1,
+                completion_tokens=1,
+            )
+        return AgentResult(ok=True, value=_CANDIDATE_JSON, elapsed_ms=1, prompt_tokens=5, completion_tokens=3)
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        yield "문이 삐걱거리며 열린다. "
+        yield "안에서 서늘한 바람이 흘러나온다."
+        self._last_result = AgentResult(ok=True, value="...", elapsed_ms=1, prompt_tokens=7, completion_tokens=4)
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("complete() 또는 stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_cli_turn_records_scene_entity_emerged_event(tmp_db_path, monkeypatch):
+    """명령줄 판정 턴이 scene_entity_judge의 판단을 사건으로 적립한다
+    (D-13②) — 웹만 고치고 명령줄을 놓치는 회귀가 이 저장소에서 반복해서
+    났으므로(Pitfall 1과 같은 함정), 두 경로 시험을 짝으로 둔다."""
+    db = str(tmp_db_path)
+    provider = _SceneEntityJudgeReturnsNewEntityProvider()
+    _install_fake_provider(monkeypatch, provider)
+
+    exit_code = _run_turn(db, "s1", "문을 부수고 들어간다", monkeypatch=monkeypatch)
+    assert exit_code == 0
+
+    events = _read_events(db, "s1")
+    emerged_events = [event for event in events if event.event_type == "scene_entity_emerged"]
+    assert len(emerged_events) == 1
+    assert emerged_events[0].name == "검은 개"
+    assert emerged_events[0].kind == "thing"
+
+
+# ---------------------------------------------------------------------------
 # 시험 9 (10-03, D-08): 두 번 다 걸리는 서사 — 웹(tests/test_web_actions.py
 # ::test_narration_blocked_twice_gives_up_with_notice_and_keeps_roll_result)과
 # 같은 시나리오를 명령줄 경로에서 돈다. 웹만 고치고 명령줄을 놓치는 회귀가

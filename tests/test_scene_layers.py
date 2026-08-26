@@ -342,3 +342,89 @@ def test_build_turn_context_over_scene_entity_limit_keeps_the_latest_emerged(
     expected_latest = [fold.name for fold in emerged[-remaining_budget:]]
     assert emerged_names_in_ctx == expected_latest
     assert len(ctx.scene_entities) == SCENE_ENTITY_LIMIT
+
+
+# ---------------------------------------------------------------------------
+# record_emerged_entities 헬퍼 — D-13②/D-05/ARCH-05 (Task 3)
+# ---------------------------------------------------------------------------
+
+
+class _StubActorAlwaysRejectsUnexpectedly:
+    """`.submit()`이 매번 알 수 없는 예외를 던지는 이중체 — 적립 실패가
+    턴을 막지 않는지(D-05/ARCH-05) 확인한다."""
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    async def submit(self, command):
+        self.calls.append(command)
+        raise RuntimeError("액터 큐가 일부러 실패한다")
+
+
+def _judgments_with_new_entity(name: str, kind: str):
+    from gptrpg.agents.envelope import AgentResult
+    from gptrpg.agents.scene_entity_judge import EntityJudgment, NewEntity
+    from gptrpg.turn.judgments import TurnJudgments
+
+    ai = AgentResult(ok=True, value="[]", elapsed_ms=1, prompt_tokens=1, completion_tokens=1)
+
+    class _StubSituation:
+        pass
+
+    class _StubClock:
+        pass
+
+    class _StubOutcome:
+        pass
+
+    return TurnJudgments(
+        situation=_StubSituation(),
+        entity=EntityJudgment(entities=(NewEntity(name=name, kind=kind),), ai=ai),
+        clock=_StubClock(),
+        outcome=_StubOutcome(),
+    )
+
+
+async def test_record_emerged_entities_submission_failure_does_not_raise(tmp_db_path, capsys):
+    from gptrpg.turn.emerged_entities import record_emerged_entities
+
+    actor = _StubActorAlwaysRejectsUnexpectedly()
+    judgments = _judgments_with_new_entity("검은 개", "thing")
+
+    # 예외를 안 던진다는 것 자체가 단언이다 — 여기까지 도달하면 통과.
+    await record_emerged_entities(actor, judgments, cast=(), emerged=(), caused_by_seq=None)
+    assert len(actor.calls) == 1
+
+    captured = capsys.readouterr()
+    assert "경고" in captured.err
+
+
+async def test_record_emerged_entities_skips_names_overlapping_cast():
+    from gptrpg.turn.emerged_entities import record_emerged_entities
+
+    class _StubActorNeverCalled:
+        async def submit(self, command):
+            raise AssertionError("1층과 겹치는 이름은 제출하면 안 된다")
+
+    actor = _StubActorNeverCalled()
+    judgments = _judgments_with_new_entity("우물지기 이슬", "person")
+
+    await record_emerged_entities(
+        actor, judgments, cast=_cast(), emerged=(), caused_by_seq=None
+    )
+
+
+async def test_record_emerged_entities_treats_already_emerged_as_success():
+    from gptrpg.turn.emerged_entities import record_emerged_entities
+
+    class _StubActorAlreadyEmerged:
+        async def submit(self, command):
+            raise EntityAlreadyEmerged(
+                EmergedEntityFold(seq=1, name="검은 개", kind="thing", normalized_name="검은 개")
+            )
+
+    actor = _StubActorAlreadyEmerged()
+    judgments = _judgments_with_new_entity("검은 개", "thing")
+
+    # EntityAlreadyEmerged가 다시 던져지지 않는다는 것 자체가 단언이다.
+    await record_emerged_entities(actor, judgments, cast=(), emerged=(), caused_by_seq=None)

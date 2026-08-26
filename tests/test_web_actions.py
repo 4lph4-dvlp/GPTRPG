@@ -1627,6 +1627,49 @@ def test_proceed_on_own_no_check_declare_still_returns_200(
 
 
 # ---------------------------------------------------------------------------
+# 13-04 Task 3: scene_entity_judge 결과 적립 — confirm()·proceed() 둘 다
+# (D-13②, 하나만 고치는 함정을 시험이 막는다).
+# ---------------------------------------------------------------------------
+
+
+def test_confirm_records_scene_entity_emerged_event(web_client_with_fake_provider) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    entity_judge = FakeProvider(complete_value=json.dumps([{"name": "부서진 등불", "kind": "thing"}]))
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=gm, scene_entity_judge=entity_judge
+    ) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(declare_seq),
+        )
+        assert response.status_code == 200
+        events = _events_of_type(client, "scene_entity_emerged")
+
+    assert len(events) == 1
+    assert events[0]["name"] == "부서진 등불"
+
+
+def test_proceed_records_scene_entity_emerged_event(web_client_with_fake_provider) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"no_check": True}]))
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    entity_judge = FakeProvider(complete_value=json.dumps([{"name": "떠돌이 상인", "kind": "person"}]))
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=gm, scene_entity_judge=entity_judge
+    ) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+        assert response.status_code == 200
+        events = _events_of_type(client, "scene_entity_emerged")
+
+    assert len(events) == 1
+    assert events[0]["name"] == "떠돌이 상인"
+
+
+# ---------------------------------------------------------------------------
 # 12-05 Task 3: 파티 상태는 시작값이 아니라 「접은 지금 값」이다(RULE-06과
 # 같은 경로) — 웹의 두 호출부(`confirm()`/`proceed()`)가 같은 결합 규칙을
 # 쓴다는 것을 실제 사건 기록으로 증명한다.

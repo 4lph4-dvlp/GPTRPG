@@ -51,6 +51,7 @@ from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rulebooks.scenarios import DEFAULT_SCENARIO_ID, UnknownScenario, get_scenario
+from gptrpg.rulebooks import threat_clocks
 from gptrpg.rulebooks.threat_clocks import WELL_BELOW
 from gptrpg.rules_core.entities import Entity
 from gptrpg.rules_core.scenario import ScenarioDecl, render_scripted_opening
@@ -114,6 +115,7 @@ from gptrpg.session_actor.actor import SessionActor
 from gptrpg.session_actor.live_roller import LiveRoller
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
+from gptrpg.turn.emerged_entities import record_emerged_entities
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
 from gptrpg.web.check_views import CheckCalculationView, calculation_view_for
 from gptrpg.web.cookie_auth import read_identity
@@ -901,6 +903,7 @@ async def confirm(
         store,
         session_id,
         character.rulebook_id,
+        emerged_entities=actor.state.scene_entities_emerged,
         party_state=party,
         actor_character_id=identity.character_id,
         character_names=_character_names(party),
@@ -1004,6 +1007,19 @@ async def confirm(
             latency_ms=judgments.entity.ai.elapsed_ms,
             caused_by_seq=confirm_seq,
         )
+    )
+    # scene_entity_judge가 만든 판단을 받는다(D-13②, Phase 13-04) — 이
+    # 판단은 Phase 9부터 매 턴 불려 왔고 결과가 서술에 넘겨지고
+    # 버려지기만 했다. 새 AI 호출은 하나도 안 늘었다. **호출부가 셋이라
+    # (여기·`proceed()`·`cli/turn_flow.py`) 하나만 고치면 어긋난다** —
+    # 전체 설명은 `turn.emerged_entities.record_emerged_entities`
+    # 도크스트링 참조.
+    await record_emerged_entities(
+        actor,
+        judgments,
+        cast=threat_clocks.THREAT_CAST,
+        emerged=actor.state.scene_entities_emerged,
+        caused_by_seq=confirm_seq,
     )
     await actor.submit(
         RecordAiCall(
@@ -1564,6 +1580,7 @@ async def proceed(
         store,
         session_id,
         character.rulebook_id,
+        emerged_entities=actor.state.scene_entities_emerged,
         party_state=party,
         actor_character_id=identity.character_id,
         character_names=_character_names(party),
@@ -1643,6 +1660,19 @@ async def proceed(
             latency_ms=judgments.entity.ai.elapsed_ms,
             caused_by_seq=body.declare_seq,
         )
+    )
+    # scene_entity_judge가 만든 판단을 받는다(D-13②, Phase 13-04) — 이
+    # 판단은 Phase 9부터 매 턴 불려 왔고 결과가 서술에 넘겨지고
+    # 버려지기만 했다. 새 AI 호출은 하나도 안 늘었다. **호출부가 셋이라
+    # (`confirm()`·여기·`cli/turn_flow.py`) 하나만 고치면 어긋난다** —
+    # 전체 설명은 `turn.emerged_entities.record_emerged_entities`
+    # 도크스트링 참조.
+    await record_emerged_entities(
+        actor,
+        judgments,
+        cast=threat_clocks.THREAT_CAST,
+        emerged=actor.state.scene_entities_emerged,
+        caused_by_seq=body.declare_seq,
     )
     await actor.submit(
         RecordAiCall(

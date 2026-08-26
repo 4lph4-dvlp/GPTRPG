@@ -220,3 +220,151 @@ def test_judge_new_entity_drops_name_already_in_scene_entities():
         provider=provider, model="stub-model", ctx=_ctx(), rulebook_display_name="던전월드 계열"
     )
     assert judgment.entities == (NewEntity(name="부서진 등불", kind="thing"),)
+
+
+# ---------------------------------------------------------------------------
+# 받는 쪽 — confirm()이 scene_entity_judge 판단을 사건으로 적립한다
+# (D-13②/D-14, Phase 13-04, HTTP 통합 시험). `conftest.web_client_with_fake_provider`
+# / `tests/test_web_actions.py`의 declare/confirm 도우미 패턴을 그대로 빌린다.
+# ---------------------------------------------------------------------------
+
+from conftest import FakeProvider
+from conftest import select_character as _select_character_at
+from gptrpg.event_log.store import EventStore
+from gptrpg.rulebooks.threat_clocks import THREAT_CAST
+from gptrpg.turn.context import build_turn_context
+
+_EMERGED_SESSION_ID = "s1"
+
+
+def _events(client, session_id: str = _EMERGED_SESSION_ID) -> list[dict]:
+    response = client.get(f"/api/sessions/{session_id}/events")
+    assert response.status_code == 200
+    return response.json()["events"]
+
+
+def _emerged_declare_body(**overrides) -> dict:
+    body = {
+        "player_id": "bram",
+        "character_id": "bram",
+        "raw_text": "경비병을 설득해 통로를 열어 보려 한다",
+    }
+    body.update(overrides)
+    return body
+
+
+def _emerged_declare(client, **overrides):
+    body = _emerged_declare_body(**overrides)
+    _select_character_at(client, _EMERGED_SESSION_ID, body["character_id"])
+    return client.post(f"/api/sessions/{_EMERGED_SESSION_ID}/actions/declare", json=body)
+
+
+def _emerged_confirm_body(declare_seq: int, **overrides) -> dict:
+    body = {
+        "player_id": "bram",
+        "move": "parley",
+        "stat": "CHA",
+        "suggestion_move": "parley",
+        "suggestion_stat": "CHA",
+        "confirmed": True,
+        "declare_seq": declare_seq,
+        "character_id": "bram",
+    }
+    body.update(overrides)
+    return body
+
+
+def _run_one_turn(client, *, raw_text: str) -> None:
+    declare_response = _emerged_declare(client, raw_text=raw_text)
+    assert declare_response.status_code == 200
+    declare_seq = declare_response.json()["declare_seq"]
+    confirm_response = client.post(
+        f"/api/sessions/{_EMERGED_SESSION_ID}/actions/confirm",
+        json=_emerged_confirm_body(declare_seq),
+    )
+    assert confirm_response.status_code == 200
+
+
+def test_emerged_entity_recorded_and_present_in_next_turn_scene_entities(
+    web_client_with_fake_provider, tmp_db_path
+) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text="문이 열린다.")
+    entity_first_turn = FakeProvider(complete_value=json.dumps([{"name": "검은 개", "kind": "thing"}]))
+    entity_second_turn = FakeProvider(complete_value="[]")
+
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=gm, scene_entity_judge=entity_first_turn
+    ) as client:
+        _run_one_turn(client, raw_text="문을 두드린다")
+        events = [e for e in _events(client, _EMERGED_SESSION_ID) if e["event_type"] == "scene_entity_emerged"]
+        assert len(events) == 1
+        assert events[0]["name"] == "검은 개"
+        assert events[0]["kind"] == "thing"
+
+    # 다음 턴의 ctx.scene_entities에 들어 있는지 — 직접 build_turn_context를
+    # 다시 불러 확인한다(D-14: 즉흥으로 생긴 것은 그 뒤로 계속 거기 있다).
+    store = EventStore(tmp_db_path)
+    store.initialize()
+    try:
+        from gptrpg.session_actor.projection import rebuild_state_from_events
+
+        state = rebuild_state_from_events(
+            _EMERGED_SESSION_ID, store.read_events(_EMERGED_SESSION_ID)
+        )
+        ctx = build_turn_context(
+            store,
+            _EMERGED_SESSION_ID,
+            "dungeonworld_like",
+            emerged_entities=state.scene_entities_emerged,
+        )
+    finally:
+        store.close()
+
+    assert "검은 개" in [e.display_name for e in ctx.scene_entities]
+
+
+def test_emerged_entity_same_name_two_turns_in_a_row_records_exactly_one_event(
+    web_client_with_fake_provider,
+) -> None:
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text="문이 열린다.")
+    entity_provider = FakeProvider(
+        complete_value=json.dumps([{"name": "검은 개", "kind": "thing"}])
+    )
+
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=gm, scene_entity_judge=entity_provider
+    ) as client:
+        _run_one_turn(client, raw_text="문을 두드린다")
+        _run_one_turn(client, raw_text="다시 문을 두드린다")
+        events = [
+            e
+            for e in _events(client, _EMERGED_SESSION_ID)
+            if e["event_type"] == "scene_entity_emerged"
+        ]
+
+    assert len(events) == 1
+
+
+def test_emerged_entity_overlapping_scenario_cast_does_not_get_recorded(
+    web_client_with_fake_provider,
+) -> None:
+    cast_name = THREAT_CAST[0].display_name
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    gm = FakeProvider(stream_text="문이 열린다.")
+    entity_provider = FakeProvider(
+        complete_value=json.dumps([{"name": cast_name, "kind": "person"}])
+    )
+
+    with web_client_with_fake_provider(
+        action_classifier=classifier, master_gm=gm, scene_entity_judge=entity_provider
+    ) as client:
+        _run_one_turn(client, raw_text="문을 두드린다")
+        events = [
+            e
+            for e in _events(client, _EMERGED_SESSION_ID)
+            if e["event_type"] == "scene_entity_emerged"
+        ]
+
+    assert events == []
