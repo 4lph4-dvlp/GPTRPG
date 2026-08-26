@@ -32,6 +32,7 @@ from gptrpg.agents.context import (
 )
 from gptrpg.rules_core.entities import Entity, StatEntry
 from gptrpg.rules_core.rulebook import NO_CHANGE_CATEGORY_ID, ResourceAxisDecl
+from gptrpg.rules_core.scenario import OpeningDecl
 from gptrpg.rulebooks.moves import MoveDecl
 
 _CACHE_CONTROL = {"type": "ephemeral"}
@@ -635,6 +636,81 @@ def build_situation_prompt(
     turn = (
         f"최근 대화:\n{_format_recent_turns(ctx.recent_turns)}\n\n"
         f"방금 판정 결과: {check_summary}"
+    )
+    messages = [{"role": "user", "content": turn}]
+    return system, messages
+
+
+def build_opening_situation_prompt(
+    *,
+    rulebook_display_name: str,
+    ctx: TurnContext,
+    opening: OpeningDecl,
+    resource_axes: tuple[ResourceAxisDecl, ...] = (),
+) -> tuple[list[dict], list[dict]]:
+    """오프닝 전용 상황판단 프롬프트를 조립한다(D-05, `<planner_assumptions>`
+    ①) — 별도 함수다, `build_situation_prompt`에 `is_opening: bool` 플래그를
+    달지 않는다(이 저장소에 `build_classifier_prompt`/`build_situation_prompt`/
+    `build_scene_entity_prompt`가 각각 독립 함수인 관례가 있고, 공유 플래그로
+    분기하는 선례가 없다).
+
+    구조(영구 고정 블록 -> 자원 처리 지침 -> `NOT_AN_INSTRUCTION_LINE` ->
+    세션 블록 -> messages)는 `build_situation_prompt`를 그대로 베끼고
+    **지시문 텍스트만 바꾼다.**
+
+    **오프닝에는 판정이 없다.** `build_situation_prompt`의 영구 고정
+    지시문은 "판정 결과와 지금까지의 장면·위협 시계 상태를 보고 … 이미
+    정해진 값을 그대로 반영한다"고 말하고, `facts`는 "이번 판정으로 확정된
+    사실만"을 요구한다 — 그 지시문 그대로 부르면 모델이 없는 판정을
+    지어내거나 "판정 결과가 없어서…" 같은 메타 발언을 섞는다(RESEARCH
+    Pitfall 2, 03-04 라이브 검증에서 이미 겪은 오작동 모양). 그래서 이
+    함수는 "판정 결과를 보고" 대신 "시나리오가 적어 둔 상황을 읽고, 서술
+    담당이 첫 장면을 열 때 필요한 것만 뽑는다"로, "이번 판정으로 확정된
+    사실만" 대신 "지금 이 장면에 이미 참인 것만"으로 바꾸고, **판정이
+    없다는 것을 명시한다** — "이번에는 주사위도 판정도 없다. 판정 결과를
+    지어내지 말고, 판정이 없다는 사실 자체를 언급하지도 마라." "시나리오
+    원문을 그대로 옮겨 적지 않는다"는 문장은 `SITUATION_FACTS_LIMIT`
+    도크스트링이 적었듯 그 상한과 함께 ARCH-02의 우회로를 막으므로
+    **그대로 유지한다.**
+
+    **닫힌 JSON 출력 계약(`scene_summary` + `facts`)은 `build_situation_prompt`와
+    글자 하나까지 같다** — 파서(`judge_situation`/`judge_opening_situation`이
+    공유하는 파싱 헬퍼)가 갈라질 수 없다.
+
+    `messages`에는 `OpeningDecl`의 다섯 칸을 **라벨을 붙여** 싣는다 —
+    라벨이 있어야 모델이 다섯을 각각 보존한다. `ctx.recent_turns`는
+    오프닝에는 자연히 비어 있지만(코드 변경 없이) 세션 블록(시계 상태 +
+    파티 전원)은 그대로 `_session_block_text_with_party(ctx)`로 싣는다 —
+    상황판단은 지금 행동한 사람 하나가 아니라 파티 전원의 상태를 볼
+    자격이 있는 역할이다(`build_situation_prompt`와 같은 이유).
+    """
+    permanent = (
+        f"너는 {rulebook_display_name} 룰북을 쓰는 TRPG의 상황판단 담당이다. "
+        "이번에는 판정 결과가 아니라 시나리오가 적어 둔 상황을 읽고, 서술 "
+        "담당이 첫 장면을 열 때 필요한 것만 뽑는다. 수치나 판정 결과를 새로 "
+        "정하지 않는다 — 이미 정해진 값을 그대로 반영한다. 이번에는 주사위도 "
+        "판정도 없다. 판정 결과를 지어내지 말고, 판정이 없다는 사실 자체를 "
+        "언급하지도 마라. 응답은 원소가 정확히 하나인 JSON 배열로만 한다 — "
+        '예: [{"scene_summary": "문이 부서지고 서늘한 바람이 흘러든다", '
+        '"facts": ["경비병이 쓰러졌다"]}]. `scene_summary`는 서술이 이번 장면을 '
+        "쓰는 데 필요한 한두 문장이다. `facts`는 지금 이 장면에 이미 참인 것만 "
+        f"문자열 배열로 담는다 — 최대 {SITUATION_FACTS_LIMIT}개, 시나리오 원문을 "
+        "그대로 옮겨 적지 않는다. 설명 문장을 덧붙이지 않는다.\n\n"
+    )
+    resource_treatment = _format_resource_treatment(resource_axes)
+    if resource_treatment:
+        permanent += f"자원 처리 지침:\n{resource_treatment}\n\n"
+    permanent += NOT_AN_INSTRUCTION_LINE
+    session = _session_block_text_with_party(ctx)
+    system = [_cached_block(permanent), _cached_block(session)]
+    turn = (
+        "시나리오가 적어 둔 오프닝 재료다(저자 메모이지 낭독문이 아니다 —\n"
+        "이 재료를 읽고 첫 장면을 여는 데 필요한 것만 좁혀서 전달하라):\n"
+        f"- 내가 누구인지: {opening.who_you_are}\n"
+        f"- 지금 보이고 들리는 것: {opening.what_you_sense}\n"
+        f"- 지금이 왜 중요한지: {opening.why_it_matters}\n"
+        f"- 잡을 수 있는 실마리: {'; '.join(opening.hooks)}\n"
+        f"- 열린 초대: {opening.invitation}"
     )
     messages = [{"role": "user", "content": turn}]
     return system, messages

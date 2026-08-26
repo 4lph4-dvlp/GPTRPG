@@ -31,6 +31,7 @@ import asyncio
 import os
 import sys
 import time
+from collections.abc import Iterator
 from dataclasses import replace
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
@@ -38,19 +39,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.config import ConfigNotFound, InvalidAgentConfig, load_config
-from gptrpg.agents.context import ItemUseClaim, NO_CHECK_SUMMARY
+from gptrpg.agents.context import ItemUseClaim, NO_CHECK_SUMMARY, OPENING_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
-from gptrpg.agents.master_gm import narrate
+from gptrpg.agents.master_gm import NarrationChunk, narrate
+from gptrpg.agents.narration_guard import inspect_opening_completeness
 from gptrpg.agents.prompt_assembly import actor_stats
 from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, UnknownProvider
 from gptrpg.agents.providers.base import Provider
+from gptrpg.agents.situation_judge import judge_opening_situation
 from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
 from gptrpg.rulebooks.moves import get_moves
 from gptrpg.rulebooks.scenarios import DEFAULT_SCENARIO_ID, UnknownScenario, get_scenario
 from gptrpg.rulebooks.threat_clocks import WELL_BELOW
 from gptrpg.rules_core.entities import Entity
-from gptrpg.rules_core.scenario import render_scripted_opening
+from gptrpg.rules_core.scenario import ScenarioDecl, render_scripted_opening
 from gptrpg.rules_core.resource_change import (
     InvalidResourceChange,
     ResourceChangeDecl,
@@ -1788,6 +1791,175 @@ class OpeningResponse(BaseModel):
     source: str
 
 
+def _collect_narration_text(chunks: Iterator[NarrationChunk]) -> str:
+    """`narrate()`가 낸 조각을 모두 소비해 하나의 문자열로 합친다 —
+    오프닝은 스트리밍하지 않고 **다 모은 뒤에 검사한다**
+    (`<planner_assumptions>` ②, D-08이 「나가기 전에 검사한다」를 요구하고
+    13-UI-SPEC이 오프닝 로딩을 대기 표시로 확정했으므로 스트리밍할 자리가
+    없다). `disposition == "blocked"`인 조각은 안 넣는다 —
+    `_submit_narration_chunk`가 이미 같은 규율을 쓴다(걸러낸 안내 문구가
+    오프닝 본문에 섞이지 않는다)."""
+    parts = [chunk.text for chunk in chunks if chunk.disposition != "blocked"]
+    return " ".join(parts)
+
+
+async def _open_sketch_scene(
+    *,
+    request: Request,
+    store: EventStore,
+    actor: SessionActor,
+    session_id: str,
+    scenario: ScenarioDecl,
+    character_id: str,
+) -> tuple[str, str]:
+    """메모형(`opening_kind == "sketch"`) 오프닝을 만든다(D-05, 13-03 Task 3).
+
+    상황판단(`judge_opening_situation`)이 시나리오를 읽고 좁혀 서술
+    (`master_gm.narrate`)에 넘긴다 — `gather_turn_judgments`는 **지나가지
+    않는다**(`<planner_assumptions>` ③): 시계 신호·결과 선택·신규 대상
+    판단이 오프닝에는 성립하지 않고, 그 함수는 런타임 분기를 금지하므로
+    (ARCH-04) 고치는 대신 다른 호출부를 쓰는 것이다.
+
+    다섯 요소 검사(`inspect_opening_completeness`, Task 1 ⓐ)에 걸리면
+    **한 번만** 같은 `facts`로 다시 만들고(D-08), 그래도 안 되면 저자의
+    다섯 칸을 그대로 돌려준다(D-09) — 이 함수가 던지는 스트림 호출은
+    최대 2회다(재생성이 `situation_judge`를 다시 안 부르므로 10-03의
+    한 턴 상한 3회보다 좁다, RESEARCH Pitfall 2/03-04 22분 먹통 사고
+    재발 방지).
+
+    `(text, source)`를 돌려준다 — `source`는 `"sketch"`(검사 통과) 또는
+    `"fallback"`(D-09, 검사·재생성 실패 또는 제공자 호출 자체 실패)이다.
+    **캐릭터/룰북 조회 실패(400)와 제공자 설정 실패(503)만 이 함수 밖으로
+    던진다**(D-09 ②갈래, 12.3 D-13이 "AI 설정 자체가 없음"으로 다르게
+    말하기로 한 것) — 그 뒤 판단·서술 구간의 예외는 이 함수 안에서
+    흡수하고 폴백으로 떨어진다(D-05/ARCH-05).
+    """
+    character = _created_character(store, session_id, character_id)
+    if character is None:
+        raise HTTPException(status_code=400, detail="그런 캐릭터가 없다")
+    try:
+        rulebook = get_rulebook(character.rulebook_id)
+    except UnknownRulebook as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    try:
+        choices = load_config(request.app.state.agent_config_path)
+        situation_choice = choices["situation_judge"]
+        gm_choice = choices["master_gm"]
+        situation_provider: Provider = request.app.state.provider_resolver(
+            "situation_judge", choices, os.environ
+        )
+        gm_provider: Provider = request.app.state.provider_resolver(
+            "master_gm", choices, os.environ
+        )
+    except (
+        ConfigNotFound,
+        InvalidAgentConfig,
+        UnknownProvider,
+        MissingApiKey,
+        ProviderNotImplemented,
+    ) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    text, source = render_scripted_opening(scenario.opening), "fallback"
+    empty_ai = AgentResult(ok=False, value=None, elapsed_ms=0, prompt_tokens=0, completion_tokens=0)
+    situation_result = empty_ai
+    gm_result = empty_ai
+    try:
+        party = _current_party_state(store, session_id)
+        ctx = build_turn_context(
+            store,
+            session_id,
+            character.rulebook_id,
+            scenario=scenario,
+            party_state=party,
+            actor_character_id=character_id,
+            character_names=_character_names(party),
+        )
+        situation = judge_opening_situation(
+            provider=situation_provider,
+            model=situation_choice.model,
+            ctx=ctx,
+            opening=scenario.opening,
+            rulebook_display_name=rulebook.display_name,
+            resource_axes=rulebook.resource_axes,
+        )
+        situation_result = situation.ai
+        facts = build_narration_facts(
+            ctx=ctx,
+            check_summary=OPENING_CHECK_SUMMARY,
+            judgments=replace(empty_turn_judgments(), situation=situation),
+        )
+
+        narration_start = time.monotonic()
+        generated = _collect_narration_text(
+            narrate(
+                provider=gm_provider,
+                model=gm_choice.model,
+                facts=facts,
+                rulebook_display_name=rulebook.display_name,
+                resource_axes=rulebook.resource_axes,
+            )
+        )
+        violations = inspect_opening_completeness(generated, scenario.opening)
+        if violations:
+            # D-08 — 걸리면 한 번만 다시 만든다. 같은 facts로 narrate()를
+            # 한 번 더 부른다(situation_judge는 다시 안 부른다).
+            generated = _collect_narration_text(
+                narrate(
+                    provider=gm_provider,
+                    model=gm_choice.model,
+                    facts=facts,
+                    rulebook_display_name=rulebook.display_name,
+                    resource_axes=rulebook.resource_axes,
+                )
+            )
+            violations = inspect_opening_completeness(generated, scenario.opening)
+        elapsed_ms = int((time.monotonic() - narration_start) * 1000)
+        gm_result = _last_result_or_failure_envelope(gm_provider, elapsed_ms=elapsed_ms)
+
+        if not violations and gm_result.ok:
+            text, source = generated, "sketch"
+        # 걸렸거나 제공자 호출 자체가 실패했으면 위에서 채운 fallback
+        # text/source="fallback" 그대로 떨어진다(D-09) — 화면에 오류를 안
+        # 낸다. 이 무표시는 실수가 아니라 D-09의 설계 의도다("진행자가
+        # 잠시 말을 잃었습니다" 류 안내와 다시 부르기 단추를 만들지 않는다).
+    except Exception as exc:  # noqa: BLE001 - D-05/ARCH-05, 판단·서술 실패가 오프닝을 막지 않는다
+        print(
+            f"경고: 오프닝 상황판단/서술이 실패했다 (session {session_id}) — {exc}",
+            file=sys.stderr,
+        )
+        # text/source는 이미 위에서 채운 fallback 값이다.
+
+    # RecordAiCall — 성공·실패 어느 쪽에서도 항상 제출한다(MEAS-02,
+    # `proceed()`와 같은 규율). caused_by_seq는 `None`이다 — 오프닝을
+    # 일으킨 앞선 사건이 없다.
+    await actor.submit(
+        RecordAiCall(
+            agent_role="situation_judge",
+            model=situation_choice.model,
+            provider=situation_choice.provider,
+            prompt_tokens=situation_result.prompt_tokens,
+            completion_tokens=situation_result.completion_tokens,
+            cached_prompt_tokens=situation_result.cached_prompt_tokens,
+            latency_ms=situation_result.elapsed_ms,
+        )
+    )
+    await actor.submit(
+        RecordAiCall(
+            agent_role="master_gm",
+            model=gm_choice.model,
+            provider=gm_choice.provider,
+            prompt_tokens=gm_result.prompt_tokens,
+            completion_tokens=gm_result.completion_tokens,
+            cached_prompt_tokens=gm_result.cached_prompt_tokens,
+            latency_ms=gm_result.elapsed_ms,
+        )
+    )
+
+    return text, source
+
+
 @router.post("/sessions/{session_id}/opening", response_model=OpeningResponse)
 async def opening(
     session_id: str,
@@ -1810,19 +1982,18 @@ async def opening(
 
     낭독문형(`opening_kind == "scripted"`)은 AI를 아예 안 부른다(D-06) —
     저자가 쓴 다섯 칸을 `render_scripted_opening`으로 정해진 순서로 이어
-    그대로 기록한다. 메모형(`"sketch"`)은 **이 판에서는** 같은 다섯 칸을
-    그대로 이어 `source="fallback"`으로 제출한다 — 이것은 자리표시자가
-    아니라 D-09가 정한 실제 폴백 경로 자체다(「오프닝 AI 호출이 실패하면
-    시나리오 원문을 그대로 띄운다」). 13-03이 이 앞에 상황 판단 → 서술
-    구간을 얹고, 실패했을 때 떨어지는 자리로 이 코드를 그대로 쓴다.
-    **501/`NotImplemented`로 두지 않는다** — 지금 실제로 도는 세션이 이
-    갈래를 타므로, 그러면 이 계획이 없애려는 빈 화면이 그대로 돌아온다.
+    그대로 기록한다. 메모형(`"sketch"`)은 `_open_sketch_scene`이 상황판단
+    → 서술 구간을 돌려 오프닝을 만든다(13-03 Task 3) — 실패하면(제공자
+    미설정 제외) D-09 폴백으로 같은 다섯 칸을 그대로 이어 낸다. **501/
+    `NotImplemented`로 두지 않는다** — 지금 실제로 도는 세션이 이 갈래를
+    타므로, 그러면 이 계획이 없애려는 빈 화면이 그대로 돌아온다.
     """
     identity = read_identity(request, session_id)
     if identity is None or identity.character_id != body.character_id:
         print("경고: 신원 검증 실패 — opening 거부", file=sys.stderr)
         raise HTTPException(status_code=403, detail="캐릭터를 다시 선택해 주세요")
 
+    store = request.app.state.store
     registry = request.app.state.registry
     actor = registry.get_or_create(session_id)
 
@@ -1844,8 +2015,14 @@ async def opening(
             text = render_scripted_opening(scenario.opening)
             source = "scripted"
         else:
-            text = render_scripted_opening(scenario.opening)
-            source = "fallback"
+            text, source = await _open_sketch_scene(
+                request=request,
+                store=store,
+                actor=actor,
+                session_id=session_id,
+                scenario=scenario,
+                character_id=identity.character_id,
+            )
 
         try:
             seq = await actor.submit(

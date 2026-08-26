@@ -31,6 +31,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from gptrpg.agents.json_parsing import THINK_BLOCK
+from gptrpg.rules_core.scenario import OpeningDecl
 
 MIN_OVERLAP_CHARS = 12
 """정규화 후 이 글자 수 이상 겹치면 원문 유출로 본다(D-02②, 10-02 계획 판단
@@ -359,3 +360,55 @@ def inspect_sentence(
         subject_len=subject_len,
         think_open=False,
     )
+
+
+def _normalize_for_hook_match(text: str) -> str:
+    """NFC 정규화 + 공백 제거 — 오프닝 완결성 검사(`inspect_opening_completeness`)
+    전용 정규화다. 같은 한글이 조합형/분해형으로 오거나 공백이 다르게
+    들어가도 같은 낱말로 인식되게 한다.
+
+    `normalize_for_overlap`(원문 겹침 대조용)과는 다른 목적이라 casefold·
+    구두점 제거는 하지 않는다 — `hook_terms` 대조는 원문 유출 검사가
+    아니라 "이 낱말이 텍스트 안에 있는가"만 보는 것이다."""
+    return "".join(unicodedata.normalize("NFC", text).split())
+
+
+def inspect_opening_completeness(text: str, opening: OpeningDecl) -> tuple[str, ...]:
+    """생성된 오프닝이 D-07 다섯 요소를 실제로 담았는지 최소한으로
+    대조한다(D-08, 13-03 Task 1 체크포인트에서 사장님이 확정한 ⓐ안).
+    위반 사유 튜플을 돌려준다 — **빈 튜플이 통과다.**
+
+    **`inspect_sentence`와 다른 자리에 있는 이유.** 위 갈래들은 전부
+    `sentence: str, next_sentence: str | None`을 받는 **한 문장** 판정
+    함수다(생각 블록·원문 겹침·캐릭터 이탈·깨진 글자 넷 다). 반면 D-07의
+    다섯 요소(내가 누구인지/보이고 들리는 것/왜 중요한지/실마리/열린
+    초대)는 **오프닝 전체의 완결성**이라 문장 하나로는 판단할 수 없다 —
+    "실마리가 있는가"는 오프닝 전체를 봐야 안다. D-08의 문언("서사가 이미
+    거치는 네 갈래 검사에 한 갈래를 더한다")과 이 구현(별도 문서 단위
+    함수)의 차이는 13-RESEARCH.md가 A2로 명시적으로 flag했고, 13-03 Task 1
+    체크포인트에서 사장님이 확인·승인했다(SUMMARY 기록).
+
+    **이 함수가 실제로 보는 것은 딱 둘뿐이고, 그 이상을 주장하지 않는다:**
+    ① `text`가 `strip()` 뒤 비어 있으면 위반. ② `opening.hook_terms` 중
+    어느 것도 `text` 안에 없으면 위반 — 대조는 NFC 정규화 + 공백 제거 뒤
+    부분 문자열 포함으로 한다. **"왜 중요한지" 등 나머지 요소는 이 검사가
+    못 잡는다** — 사장님이 명시적으로 받아들인 한계다(등록 시점 구조
+    검사가 다섯 칸이 채워졌음을 보장하고, 이 검사는 생성물이 실마리를
+    통째로 빠뜨리는 가장 흔한 실패만 잡는다).
+
+    **길이 검사를 넣지 않는다.** 상한을 두지 않기로 확정됐다(2026-08-24).
+    나중에 넣더라도 **코드 포인트**(또는 토큰)로 재고 바이트로 재지
+    않는다 — 한글 한 글자가 UTF-8 3바이트라는 사실이 어떤 상한에도 새어
+    들어가면 안 된다(SCENE-02 encoding).
+    """
+    if not text.strip():
+        return ("empty",)
+
+    normalized_text = _normalize_for_hook_match(text)
+    if not any(
+        _normalize_for_hook_match(hook_term) in normalized_text
+        for hook_term in opening.hook_terms
+    ):
+        return ("missing_hook_term",)
+
+    return ()

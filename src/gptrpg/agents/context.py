@@ -31,6 +31,18 @@ D-10 ②갈래).
 플랫폼 고정 문장 하나를 쓴다. `web/routes_actions.py`의 `proceed()`와
 `cli/turn_flow.py`의 `no_check` 갈래가 이 상수를 그대로 넘긴다."""
 
+OPENING_CHECK_SUMMARY = "이번은 판정 없이 장면을 여는 오프닝이다."
+"""오프닝(SCENE-01, Phase 13-03)에서 `check_summary` 자리에 넣는 플랫폼
+고정 문장 — `NO_CHECK_SUMMARY`와 같은 성격이다(플랫폼이 조립하는 고정
+문장이지 모델이 만든 것이 아니다). 오프닝에는 판정 자체가 없으므로
+`NO_CHECK_SUMMARY`("이번 행동은 판정 없이 진행됐다")를 그대로 쓰면
+"행동"이 있었다고 암시해 모델이 없는 행동·판정을 지어낼 수 있다 — 그래서
+별도 상수를 둔다. `check_summary` 자리를 비워 두면(빈 문자열) 모델이 그
+공백을 스스로 채우려 들어 없는 판정을 지어내거나 "판정 결과가 없어서…"
+같은 메타 발언을 섞는다(RESEARCH Pitfall 2, 03-04 라이브 검증에서 이미
+겪은 오작동 모양) — 그래서 플랫폼이 항상 이 고정 문장으로 그 자리를
+채운다."""
+
 
 class TooMuchContext(Exception):
     """`recent_turns`가 `RECENT_TURNS_LIMIT`을 넘겼을 때 던진다.

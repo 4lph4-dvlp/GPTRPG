@@ -13,17 +13,18 @@
 
 import dataclasses
 import inspect
+import json
 
 from gptrpg.agents import narration_guard, prompt_assembly
 from gptrpg.agents.clock_judge import ClockSignal
-from gptrpg.agents.context import ClockState, NarrationFacts
+from gptrpg.agents.context import ClockState, NarrationFacts, OPENING_CHECK_SUMMARY
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.master_gm import chunk_sentences, narrate
 from gptrpg.agents.outcome_picker import OutcomePick
 from gptrpg.agents.scene_entity_judge import EntityJudgment
-from gptrpg.agents.situation_judge import SituationJudgment
-from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST
-from gptrpg.turn.judgments import TurnJudgments, build_narration_facts
+from gptrpg.agents.situation_judge import SituationJudgment, judge_opening_situation
+from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST, WELL_BELOW
+from gptrpg.turn.judgments import TurnJudgments, build_narration_facts, empty_turn_judgments
 
 _CHECK_SUMMARY = "hack_and_slash 판정 결과 miss (목표 10)"
 
@@ -164,6 +165,113 @@ def test_situation_summary_can_carry_scenario_text_verbatim_into_narration_messa
     # 우회 경로가 실제로 열려 있다는 것을 증명으로 남긴다(단언 실패가 아니다).
     assert M0_THREAT_CLOCK.identity in turn_text
     assert M0_THREAT_CLOCK.wants in turn_text
+
+
+# ---------------------------------------------------------------------------
+# 오프닝 경로 격리 — D-05가 벽을 넘지 않았다는 유일한 증거(13-03 Task 3)
+# ---------------------------------------------------------------------------
+
+
+class _OpeningSituationJudgeStub:
+    """`judge_opening_situation` 시험 전용 이중체 — 고정 JSON을 돌려준다.
+    `_SituationJudgeStub`(test_situation_judge.py)와 같은 최소 모양이지만
+    이 파일이 파일 간 import 없이 자기 완결적이도록 여기 다시 둔다."""
+
+    name = "opening-situation-judge-stub"
+
+    def __init__(self, complete_value: str) -> None:
+        self.complete_value = complete_value
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        return AgentResult(
+            ok=True, value=self.complete_value, elapsed_ms=3, prompt_tokens=2, completion_tokens=2
+        )
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s):
+        raise NotImplementedError("situation_judge는 스트리밍하지 않는다")
+
+    def last_result(self) -> AgentResult:
+        raise NotImplementedError("이 이중체는 complete()만 시험한다")
+
+
+def _opening_turn_ctx():
+    from gptrpg.agents.context import TurnContext
+
+    clock_state = ClockState(
+        clock_id="threat",
+        segment_index=0,
+        segment_count=len(M0_THREAT_CLOCK.segment_descriptions),
+        threat_name=M0_THREAT_CLOCK.name,
+        threat_identity=M0_THREAT_CLOCK.identity,
+        threat_wants=M0_THREAT_CLOCK.wants,
+        segment_descriptions=M0_THREAT_CLOCK.segment_descriptions,
+        catastrophe_text=M0_THREAT_CLOCK.catastrophe,
+    )
+    return TurnContext(
+        scene_entities=WELL_BELOW.cast,
+        party_state=(),
+        actor_character_id=None,
+        clock_state=clock_state,
+        recent_turns=(),
+    )
+
+
+def test_opening_path_narration_system_and_messages_exclude_all_five_opening_elements_verbatim():
+    """**오프닝 경로에서도 서술이 시나리오 원문을 못 본다(D-05, 13-03 Task
+    3) — 이 시험이 그 유일한 증거다.** `judge_opening_situation`이 실제로
+    만든 판단을 `build_narration_facts`로 조립해 `narrate()`에 넘어갈
+    `NarrationFacts`를 얻고, 그 값으로 만든 `build_gm_prompt`의 system·
+    messages 어디에도 `ScenarioDecl.opening`의 다섯 칸 원문이 부분
+    문자열로 없음을 단언한다.
+
+    상황판단(대역)은 시나리오 원문을 옮겨 적지 않은 짧은 요약만 돌려준다
+    — `build_situation_prompt`의 우회로 경고(위
+    `test_situation_summary_can_carry_scenario_text_verbatim_into_narration_messages`)
+    와 같은 이유로, 상황판단 스스로가 원문을 그대로 베끼면 이 시험이 막을
+    수 없는 합법적 우회로가 열린다. 이 시험이 지키는 것은 그 경로가 아니라
+    **`NarrationFacts`/`build_gm_prompt`가 원문을 담을 칸·조립 경로 자체가
+    없다**는 구조다."""
+    opening = WELL_BELOW.opening
+    ctx = _opening_turn_ctx()
+    stub = _OpeningSituationJudgeStub(
+        complete_value=json.dumps(
+            [
+                {
+                    "scene_summary": "우물가에 서늘한 정적이 감돈다.",
+                    "facts": ["염소 두 마리가 사라졌다"],
+                }
+            ]
+        )
+    )
+    situation = judge_opening_situation(
+        provider=stub,
+        model="stub-model",
+        ctx=ctx,
+        opening=opening,
+        rulebook_display_name="던전월드 계열",
+    )
+    judgments = dataclasses.replace(empty_turn_judgments(), situation=situation)
+    facts = build_narration_facts(
+        ctx=ctx, check_summary=OPENING_CHECK_SUMMARY, judgments=judgments
+    )
+    system, messages = prompt_assembly.build_gm_prompt(
+        rulebook_display_name="던전월드 계열", facts=facts
+    )
+    combined_system = _combined_system(system)
+    turn_text = messages[-1]["content"]
+
+    for text in (
+        opening.who_you_are,
+        opening.what_you_sense,
+        opening.why_it_matters,
+        opening.invitation,
+        *opening.hooks,
+    ):
+        assert text not in combined_system
+        assert text not in turn_text
 
 
 # ---------------------------------------------------------------------------

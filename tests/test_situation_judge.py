@@ -21,8 +21,12 @@ from gptrpg.agents.context import (
 )
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.invoke import MAX_ATTEMPTS, SITUATION_TIMEOUT_S
-from gptrpg.agents.situation_judge import SituationJudgment, judge_situation
-from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST
+from gptrpg.agents.situation_judge import (
+    SituationJudgment,
+    judge_opening_situation,
+    judge_situation,
+)
+from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST, WELL_BELOW
 
 
 def _turn_ctx(*, clock_at_catastrophe: bool = False) -> TurnContext:
@@ -335,3 +339,129 @@ def test_judge_situation_truncates_facts_over_limit_without_raising():
     )
     assert len(judgment.facts) == SITUATION_FACTS_LIMIT
     assert judgment.facts == tuple(over_limit_facts[:SITUATION_FACTS_LIMIT])
+
+
+# ---------------------------------------------------------------------------
+# build_opening_situation_prompt / judge_opening_situation — D-05, 13-03 Task 3
+# ---------------------------------------------------------------------------
+
+
+def _opening_turn_ctx() -> TurnContext:
+    """오프닝에는 직전 장면이 없다 — `recent_turns=()`가 코드 변경 없이
+    자연히 비어 있다(13-03 Task 3 ③3)."""
+    clock_state = ClockState(
+        clock_id="threat",
+        segment_index=0,
+        segment_count=len(M0_THREAT_CLOCK.segment_descriptions),
+        threat_name=M0_THREAT_CLOCK.name,
+        threat_identity=M0_THREAT_CLOCK.identity,
+        threat_wants=M0_THREAT_CLOCK.wants,
+        segment_descriptions=M0_THREAT_CLOCK.segment_descriptions,
+        catastrophe_text=M0_THREAT_CLOCK.catastrophe,
+    )
+    return TurnContext(
+        scene_entities=WELL_BELOW.cast,
+        party_state=(),
+        actor_character_id=None,
+        clock_state=clock_state,
+        recent_turns=(),
+    )
+
+
+def test_opening_situation_permanent_block_has_no_check_result_premise():
+    """영구 고정 블록에 `build_situation_prompt`의 판정 전제 문구("판정
+    결과와 지금까지의 장면")가 없고, 대신 판정이 없다는 사실이 명시된다."""
+    system, _messages = prompt_assembly.build_opening_situation_prompt(
+        rulebook_display_name="던전월드 계열",
+        ctx=_opening_turn_ctx(),
+        opening=WELL_BELOW.opening,
+    )
+    combined = _combined_system(system)
+    assert "판정 결과와 지금까지의 장면" not in combined
+    assert "이번 판정으로 확정된 사실만" not in combined
+    assert "이번에는 주사위도 판정도 없다" in combined
+
+
+def test_opening_situation_messages_carry_all_five_opening_elements_labeled():
+    """`messages`에 `OpeningDecl`의 다섯 칸이 라벨을 붙여 전부 실린다."""
+    opening = WELL_BELOW.opening
+    _system, messages = prompt_assembly.build_opening_situation_prompt(
+        rulebook_display_name="던전월드 계열",
+        ctx=_opening_turn_ctx(),
+        opening=opening,
+    )
+    turn_text = messages[-1]["content"]
+    assert opening.who_you_are in turn_text
+    assert opening.what_you_sense in turn_text
+    assert opening.why_it_matters in turn_text
+    for hook in opening.hooks:
+        assert hook in turn_text
+    assert opening.invitation in turn_text
+    assert "내가 누구인지" in turn_text
+    assert "지금이 왜 중요한지" in turn_text
+
+
+def test_opening_situation_output_contract_matches_build_situation_prompt():
+    """닫힌 JSON 출력 계약(`scene_summary` + `facts`)이 `build_situation_prompt`와
+    글자 하나까지 같다 — 파서를 공유하므로 계약이 갈라지면 안 된다."""
+    opening_system, _ = prompt_assembly.build_opening_situation_prompt(
+        rulebook_display_name="던전월드 계열",
+        ctx=_opening_turn_ctx(),
+        opening=WELL_BELOW.opening,
+    )
+    situation_system, _ = prompt_assembly.build_situation_prompt(
+        rulebook_display_name="던전월드 계열",
+        ctx=_turn_ctx(),
+        check_summary="hack_and_slash 판정 결과 miss (목표 10)",
+    )
+    contract_line = (
+        '[{"scene_summary": "문이 부서지고 서늘한 바람이 흘러든다", '
+        '"facts": ["경비병이 쓰러졌다"]}]'
+    )
+    assert contract_line in _combined_system(opening_system)
+    assert contract_line in _combined_system(situation_system)
+
+
+def test_judge_opening_situation_both_attempts_fail_yields_empty_judgment_without_raising():
+    provider = _SituationJudgeStub(fail_times=99)
+    judgment = judge_opening_situation(
+        provider=provider,
+        model="stub-model",
+        ctx=_opening_turn_ctx(),
+        opening=WELL_BELOW.opening,
+        rulebook_display_name="던전월드 계열",
+    )
+    assert isinstance(judgment, SituationJudgment)
+    assert judgment.scene_summary == ""
+    assert judgment.facts == ()
+    assert judgment.ai.ok is False
+    assert provider.call_count == MAX_ATTEMPTS
+
+
+def test_judge_opening_situation_parses_scene_summary_and_facts():
+    provider = _SituationJudgeStub(
+        complete_value=json.dumps(
+            [{"scene_summary": "우물가에 서늘한 정적이 감돈다.", "facts": ["염소 두 마리가 사라졌다"]}]
+        )
+    )
+    judgment = judge_opening_situation(
+        provider=provider,
+        model="stub-model",
+        ctx=_opening_turn_ctx(),
+        opening=WELL_BELOW.opening,
+        rulebook_display_name="던전월드 계열",
+    )
+    assert judgment.scene_summary == "우물가에 서늘한 정적이 감돈다."
+    assert judgment.facts == ("염소 두 마리가 사라졌다",)
+
+
+def test_judge_opening_situation_uses_situation_timeout():
+    provider = _SituationJudgeStub()
+    judge_opening_situation(
+        provider=provider,
+        model="stub-model",
+        ctx=_opening_turn_ctx(),
+        opening=WELL_BELOW.opening,
+        rulebook_display_name="던전월드 계열",
+    )
+    assert provider.timeouts == [SITUATION_TIMEOUT_S]
