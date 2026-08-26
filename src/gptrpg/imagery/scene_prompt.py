@@ -42,13 +42,15 @@ MAX_PROMPT_CHARS: Final = 300
 문구를 늘릴 때 이 상한을 넘기면 시험이 먼저 깨진다 — 그림이 조용히 나빠지는
 쪽보다 낫다. 상한을 올리고 싶으면 토크나이저로 다시 재고 근거를 여기 적는다."""
 
-WELL_SCENARIO_SETTING: Final = "a village well and flooded stone tunnels below"
-"""M0 실험 시나리오 「우물 아래의 것」(`rulebooks/threat_clocks.py`)의 배경.
-
-이 층에 있는 유일한 시나리오별 문장이다 — 두 번째 시나리오가 생기면 상수를
-하나 더 만들어 `web`이 골라 넘긴다. `threat_clocks.py`에 넣지 않은 이유는
-그 파일이 사람이 읽는 한국어 시나리오 선언이고, 이 문장은 CLIP에게 먹이는
-영어 프롬프트 조각이라 목적이 다르기 때문이다."""
+# 예전에는 여기 `WELL_SCENARIO_SETTING` 상수가 있었다 — 시나리오별 배경
+# 문구를 이 층이 직접 아는 유일한 자리였다. 그 도크스트링이 스스로
+# 「두 번째 시나리오가 생기면 상수를 하나 더 만들어 `web`이 골라 넘긴다」고
+# 예고해 뒀고, 13-03(D-18)이 그 예고를 실행했다 — 값은
+# `rulebooks.threat_clocks.WELL_BELOW.imagery_setting`으로 옮겨졌다. 이
+# 층(`imagery`)은 `rulebooks`보다 위 층이라 import는 허용되지만
+# (`.importlinter` contract:2), 그림 층이 시나리오 등록소를 아는 것은
+# 이 층의 책임이 아니다 — `scene_prompt()`는 여전히 `setting`을 **인자로만**
+# 받는다(아래), 호출부(`web`)가 어느 시나리오의 배경 문구를 넘길지 고른다.
 
 _MOVE_SUBJECTS: Final[dict[str, str]] = {
     # rulebooks/dungeonworld_like.py

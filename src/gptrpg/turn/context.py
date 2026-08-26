@@ -12,11 +12,19 @@ from gptrpg.agents.context import ClockState, RECENT_TURNS_LIMIT, TurnContext
 from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.event_log.store import EventStore
 from gptrpg.rules_core.entities import Entity
+from gptrpg.rules_core.scenario import ScenarioDecl
+from gptrpg.rulebooks import threat_clocks
 from gptrpg.rulebooks.dungeonworld_like import EXAMPLE_SINGLE_STAT_FOE
-from gptrpg.rulebooks.threat_clocks import M0_THREAT_CLOCK, THREAT_CAST, THREAT_CLOCK_SEGMENT_COUNT
 from gptrpg.session_actor.projection import rebuild_state_from_events
 
-CLOCK_SEGMENT_COUNT = THREAT_CLOCK_SEGMENT_COUNT
+# `threat_clocks`를 모듈 자체로 import하고 아래에서 `threat_clocks.*`로만
+# 참조한다(개별 이름을 따로 import하지 않는다) — `scenario`가 안 주어졌을
+# 때만 쓰는 기본값 갈래(`build_turn_context` 본문) 딱 한 자리에서만
+# `threat_clocks.THREAT_CAST`가 등장하게 하기 위해서다(13-03 Task 2
+# acceptance criteria — 하드코딩 대입 자리가 그 한 곳에만 남았음을 grep으로
+# 고정한다).
+
+CLOCK_SEGMENT_COUNT = threat_clocks.THREAT_CLOCK_SEGMENT_COUNT
 """이제는 자리표시자가 아니다 — 값의 출처는 `rulebooks.threat_clocks.
 THREAT_CLOCK_SEGMENT_COUNT`다. 이 값 하나가 프롬프트에 들어가는 시계 분모와
 웹 화면 머리띠 분모(`web/routes_events.py`) 양쪽에 동시에 반영된다.
@@ -24,7 +32,17 @@ THREAT_CLOCK_SEGMENT_COUNT`다. 이 값 하나가 프롬프트에 들어가는 �
 세 자리(`cli/turn_flow.py`, `web/routes_events.py`, 이전 자기 자신)에
 흩어져 있던 같은 값이 이 한 자리로 모였다 — 층 계약이 없던 04-01 시점에는
 `web`이 `cli`를 import할 수 없어 값을 다시 선언하는 것이 유일한 방법이었지만,
-이제 `gptrpg.turn`이 둘 다가 내려다볼 수 있는 자리이므로 중복이 필요 없다."""
+이제 `gptrpg.turn`이 둘 다가 내려다볼 수 있는 자리이므로 중복이 필요 없다.
+
+**13-03(D-18)이 판단한 것: 이 값은 이번 계획에서 시나리오별로 만들지
+않는다.** 지금 이 값 하나가 프롬프트 분모와 화면 머리띠 분모 양쪽에
+동시에 반영되고, 웹 라우트 두 자리(`routes_events.py`, `routes_actions.py`)
+가 이 상수를 직접 import한다 — 시나리오별로 가르려면 그 두 자리도 함께
+옮겨야 하고, 그것은 위협 시계 진행 규칙 확장(Phase 15) 소관이다. 대신
+`rulebooks.scenarios.validate_registered_scenarios()`가 등록 시점에
+「모든 시나리오의 `threat_clock.segment_descriptions` 길이가 이 값과
+같아야 한다」를 강제한다 — 칸 수가 다른 시나리오가 조용히 들어와 분모가
+어긋나는 일이 구조적으로 막힌다."""
 
 
 def build_turn_context(
@@ -32,6 +50,7 @@ def build_turn_context(
     session_id: str,
     rulebook_id: str,
     *,
+    scenario: ScenarioDecl | None = None,
     party_state: tuple[Entity, ...] | None = None,
     actor_character_id: str | None = None,
     character_names: dict[str, str] | None = None,
@@ -39,12 +58,21 @@ def build_turn_context(
     """`TurnContext` 다섯 칸을 채운다 — 명령줄·웹 두 호출부가 공유하는 단일 출처.
 
     시계 상태는 `rebuild_state`가 돌려주는 `GameState.clock_segment`에서
-    「몇 번째 칸인가」를, `rulebooks.threat_clocks.M0_THREAT_CLOCK`에서
-    이야기 내용(이름·정체·원하는 것·칸 설명·파국)을 채운다. 최근 턴은
-    저장소에서 읽은 사건 중 선언·서사 텍스트만 뽑아 마지막
-    `RECENT_TURNS_LIMIT`개로 잘라서, 장면 대상은 시나리오 캐스트
-    `THREAT_CAST` 전체로 채운다(D-48 — 국면별로 걸러내는 로직은 두지
-    않는다, 매 턴 캐스트 전체가 그대로 들어간다).
+    「몇 번째 칸인가」를, 시나리오의 위협 시계 선언에서 이야기 내용(이름·
+    정체·원하는 것·칸 설명·파국)을 채운다. 최근 턴은 저장소에서 읽은
+    사건 중 선언·서사 텍스트만 뽑아 마지막 `RECENT_TURNS_LIMIT`개로
+    잘라서, 장면 대상은 시나리오 캐스트 전체로 채운다(D-48 — 국면별로
+    걸러내는 로직은 두지 않는다, 매 턴 캐스트 전체가 그대로 들어간다).
+
+    **`scenario`가 주어지면(13-03, D-18) 시계 내용·장면 대상 둘 다 그
+    `ScenarioDecl`의 것으로 채운다** — `scenario.cast`가 장면 대상, 등록
+    시점 검사(`validate_registered_scenarios`)가 이미 `threat_clock`이
+    `None`이 아님을 보장했으므로 그대로 위협 시계 내용의 출처가 된다.
+    `scenario`를 생략하면(기존 CLI 경로, 그리고 이 계획이 아직 안 고친
+    웹 호출부 — `scenario`를 실제로 넘기기 시작하는 것은 Task 3과
+    13-04다) 지금까지처럼 `rulebooks.threat_clocks`의 시나리오 캐스트
+    상수·위협 시계 내용 상수를 그대로 쓴다 — **이 함수 하나만으로는
+    실행 중 동작이 안 바뀐다**(회귀 위험이 0이다).
 
     **파티 상태는 `party_state`가 주어지면 그것으로, 아니면 예시 개체
     하나짜리 파티(`EXAMPLE_SINGLE_STAT_FOE`)로 채운다(12-05, D-17/D-18).**
@@ -95,9 +123,9 @@ def build_turn_context(
     (그동안 몇 번 돌았나)도 `fails_since_clock`(실패가 몇 번 쌓였나)도
     `TurnContext`에 넣지 않는다 — 둘 다 「AI가 봐주고 있는가」를 사후에
     재는 관측 지표이고, AI가 그 지표를 보면 지표를 만족시키는 쪽으로
-    서사와 제안을 바꿔서 계측 자체가 무의미해진다. 이번에 새로 들어오는
-    `M0_THREAT_CLOCK`의 값들은 서사 내용(이름·정체·원하는 것·칸 설명·
-    파국)이지 관측 지표가 아니다 — 이 경계 밖의 값이다.
+    서사와 제안을 바꿔서 계측 자체가 무의미해진다. 시나리오의 위협 시계
+    선언이 담는 값들은 서사 내용(이름·정체·원하는 것·칸 설명·파국)이지
+    관측 지표가 아니다 — 이 경계 밖의 값이다.
     """
     # 사건을 **한 번만** 읽는다. 예전에는 `rebuild_state(store, ...)`가 한 번,
     # 바로 아래 `read_events`가 또 한 번 — 같은 사건 전체를 두 번 읽고 두 번
@@ -116,18 +144,31 @@ def build_turn_context(
             texts.append(f"진행자: {event.text}")
     recent_turns = tuple(texts[-RECENT_TURNS_LIMIT:])
 
+    if scenario is not None:
+        # 등록 시점 검사(`validate_registered_scenarios`)가 이미
+        # `threat_clock is not None`을 보장했다(D-18) — 여기서 다시
+        # 검사하지 않는다.
+        clock_content = scenario.threat_clock
+        assert clock_content is not None, (
+            "등록된 시나리오는 threat_clock을 선언한다(D-18,"
+            " validate_registered_scenarios가 이미 보장)"
+        )
+        scene_entities = scenario.cast
+    else:
+        clock_content = threat_clocks.M0_THREAT_CLOCK
+        scene_entities = threat_clocks.THREAT_CAST
+
     clock_state = ClockState(
         clock_id="threat",
         segment_index=state.clock_segment,
         segment_count=CLOCK_SEGMENT_COUNT,
-        threat_name=M0_THREAT_CLOCK.name,
-        threat_identity=M0_THREAT_CLOCK.identity,
-        threat_wants=M0_THREAT_CLOCK.wants,
-        segment_descriptions=M0_THREAT_CLOCK.segment_descriptions,
-        catastrophe_text=M0_THREAT_CLOCK.catastrophe,
+        threat_name=clock_content.name,
+        threat_identity=clock_content.identity,
+        threat_wants=clock_content.wants,
+        segment_descriptions=clock_content.segment_descriptions,
+        catastrophe_text=clock_content.catastrophe,
     )
 
-    scene_entities = THREAT_CAST
     if party_state is not None:
         resolved_party_state = party_state
         resolved_actor_character_id = actor_character_id

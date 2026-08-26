@@ -33,14 +33,11 @@ from gptrpg.imagery import (
     scene_prompt,
     seed_for,
 )
-from gptrpg.imagery.scene_prompt import (
-    GENERIC_SETTING,
-    MAX_PROMPT_CHARS,
-    WELL_SCENARIO_SETTING,
-)
+from gptrpg.imagery.scene_prompt import GENERIC_SETTING, MAX_PROMPT_CHARS
 from gptrpg.imagery.styles import DEFAULT_STYLE, STYLES, unknown_style_fallback
 from gptrpg.rulebooks import RULEBOOKS
 from gptrpg.rulebooks.moves import get_moves
+from gptrpg.rulebooks.threat_clocks import WELL_BELOW
 from gptrpg.rules_core.reducer import fold
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT
 from gptrpg.web.app import create_app
@@ -105,7 +102,7 @@ def test_scene_prompt_is_deterministic() -> None:
         "grade": "strong_hit",
         "clock_segment": 1,
         "style": DEFAULT_STYLE,
-        "setting": WELL_SCENARIO_SETTING,
+        "setting": WELL_BELOW.imagery_setting,
     }
     assert scene_prompt(**kwargs) == scene_prompt(**kwargs)
 
@@ -116,7 +113,7 @@ def test_scene_prompt_contains_move_grade_and_setting() -> None:
         grade="miss",
         clock_segment=0,
         style=DEFAULT_STYLE,
-        setting=WELL_SCENARIO_SETTING,
+        setting=WELL_BELOW.imagery_setting,
     )
     assert "archer" in prompt  # volley
     assert "goes wrong" in prompt  # miss
@@ -615,7 +612,7 @@ def test_every_real_move_and_grade_combination_fits_the_prompt_budget() -> None:
                             grade=grade,
                             clock_segment=segment,
                             style=style,
-                            setting=WELL_SCENARIO_SETTING,
+                            setting=WELL_BELOW.imagery_setting,
                         )
                         if len(prompt) > MAX_PROMPT_CHARS:
                             too_long.append((len(prompt), style, move.move_id, grade))

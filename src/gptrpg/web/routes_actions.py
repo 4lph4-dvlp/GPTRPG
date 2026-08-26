@@ -46,9 +46,9 @@ from gptrpg.agents.providers import MissingApiKey, ProviderNotImplemented, Unkno
 from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore, SequenceConflict
 from gptrpg.rulebooks import UnknownRulebook, get_rulebook
-from gptrpg.rulebooks.lamplight_vigil import LAMPLIGHT_VIGIL_ID
 from gptrpg.rulebooks.moves import get_moves
-from gptrpg.rulebooks.scenarios import UnknownScenario, get_scenario
+from gptrpg.rulebooks.scenarios import DEFAULT_SCENARIO_ID, UnknownScenario, get_scenario
+from gptrpg.rulebooks.threat_clocks import WELL_BELOW
 from gptrpg.rules_core.entities import Entity
 from gptrpg.rules_core.scenario import render_scripted_opening
 from gptrpg.rules_core.resource_change import (
@@ -83,7 +83,6 @@ from gptrpg.imagery import (
     scene_prompt,
     seed_for,
 )
-from gptrpg.imagery.scene_prompt import WELL_SCENARIO_SETTING
 from gptrpg.session_actor.actor import (
     AlreadyChanged,
     AlreadyConfirmed,
@@ -1766,17 +1765,21 @@ class OpeningRequest(BaseModel):
     """`POST /sessions/{session_id}/opening`의 본문(SCENE-01, Phase 13).
 
     `character_id`는 신원 대조에 쓴다 — `proceed()`와 같은 이유(TRUST-02,
-    D-04). `scenario_id`의 기본값은 **이 판에서 유일하게 등록된 시나리오**
-    (`LAMPLIGHT_VIGIL_ID`)다. 계획 원문(13-01-PLAN.md ⑤)은 「기존
-    시나리오」를 기본값으로 적었으나, 그 시나리오(「우물 아래의 것」)의
-    `ScenarioDecl` 이관은 13-03의 몫이라 이 판에는 아직 등록돼 있지 않다
-    — 등록되지 않은 시나리오를 기본값으로 두면 화면이 `scenario_id`를
-    아예 안 보내는 실제 호출(13-01-PLAN.md Task 2 ⑤, 시나리오 고르는
-    UI가 없다)이 항상 400으로 실패한다. 13-03이 「우물 아래의 것」을
-    등록하는 시점에 이 기본값을 다시 판단해야 한다."""
+    D-04). `scenario_id`의 기본값은 `rulebooks.scenarios.DEFAULT_SCENARIO_ID`
+    (`WELL_BELOW_ID`, 「우물 아래의 것」)다 — **13-03이 재판단한 값**이다.
+    13-01은 이 시나리오가 아직 등록되지 않아 `LAMPLIGHT_VIGIL_ID`(형식
+    검증용 최소 시나리오)를 임시 기본값으로 뒀고, 그 SUMMARY가 명시적으로
+    「13-03이 우물 시나리오를 등록하는 시점에 이 기본값을 다시 판단해야
+    한다」고 남겨 뒀다(13-01-SUMMARY.md 승인된 편차). `lamplight_vigil`은
+    형식이 낭독문형·메모형을 다 받는다는 것을 증명하려고 이 단계가 새로
+    지은 최소 분량의 시나리오일 뿐 실제 플레이를 겨냥한 것이 아니다(D-21)
+    — 시나리오 고르는 화면이 없으므로(13-01 assumption ⑤) 모든 실제
+    세션이 이 기본값 하나로 열리고, 그 자리는 이 프로젝트의 실제 시나리오
+    (`WELL_BELOW`)여야 한다. 판단의 전문은 `rulebooks/scenarios.py`의
+    `DEFAULT_SCENARIO_ID` 도크스트링에 있다."""
 
     character_id: str = Field(min_length=1, max_length=MAX_ID_LEN)
-    scenario_id: str = Field(default=LAMPLIGHT_VIGIL_ID, max_length=MAX_ID_LEN)
+    scenario_id: str = Field(default=DEFAULT_SCENARIO_ID, max_length=MAX_ID_LEN)
 
 
 class OpeningResponse(BaseModel):
@@ -1890,12 +1893,18 @@ async def _illustrate_scene(
     기록시켜 로그를 어지럽힌다. 그림은 있으면 좋은 것이므로 경고 한 줄을
     남기고 조용히 끝낸다 — 그림이 없는 턴은 삽화 사건이 없는 턴으로 남는다.
     """
+    # `setting`은 예전에 `imagery.scene_prompt.WELL_SCENARIO_SETTING`이라는
+    # 그림 층 상수였다 — 13-03(D-18)이 그 값을 `WELL_BELOW.imagery_setting`
+    # (등록소 시나리오 선언)으로 옮겼다. 이 호출부는 **아직 세션의 실제
+    # 시나리오를 조회하지 않는다**(그 배선은 13-04 소관) — 지금까지의
+    # 유일한 시나리오였던 값을 그대로 참조해 이 계획에서 동작이 안 바뀌게
+    # 한다.
     prompt = scene_prompt(
         move=move,
         grade=grade,
         clock_segment=clock_segment,
         style=config.style,
-        setting=WELL_SCENARIO_SETTING,
+        setting=WELL_BELOW.imagery_setting,
     )
     relative_path = scene_relative_path(session_id, resolve_seq)
     try:

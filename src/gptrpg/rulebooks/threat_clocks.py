@@ -16,9 +16,16 @@ D-48(캐스트는 시나리오 캐스트 전체, 국면별 필터링 없음), D2
 
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rules_core.entities import Entity, StatEntry
-from gptrpg.rules_core.scenario import ThreatClockContent
+from gptrpg.rules_core.scenario import OpeningDecl, ScenarioDecl, ThreatClockContent
 
-__all__ = ["ThreatClockContent", "THREAT_CLOCK_SEGMENT_COUNT", "M0_THREAT_CLOCK", "THREAT_CAST"]
+__all__ = [
+    "ThreatClockContent",
+    "THREAT_CLOCK_SEGMENT_COUNT",
+    "M0_THREAT_CLOCK",
+    "THREAT_CAST",
+    "WELL_BELOW_ID",
+    "WELL_BELOW",
+]
 
 THREAT_CLOCK_SEGMENT_COUNT = 4
 """EXP-01이 요구한 칸 수 — D21의 4~6칸 범위 안 값."""
@@ -29,6 +36,11 @@ THREAT_CLOCK_SEGMENT_COUNT = 4
 # export하는 것은 이 이름을 쓰던 기존 호출부(`web/routes_actions.py` 등)가
 # 안 깨지게 하기 위해서다 — 정의는 `rules_core/scenario.py`가 유일하다.
 
+
+# 정본은 이제 아래 `WELL_BELOW`(D-18, Phase 13)다 — `M0_THREAT_CLOCK`과
+# `THREAT_CAST`는 그 구성 요소로 남는다. `WELL_BELOW.threat_clock is
+# M0_THREAT_CLOCK`/`WELL_BELOW.cast is THREAT_CAST`이므로 이 이름들을 직접
+# 참조하던 기존 호출부(`turn/context.py`의 기본값 갈래 등)는 그대로 돈다.
 
 # 진지하게도, 우습게도, 슬프게도 풀릴 수 있게 톤을 하나로 좁히지 않는다.
 # 전투(곽서리를 통해)·대화(담녹·이슬·나울)·탐색(우물 주변 흔적)·설득(이슬을
@@ -124,4 +136,52 @@ THREAT_CAST: tuple[Entity, ...] = (
         rulebook_id=DUNGEONWORLD_LIKE_ID,
         stats=(),
     ),
+)
+
+WELL_BELOW_ID = "well_below"
+
+WELL_BELOW: ScenarioDecl = ScenarioDecl(
+    scenario_id=WELL_BELOW_ID,
+    display_name="우물 아래의 것",
+    opening_kind="sketch",
+    # 메모형(D-05) — 이 시나리오에는 완성된 낭독문이 없었다(그래서 세션이
+    # 빈 화면에서 시작했다). 아래 다섯 칸은 **저자 메모**이지 그대로 읽을
+    # 낭독문이 아니다 — 상황 판단 담당(situation_judge, 13-03)이 좁혀 서술에
+    # 넘길 재료다. `segment_descriptions[0]`(위 M0_THREAT_CLOCK)과 캐스트가
+    # 이미 무대를 갖추고 있으므로 그 재료로 짧게 적는다.
+    opening=OpeningDecl(
+        who_you_are="당신들은 이 마을에 함께 머물며 크고 작은 일들을 겪어 온 사람들이다.",
+        what_you_sense=(
+            "우물물이 탁하게 흐려지고 비린내가 돈다. 밤사이 염소 두 마리가 "
+            "사라졌고, 우리 안에는 마른 진흙 발자국만 원을 그리며 남아 있다."
+        ),
+        why_it_matters=(
+            "마을의 유일한 우물에서 일어난 일이라 다들 애써 태연한 척하지만, "
+            "벌써 마음이 술렁이기 시작했다."
+        ),
+        hooks=(
+            "우물지기 이슬이 요 며칠 잠을 설친 얼굴로 우물가를 서성이고 있다.",
+            "사라진 염소들의 발자국이 우물 쪽으로 이어지다 거기서 끊긴다.",
+        ),
+        invitation="당신들은 지금 무엇을 하시겠습니까?",
+        hook_terms=("우물", "염소", "발자국"),
+        # 13-03의 생성 검사(D-08ⓐ)가 대조할 손잡이 — 위 hooks 두 문장에
+        # 실제로 들어 있는 낱말만 고른다.
+    ),
+    # improv_people=False — 캐스트 넷(담녹·이슬·곽서리·나울)은 저마다 감추는
+    # 것이 있는 폐쇄된 인물 구성이다(위 THREAT_CAST 각 항목의 주석 참고).
+    # 새 인물이 즉흥으로 끼어들면 그 비밀 구조가 흔들린다 — lamplight_vigil과
+    # 같은 판단(닫힌 캐스트의 미스터리물, D-16 예시와 정합).
+    improv_people=False,
+    # improv_things=True — 우물·발자국·염소 같은 현장 단서와 소품은 이야기가
+    # 진행되며 자유롭게 늘어나도 된다(탐색·발견이 핵심 동선인 시나리오).
+    improv_things=True,
+    target_check=True,
+    cast=THREAT_CAST,
+    threat_clock=M0_THREAT_CLOCK,
+    imagery_setting="a village well and flooded stone tunnels below",
+    # 값 출처: 예전 `imagery/scene_prompt.WELL_SCENARIO_SETTING` — 그 상수가
+    # 스스로 예고한 대로(D-18) 이 자리로 옮겨졌다. 그림 층(`imagery`)은
+    # `rulebooks`보다 위 층이라 이 시나리오를 몰라도 되고, 이 문자열은 값만
+    # 옮겨 받아 그대로 쓴다(.importlinter contract:2).
 )

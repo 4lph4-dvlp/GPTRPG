@@ -11,13 +11,22 @@ import dataclasses
 
 import pytest
 
+from gptrpg.event_log.store import EventStore
 from gptrpg.rulebooks.dungeonworld_like import DUNGEONWORLD_LIKE_ID
 from gptrpg.rulebooks.lamplight_vigil import LAMPLIGHT_VIGIL, LAMPLIGHT_VIGIL_ID
 from gptrpg.rulebooks.scenarios import (
+    DEFAULT_SCENARIO_ID,
     SCENARIOS,
     UnknownScenario,
     get_scenario,
     validate_registered_scenarios,
+)
+from gptrpg.rulebooks.threat_clocks import (
+    M0_THREAT_CLOCK,
+    THREAT_CAST,
+    THREAT_CLOCK_SEGMENT_COUNT,
+    WELL_BELOW,
+    WELL_BELOW_ID,
 )
 from gptrpg.rules_core.entities import Entity
 from gptrpg.rules_core.scenario import (
@@ -28,6 +37,7 @@ from gptrpg.rules_core.scenario import (
     ThreatClockContent,
     render_scripted_opening,
 )
+from gptrpg.turn.context import build_turn_context
 
 # ---------------------------------------------------------------------------
 # 등록소 전체 순회 — assumption-delta 불변식 시험
@@ -201,11 +211,15 @@ def test_registration_rejects_duplicate_cast_display_names():
 # ---------------------------------------------------------------------------
 
 
-def test_registration_rejects_all_scenarios_sharing_one_opening_kind():
+def test_registration_rejects_all_scenarios_sharing_one_opening_kind(monkeypatch):
     """등록된 시나리오가 둘 이상인데 `opening_kind`가 전부 같으면 거부된다
     — 형식이 낭독문형·메모형을 둘 다 받는다는 것이 검증되지 않는다
-    (D-21/D-06). `lamplight_vigil`은 `scripted`이므로 같은 종류의 시나리오
+    (D-21/D-06). **13-03이 `WELL_BELOW`(sketch)를 등록해 실제 등록소가 이제
+    두 종류를 갖게 됐으므로**, 이 시험이 재현하려는 "전부 같은 종류" 상태를
+    만들려면 `WELL_BELOW`를 잠시 빼서 `lamplight_vigil`(scripted) 하나만
+    남긴다 — `lamplight_vigil`은 `scripted`이므로 같은 종류의 시나리오
     하나를 더 등록하면 이 검사가 걸린다."""
+    monkeypatch.delitem(SCENARIOS, WELL_BELOW_ID)
     scenario = _valid_scenario(opening_kind="scripted")
     with pytest.raises(InvalidScenarioDecl):
         _register_and_validate(scenario)
@@ -265,3 +279,83 @@ def test_render_scripted_opening_preserves_korean_code_points_not_bytes():
     assert long_hook in rendered
     assert len(long_hook) == 400  # 코드 포인트 수 — 바이트 수(1200)가 아니다
     assert rendered.count("우물") == 200
+
+
+# ---------------------------------------------------------------------------
+# 13-03 Task 2 — 「우물 아래의 것」이관 + 등록소가 형식 둘을 실제로 받는다
+# ---------------------------------------------------------------------------
+
+
+def test_well_below_is_registered_alongside_lamplight_vigil_with_a_different_kind():
+    """등록소에 시나리오가 둘 있고(`WELL_BELOW`/`LAMPLIGHT_VIGIL`)
+    `opening_kind`가 서로 다르다 — 형식이 낭독문형·메모형을 둘 다 받는다는
+    것이 실제 데이터로 증명된다(D-21/D-06). 기본 시나리오는 `WELL_BELOW`다
+    (13-03 재판단, `DEFAULT_SCENARIO_ID` 도크스트링 참고)."""
+    assert SCENARIOS[WELL_BELOW_ID] is WELL_BELOW
+    assert get_scenario(WELL_BELOW_ID) is WELL_BELOW
+    assert WELL_BELOW.opening_kind == "sketch"
+    assert LAMPLIGHT_VIGIL.opening_kind == "scripted"
+    assert {s.opening_kind for s in SCENARIOS.values()} == {"scripted", "sketch"}
+    assert DEFAULT_SCENARIO_ID == WELL_BELOW_ID
+
+
+def test_well_below_cast_and_threat_clock_are_the_original_objects_unchanged():
+    """이관이 이야기를 안 바꿨다는 증거 — `WELL_BELOW.cast`/`.threat_clock`이
+    기존 `THREAT_CAST`/`M0_THREAT_CLOCK`과 **같은 객체**이고, 네 인물의
+    이름이 그대로다."""
+    assert WELL_BELOW.cast is THREAT_CAST
+    assert WELL_BELOW.threat_clock is M0_THREAT_CLOCK
+    assert [entity.display_name for entity in WELL_BELOW.cast] == [
+        "촌장 담녹",
+        "우물지기 이슬",
+        "순찰대장 곽서리",
+        "홀린 아이 나울",
+    ]
+
+
+def test_registration_rejects_threat_clock_segment_count_mismatch():
+    """`threat_clock.segment_descriptions` 칸 수가
+    `THREAT_CLOCK_SEGMENT_COUNT`와 다르면 거부된다 — 프롬프트 분모와 화면
+    머리띠 분모가 어긋나는 일을 등록 시점에 막는다."""
+    mismatched_clock = ThreatClockContent(
+        clock_id="test",
+        name="칸 수가 틀린 시계",
+        identity="시험용 정체",
+        wants="시험용 소망",
+        segment_descriptions=("칸1", "칸2", "칸3"),  # THREAT_CLOCK_SEGMENT_COUNT(4)와 다름
+        catastrophe="시험용 파국",
+    )
+    assert len(mismatched_clock.segment_descriptions) != THREAT_CLOCK_SEGMENT_COUNT
+    scenario = _valid_scenario(threat_clock=mismatched_clock)
+    with pytest.raises(InvalidScenarioDecl):
+        _register_and_validate(scenario)
+
+
+def test_registration_rejects_imagery_setting_over_the_imagery_layer_char_limit():
+    """`imagery_setting`이 그림 층의 상한(`imagery.scene_prompt.
+    MAX_PROMPT_CHARS`, 300자)을 넘으면 거부된다 — 실제 그림 생성에서 조용히
+    잘리는 일을 등록 시점에 막는다."""
+    from gptrpg.imagery.scene_prompt import MAX_PROMPT_CHARS
+
+    too_long_setting = "a" * (MAX_PROMPT_CHARS + 1)
+    scenario = _valid_scenario(imagery_setting=too_long_setting)
+    with pytest.raises(InvalidScenarioDecl):
+        _register_and_validate(scenario)
+
+
+def test_build_turn_context_with_and_without_scenario_are_equivalent(tmp_path):
+    """`build_turn_context(scenario=WELL_BELOW)`와 `build_turn_context()`
+    (인자 없음)이 **같은 `TurnContext`를 만든다** — `WELL_BELOW`가
+    `THREAT_CAST`/`M0_THREAT_CLOCK`을 그대로 참조하므로, 시나리오를 옮기기
+    전후로 실행 중 동작이 하나도 안 바뀌었다는 회귀 증거다."""
+    store = EventStore(str(tmp_path / "events.db"))
+    store.initialize()
+    try:
+        session_id = "well-below-equivalence"
+        without_scenario = build_turn_context(store, session_id, DUNGEONWORLD_LIKE_ID)
+        with_scenario = build_turn_context(
+            store, session_id, DUNGEONWORLD_LIKE_ID, scenario=WELL_BELOW
+        )
+        assert with_scenario == without_scenario
+    finally:
+        store.close()
