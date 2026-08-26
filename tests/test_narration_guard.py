@@ -225,6 +225,59 @@ def test_inspect_sentence_normal_narration_stays_clean():
 
 
 # ---------------------------------------------------------------------------
+# 자기 반복(narration_repeat) — verify-13-06 사람 확인 결함1. 2026-08-26
+# well_below 실측 turn(seq 112)에서 서사 스트림 하나가 문장 하나를 다 쓴 뒤
+# 마침표 없이 곧바로 처음부터 되풀이했다 — 27조각 중 12조각이 앞선 조각과
+# 바이트 단위로 같았다. `written_so_far`(이번 서사에서 이미 낸 문장들)를
+# 원문 겹침과 같은 창-슬라이딩 대조로 잡는다(source_texts는 관여하지 않는다).
+# ---------------------------------------------------------------------------
+
+
+def test_inspect_sentence_blocks_verbatim_repeat_of_already_written_sentence():
+    already_written = "우물 아래에서 낮게 울리는 소리가 들려오기 시작했다."
+    verdict = narration_guard.inspect_sentence(
+        already_written,
+        next_sentence=None,
+        source_texts=(),
+        written_so_far=(already_written,),
+    )
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "narration_repeat"
+    assert verdict.matched_len >= narration_guard.MIN_OVERLAP_CHARS
+    assert verdict.text == ""
+
+
+def test_inspect_sentence_new_sentence_not_in_written_so_far_stays_clean():
+    verdict = narration_guard.inspect_sentence(
+        "이번에는 정말로 새로운 문장이다.",
+        next_sentence=None,
+        source_texts=(),
+        written_so_far=("완전히 다른 앞선 문장이 이미 나갔었다.",),
+    )
+    assert verdict.disposition == "clean"
+
+
+def test_inspect_sentence_default_written_so_far_is_empty_and_never_blocks_as_repeat():
+    """기본값 `()`은 옛 호출부와의 호환이다 — `written_so_far`를 안 주면
+    이 갈래는 항상 통과한다."""
+    sentence = "이 문장은 어디에도 안 걸린다."
+    verdict = narration_guard.inspect_sentence(sentence, next_sentence=None, source_texts=())
+    assert verdict.disposition == "clean"
+
+
+def test_inspect_sentence_source_overlap_wins_when_both_would_match():
+    """원문 겹침과 자기 반복이 동시에 걸리면(같은 문장이 지시문에도, 이미 쓴
+    문장에도 있는 경우) 원문 겹침이 먼저 판정된다(D-02②가 D-03보다 앞선
+    안전 갈래) — `reason`이 `narration_repeat`가 아니라 `source_overlap`."""
+    shared = "정확히 같은 열두 글자 이상 구절이다"
+    verdict = narration_guard.inspect_sentence(
+        shared, next_sentence=None, source_texts=(shared,), written_so_far=(shared,)
+    )
+    assert verdict.disposition == "blocked"
+    assert verdict.reason == "source_overlap"
+
+
+# ---------------------------------------------------------------------------
 # CHARACTER_BREAK_PATTERNS — 캐릭터 이탈은 통과시키되 기록만 한다(D-02③/D-03)
 # ---------------------------------------------------------------------------
 
@@ -406,17 +459,22 @@ class _LeakingProvider:
     """영구 고정 블록의 한 구절을 그대로 옮긴 문장을 낸다(세션1에서 실제로
     난 "진행자 지시문 전체가 서사로 유출"의 축소판).
 
-    `messages`(재생성 프롬프트)와 무관하게 매번 같은 세 문장을 낸다 — 이
-    이중체가 부르는 쪽에 무엇을 넣든 계속 같은 자리에서 걸린다는 뜻이다
-    (10-03, `narrate()`가 재생성을 한 번 시도했다가 또 걸리는 경로를
-    확인하는 데 쓴다). `note_result()`도 구현한다 — 10-03부터 두 번 다
-    걸린 턴은 `narrate()`가 이 메서드로 실패 껍데기를 남긴다."""
+    `messages`(재생성 프롬프트)와 무관하게 매번 같은 자리(둘째 문장)에서
+    걸린다는 뜻이다(10-03, `narrate()`가 재생성을 한 번 시도했다가 또
+    걸리는 경로를 확인하는 데 쓴다). **첫 문장은 호출마다 다르게 낸다**
+    (verify-13-06 결함1 이후 — `narrate()`가 이제 자기 반복도 잡으므로,
+    재생성 호출이 원래 스트림의 첫 문장을 그대로 되풀이하면 이 시험이
+    보려는 `source_overlap` 자리에 닿기도 전에 `narration_repeat`로 먼저
+    걸린다. 이 이중체는 원문 유출 검사만 겨눈 시험이라 자기 반복이라는
+    다른 변수를 섞지 않는다). `note_result()`도 구현한다 — 10-03부터
+    두 번 다 걸린 턴은 `narrate()`가 이 메서드로 실패 껍데기를 남긴다."""
 
     name = "leaking-narration"
 
     def __init__(self, leaked_phrase: str) -> None:
         self._leaked_phrase = leaked_phrase
         self._last_result: AgentResult | None = None
+        self._call_count = 0
 
     def list_models(self) -> list[str]:
         return ["stub-model"]
@@ -425,7 +483,13 @@ class _LeakingProvider:
         raise NotImplementedError("이 이중체는 stream()만 시험한다")
 
     def stream(self, *, model, system, messages, max_tokens, timeout_s) -> Iterator[str]:
-        yield "평범한 서사 한 문장이 먼저 나간다. "
+        self._call_count += 1
+        first_sentence = (
+            "평범한 서사 한 문장이 먼저 나간다."
+            if self._call_count == 1
+            else "재생성이라 앞 문장과는 다른 서사를 낸다."
+        )
+        yield f"{first_sentence} "
         yield f"{self._leaked_phrase}. "
         yield "평범한 서사 한 문장이 뒤이어 나간다."
         self._last_result = AgentResult(

@@ -24,6 +24,22 @@
 영구 저장된 것」**이었다 — 이 갈래는 그 침묵만 없앤다. 탐지는 다른 세
 갈래와 마찬가지로 내용 무관이다: `REPLACEMENT_CHAR`가 문장에 있는지만
 본다. 문구 목록도 모델 이름 분기도 없다.
+
+**다섯 번째 갈래 — 자기 반복**(verify-13-06 사람 확인 결함 1). 2026-08-26
+`well_below` 실측에서 한 턴의 서사 27조각 중 12조각이 앞선 조각과 바이트
+단위로 같았다 — 모델(또는 스트림)이 문장 하나를 다 쓴 뒤 마침표 없이
+곧바로 처음부터 다시 쓴 사고였다(문장 경계가 없어 `chunk_sentences`가 꼬리와
+머리를 한 조각으로 이어 붙였을 만큼 이음매가 없었다). 이 갈래는 **원문
+겹침과 정확히 같은 창-슬라이딩 대조**(`find_source_overlap`)를 쓰되 대조
+소스가 진행자 지시문이 아니라 **이번 서사에서 이미 내보낸 문장들**
+(`written_so_far`)이다 — 같은 함수·같은 임계값(`MIN_OVERLAP_CHARS`)을
+재사용해 새 로직을 안 만든다. 걸리면 `source_overlap`과 똑같이 `blocked`로
+처리되어 그 자리에서 스트림이 멈추고 기존 재생성(D-06/D-07)·포기(D-08)
+경로를 그대로 탄다 — 이 갈래가 새 화면 요소나 새 실패 모드를 만들지
+않는다, 기존 넷과 같은 파이프라인에 다섯 번째 판정 소스가 늘었을 뿐이다.
+`reason`은 `"narration_repeat"`로 따로 둔다 — 진짜 지시문 유출과 자기
+반복은 원인이 다른 결함이라 표준오류·`safety_flagged` 기록에서 섞이면
+안 된다.
 """
 
 import re
@@ -198,6 +214,40 @@ def find_source_overlap(
     return 0, False
 
 
+def _verbatim_overlap_verdict(
+    sentence: str, next_sentence: str | None, sources: tuple[str, ...], *, reason: str
+) -> GuardVerdict | None:
+    """`sentence`(+`next_sentence`까지 이어 붙여)가 `sources` 중 하나와
+    `MIN_OVERLAP_CHARS`자 이상 겹치면 `blocked` 판정을 만들어 돌려주고,
+    안 겹치면 `None`이다.
+
+    원문 겹침(D-02②)과 자기 반복(narration_repeat) 두 갈래가 창-슬라이딩
+    대조 로직과 `subject_len` 보정(10-07/WR-02 — 겹침이 `next_sentence`까지
+    뻗었으면 분모도 이어 붙인 길이여야 한다)을 그대로 공유한다 — 다른 것은
+    대조 소스 목록과 `reason` 문자열뿐이다."""
+    matched_len, overlap_hit = find_source_overlap(sentence, next_sentence, sources)
+    if not overlap_hit:
+        return None
+
+    if next_sentence:
+        matched_len_within_sentence, _ = find_source_overlap(sentence, None, sources)
+    else:
+        matched_len_within_sentence = matched_len
+    if matched_len > matched_len_within_sentence:
+        subject_len = len(sentence) + len(next_sentence or "")
+    else:
+        subject_len = len(sentence)
+
+    return GuardVerdict(
+        disposition="blocked",
+        reason=reason,
+        text="",
+        matched_len=matched_len,
+        subject_len=subject_len,
+        think_open=False,
+    )
+
+
 def strip_think_blocks(text: str) -> str:
     """완결된 `<think>...</think>` 쌍을 지운 문자열을 돌려준다.
 
@@ -222,12 +272,17 @@ def inspect_sentence(
     next_sentence: str | None,
     source_texts: tuple[str, ...],
     think_open: bool = False,
+    written_so_far: tuple[str, ...] = (),
 ) -> GuardVerdict:
-    """서사 검사 진입점 — 네 갈래(생각 블록/원문 겹침/캐릭터 이탈/깨진 글자)를
-    모두 채운다(10-02·10-06).
+    """서사 검사 진입점 — 다섯 갈래(생각 블록/원문 겹침/자기 반복/캐릭터
+    이탈/깨진 글자)를 모두 채운다(10-02·10-06·verify-13-06 결함1).
 
     `source_texts`는 "우리가 프롬프트에 실제로 넣은 문자열"이다 —
     `find_source_overlap`이 이 값을 원문 겹침 대조 소스로 그대로 쓴다.
+    `written_so_far`는 **이번 서사 호출에서 이미 내보낸 문장들**이다(기본값
+    `()`은 옛 호출부와의 호환 — 자기 반복 검사를 안 한다는 뜻이 아니라
+    "아직 아무것도 안 썼다"와 같은 값이라 자연히 갈래가 안 걸린다). 자기
+    반복 갈래의 세부는 모듈 도크스트링 참조.
 
     **판정 순서:**
     1. `think_open`이 참이면(이전 문장에서 연 생각 블록이 아직 안 닫혔다)
@@ -248,20 +303,25 @@ def inspect_sentence(
        len(next_sentence or "")`(대조 대상이 두 문장을 이어 붙인 텍스트이기
        때문이다), 안 넘었으면 다른 갈래와 같이 `len(sentence)`다. `matched_len`은
        절대 자르지 않는다 — `GuardVerdict` 도크스트링 참조.
-    4. 원문 겹침도 없으면 `CHARACTER_BREAK_PATTERNS`를 순회한다(D-02③) —
-       하나라도 걸리면 `flagged`, `reason="character_break"`, `text`는
-       **원문 그대로**(호출부가 이 문장을 그대로 내보낸다), `matched_len`은
-       걸린 부분의 길이다. **이 갈래는 절대 `blocked`를 돌려주지 않는다**
-       (D-03) — 오탐이어도 통과시키는 편의 비용이 멀쩡한 서사를 잘못 자르는
-       비용보다 낮다.
-    5. 캐릭터 이탈도 없으면 `count_corrupted_glyphs(sentence)`를 본다
+    4. 원문 겹침도 없으면 자기 반복을 본다(verify-13-06 결함1) —
+       `find_source_overlap(sentence, next_sentence, written_so_far)`가
+       적중하면 `blocked`, `reason="narration_repeat"`, 매김·`subject_len`
+       계산은 원문 겹침 갈래와 완전히 같다(`_verbatim_overlap_verdict` 공유).
+       `written_so_far`가 비어 있으면(기본값) 이 갈래는 항상 통과한다.
+    5. 원문 겹침도 자기 반복도 없으면 `CHARACTER_BREAK_PATTERNS`를
+       순회한다(D-02③) — 하나라도 걸리면 `flagged`, `reason="character_break"`,
+       `text`는 **원문 그대로**(호출부가 이 문장을 그대로 내보낸다),
+       `matched_len`은 걸린 부분의 길이다. **이 갈래는 절대 `blocked`를
+       돌려주지 않는다**(D-03) — 오탐이어도 통과시키는 편의 비용이 멀쩡한
+       서사를 잘못 자르는 비용보다 낮다.
+    6. 캐릭터 이탈도 없으면 `count_corrupted_glyphs(sentence)`를 본다
        (10-06, SAFE-01) — 하나라도 있으면 `flagged`, `reason="corrupted_glyph"`,
        `text`는 **원문 그대로**, `matched_len`은 깨진 글자 개수다. 이 갈래도
        **절대 `blocked`를 돌려주지 않는다** — 깨진 글자는 안전 유출이 아니라
        품질 결함이다(모듈 도크스트링 참조). 캐릭터 이탈이 앞선 갈래이므로
        두 사유가 동시에 걸리는 문장은 `character_break`가 이긴다(먼저 온
        갈래가 이긴다) — 두 사유를 합치는 칸을 새로 만들지 않는다.
-    6. 다섯 다 아니면 `clean` — 문장 그대로 내보낸다.
+    7. 여섯 다 아니면 `clean` — 문장 그대로 내보낸다.
 
     **`next_sentence`를 직접 들여다보지 않는 이유(생각 블록 갈래):** "여는
     표식이 문장 1에, 닫는 표식이 문장 2에 걸쳐 있어도 잡힌다"(D-01)는
@@ -300,34 +360,24 @@ def inspect_sentence(
             think_open=still_has_open,
         )
 
-    matched_len, overlap_hit = find_source_overlap(sentence, next_sentence, source_texts)
-    if overlap_hit:
-        # `subject_len`을 바로잡는다(10-07, WR-02) — 겹침이 `sentence`를 넘어
-        # `next_sentence`까지 뻗었으면 대조 대상 자체가 두 문장을 이어 붙인
-        # 텍스트이므로 분모도 이어 붙인 길이여야 한다. 넘었는지는 "next_sentence
-        # 없이 `sentence` 혼자 대조했을 때의 최대 겹침 길이"와 비교해 판정한다
-        # — 혼자서는 못 미쳤는데(next_sentence 없이는 이 길이가 안 나오는데)
-        # next_sentence를 더했더니 늘었다면, 그 늘어난 몫은 반드시
-        # `len(sentence)`를 넘어선 자리에서 나온 것이다(순수하게 `sentence`
-        # 안쪽 창만으로는 `find_source_overlap(sentence, None, ...)`가 이미
-        # 그 최대값을 찾아냈을 것이므로). `matched_len`은 자르지 않는다 —
-        # 값을 자르는 대신 분모를 정직하게 넓히는 것이 이 판단의 핵심이다.
-        if next_sentence:
-            matched_len_within_sentence, _ = find_source_overlap(sentence, None, source_texts)
-        else:
-            matched_len_within_sentence = matched_len
-        if matched_len > matched_len_within_sentence:
-            overlap_subject_len = len(sentence) + len(next_sentence or "")
-        else:
-            overlap_subject_len = len(sentence)
-        return GuardVerdict(
-            disposition="blocked",
-            reason="source_overlap",
-            text="",
-            matched_len=matched_len,
-            subject_len=overlap_subject_len,
-            think_open=False,
-        )
+    # `subject_len` 보정(10-07, WR-02 — 겹침이 `sentence`를 넘어
+    # `next_sentence`까지 뻗었으면 분모도 이어 붙인 길이여야 한다)과 창-슬라이딩
+    # 대조 자체는 `_verbatim_overlap_verdict`가 두 갈래(원문 겹침·자기 반복)
+    # 공통으로 진다 — 다른 것은 대조 소스와 `reason`뿐이다.
+    overlap_verdict = _verbatim_overlap_verdict(
+        sentence, next_sentence, source_texts, reason="source_overlap"
+    )
+    if overlap_verdict is not None:
+        return overlap_verdict
+
+    # 자기 반복(verify-13-06 결함1) — 원문 겹침과 같은 로직, 대조 소스만
+    # "이번 서사에서 이미 낸 문장들"이다. 원문 겹침 갈래가 먼저 오므로
+    # 두 사유가 동시에 걸리면(이론상 거의 없다) `source_overlap`이 이긴다.
+    repeat_verdict = _verbatim_overlap_verdict(
+        sentence, next_sentence, written_so_far, reason="narration_repeat"
+    )
+    if repeat_verdict is not None:
+        return repeat_verdict
 
     for pattern in CHARACTER_BREAK_PATTERNS:
         match = pattern.search(sentence)

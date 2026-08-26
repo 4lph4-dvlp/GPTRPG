@@ -174,21 +174,30 @@ def _judge_sentence(
     next_sentence: str | None,
     think_open: bool,
     source_texts: tuple[str, ...],
+    written_so_far: tuple[str, ...] = (),
 ) -> tuple[NarrationChunk, bool]:
     """보류 중이던 `sentence`를 판정해 `NarrationChunk`로 만든다.
 
-    `inspect_sentence`의 세 갈래(생각 블록/원문 겹침/캐릭터 이탈)가 모두
-    채워져 있다(10-01·10-02) — `source_texts`는 `narrate()`가 넘겨주는
-    영구 고정 블록 텍스트 하나다. `disposition == "blocked"`이면 화면에는
-    `NOTICE_FILTERED`를 대신 싣고, 운영자 표준오류에 사유·겹친 글자 수·
-    문장 길이·짧은 발췌를 한 줄 찍는다(T-10-03 — 사람이 읽을 발췌는
-    네트워크를 안 타는 표준오류에만). `disposition == "flagged"`(캐릭터
-    이탈, D-03)는 걸러내지 않고 원문 그대로 내보낸다 — 아래 `else` 갈래가
-    `clean`과 `flagged` 둘 다 같은 방식으로 처리한다(`verdict.text`가
-    이미 두 경우 모두 올바른 값을 담고 있다).
+    `inspect_sentence`의 다섯 갈래(생각 블록/원문 겹침/자기 반복/캐릭터
+    이탈/깨진 글자)가 모두 채워져 있다(10-01·10-02·10-06·verify-13-06
+    결함1) — `source_texts`는 `narrate()`가 넘겨주는 영구 고정 블록 텍스트
+    하나이고, `written_so_far`는 이번 서사 호출에서 **이미 내보낸 문장들**
+    이다(`_consume_narration_stream`이 호출 시점의 값을 그대로 넘긴다 —
+    호출마다 자라는 목록이라 매번 다시 읽어야 한다). `disposition ==
+    "blocked"`이면 화면에는 `NOTICE_FILTERED`를 대신 싣고, 운영자
+    표준오류에 사유·겹친 글자 수·문장 길이·짧은 발췌를 한 줄 찍는다
+    (T-10-03 — 사람이 읽을 발췌는 네트워크를 안 타는 표준오류에만).
+    `disposition == "flagged"`(캐릭터 이탈, D-03)는 걸러내지 않고 원문
+    그대로 내보낸다 — 아래 `else` 갈래가 `clean`과 `flagged` 둘 다 같은
+    방식으로 처리한다(`verdict.text`가 이미 두 경우 모두 올바른 값을
+    담고 있다).
     """
     verdict = inspect_sentence(
-        sentence, next_sentence=next_sentence, source_texts=source_texts, think_open=think_open
+        sentence,
+        next_sentence=next_sentence,
+        source_texts=source_texts,
+        think_open=think_open,
+        written_so_far=written_so_far,
     )
     if verdict.disposition == "blocked":
         # `verdict.subject_len > len(sentence)`는 원문 겹침이 문장 경계를 넘어
@@ -230,10 +239,20 @@ def _consume_narration_stream(
     bounded_deltas: Iterable[str],
     *,
     source_texts: tuple[str, ...],
+    written_so_far: list[str],
 ) -> Iterator[tuple[NarrationChunk, str | None]]:
     """조각 스트림 하나를 1문장 지연 버퍼로 판정해 `(chunk, avoid_text)`
     짝으로 흘려보낸다 — 정상 경로와 재생성 경로가 이 함수 하나를
     공유한다(10-01/10-03, 로직 중복 금지).
+
+    `written_so_far`는 **살아있는 리스트를 그대로 받는다**(고정 튜플이
+    아니다) — `narrate()`의 `_drive`가 조각 하나를 소비할 때마다 이
+    리스트에 이어 붙이고, 이 함수는 문장을 판정하는 **그 순간의** 값을
+    `tuple(written_so_far)`로 읽어야 한다(verify-13-06 결함1, 자기 반복
+    검사). 호출 시작 시점에 스냅샷을 떠 고정 튜플로 받으면, 같은 스트림
+    안에서 나중에 나온 문장이 그 스트림 **앞부분**과 겹쳐도 못 잡는다 —
+    실제 결함이 정확히 그 모양이었다(한 스트림 안에서 뒷부분이 앞부분을
+    그대로 되풀이했다).
 
     `avoid_text`는 `chunk.disposition == "blocked"`일 때만 그 문장의
     **원문**(판정 전 원래 텍스트, D-07이 재생성 프롬프트에 되돌려 보낼
@@ -263,14 +282,22 @@ def _consume_narration_stream(
         except Exception:  # noqa: BLE001 - 문장 생성 도중 죽은 스트림, 재시도 판단은 호출한 쪽이 한다
             if held is not None:
                 chunk, _think_open = _judge_sentence(
-                    held, next_sentence=None, think_open=think_open, source_texts=source_texts
+                    held,
+                    next_sentence=None,
+                    think_open=think_open,
+                    source_texts=source_texts,
+                    written_so_far=tuple(written_so_far),
                 )
                 yield chunk, (held if chunk.disposition == "blocked" else None)
                 held = None
             raise
         if held is not None:
             chunk, think_open = _judge_sentence(
-                held, next_sentence=sentence, think_open=think_open, source_texts=source_texts
+                held,
+                next_sentence=sentence,
+                think_open=think_open,
+                source_texts=source_texts,
+                written_so_far=tuple(written_so_far),
             )
             avoid_text = held if chunk.disposition == "blocked" else None
             held = sentence
@@ -281,7 +308,11 @@ def _consume_narration_stream(
             held = sentence
     if held is not None:
         chunk, think_open = _judge_sentence(
-            held, next_sentence=None, think_open=think_open, source_texts=source_texts
+            held,
+            next_sentence=None,
+            think_open=think_open,
+            source_texts=source_texts,
+            written_so_far=tuple(written_so_far),
         )
         yield chunk, (held if chunk.disposition == "blocked" else None)
 
@@ -470,7 +501,9 @@ def narrate(
         blocked_reason = ""
         blocked_matched_len = 0
         blocked_subject_len = 0
-        for chunk, avoid_text in _consume_narration_stream(bounded_deltas, source_texts=source_texts):
+        for chunk, avoid_text in _consume_narration_stream(
+            bounded_deltas, source_texts=source_texts, written_so_far=written_so_far
+        ):
             if avoid_text is not None and not emit_block_notice:
                 pass  # 이 호출 자신의 차단 안내는 억누른다(위 도크스트링) — 사실은 아래에서 그대로 기록한다.
             else:

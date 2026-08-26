@@ -25,7 +25,7 @@ from gptrpg.agents.master_gm import (
     chunk_sentences,
     narrate,
 )
-from gptrpg.agents.narration_guard import NOTICE_GAVE_UP
+from gptrpg.agents.narration_guard import NOTICE_FILTERED, NOTICE_GAVE_UP
 from gptrpg.agents.providers.nim_provider import NimProvider
 
 _FAKE_KEY = "fake-key-does-not-touch-network"
@@ -929,3 +929,94 @@ def test_narrate_stream_call_count_stays_within_the_three_call_ceiling_across_al
     if call_count is None:
         call_count = len(provider.stream_calls)
     assert call_count <= 3
+
+
+# ---------------------------------------------------------------------------
+# verify-13-06 사람 확인 결함1 — 서사 스트림 자기 반복. 2026-08-26 well_below
+# 실측(session verify-13-06, turn seq 112)에서 한 턴의 narration_appended
+# 27조각 중 12조각이 앞선 조각과 바이트 단위로 같았다 — 스트림이 문장 하나를
+# 다 쓴 뒤 마침표 없이 곧바로 처음부터 되풀이했다(13번째 조각의 텍스트가
+# 직전 문장의 꼬리 + 첫 문장의 반복을 이음매 없이 이어 붙인 모양이었다).
+# 이 이중체는 그 정확한 모양(마침표 없는 이음매)을 재현한다.
+# ---------------------------------------------------------------------------
+
+
+class _RepeatsEarlierSentenceMidStreamProvider:
+    """`narrate()`의 자기 반복 검사(narration_repeat) 시험용 — 한 번의
+    `stream()` 호출 안에서 문장 둘을 낸 뒤, 마침표 없는 꼬리에 곧바로 첫
+    문장을 다시 이어 붙인다(2026-08-26 well_below 실측과 정확히 같은
+    이음매 없는 모양 — `chunk_sentences`가 꼬리와 반복을 한 조각으로 합친다).
+    재생성 호출(두 번째 `stream()`)은 실제로 새 문장을 낸다."""
+
+    name = "repeats-earlier-sentence"
+
+    _S0 = "쓰러진 돌기둥 사이로 차가운 밤바람이 스며들었다."
+    _S1 = "저 멀리서 늑대의 울음소리가 희미하게 들려왔다."
+
+    def __init__(self) -> None:
+        self.stream_calls: list[tuple[list[dict], list[dict]]] = []
+        self._last_result: AgentResult | None = None
+
+    def list_models(self) -> list[str]:
+        return ["stub-model"]
+
+    def complete(self, *, model, system, messages, max_tokens, timeout_s) -> AgentResult:
+        raise NotImplementedError("이 이중체는 stream()만 시험한다")
+
+    def stream(self, *, model, system, messages, max_tokens, timeout_s) -> Iterator[str]:
+        self.stream_calls.append((system, messages))
+        if len(self.stream_calls) == 1:
+            # 마침표 없는 꼬리 바로 뒤에 S0를 다시 이어 붙인다 — 실측에서
+            # 관찰된 이음매 없는 되풀이를 그대로 흉내낸다.
+            yield f"{self._S0} {self._S1} 정체 모를 발소리가 서서히 가까워지고 있었다"
+            yield f"{self._S0} {self._S1}"
+        else:
+            yield "재생성이 실제로 새로 쓴 문장이다."
+        self._last_result = AgentResult(
+            ok=True, value="", elapsed_ms=5, prompt_tokens=3, completion_tokens=3
+        )
+
+    def last_result(self) -> AgentResult:
+        if self._last_result is None:
+            raise RuntimeError("stream()을 먼저 불러야 last_result()를 부를 수 있다")
+        return self._last_result
+
+    def note_result(self, result: AgentResult) -> None:
+        self._last_result = result
+
+
+def test_narrate_stops_narration_stream_that_repeats_itself_without_sentence_boundary() -> None:
+    """verify-13-06 사람 확인 결함1 재현 — 같은 스트림 안에서 이미 낸 문장을
+    마침표 없이 곧바로 되풀이하면 `narrate()`가 그 자리에서 스트림 소비를
+    멈추고 재생성 한 번으로 넘어간다. **이 고침 전에는 이 시험이 실패한다**
+    — 되풀이된 문장이 `chunks`에 그대로 두 번(원본 + 이음매 없는 반복)
+    나갔을 것이다."""
+    facts = NarrationFacts(
+        check_summary="hack_and_slash 판정 결과 hit (목표 10)",
+        scene_summary="",
+        facts=(),
+        scene_entities=(),
+        party_state=(),
+        actor_character_id=None,
+        recent_turns=(),
+        new_entities=(),
+    )
+    provider = _RepeatsEarlierSentenceMidStreamProvider()
+    chunks = list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=facts,
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+
+    assert len(provider.stream_calls) == 2  # 원래 스트림 + 재생성 1회, 더 안 는다
+    assert [chunk.disposition for chunk in chunks] == ["clean", "clean", "blocked", "clean"]
+    assert chunks[2].reason == "narration_repeat"
+    assert chunks[2].text == NOTICE_FILTERED
+    # 되풀이된 원문 자체는 화면에 두 번 나가지 않는다 — 셋째 조각은 걸린
+    # 원문이 아니라 안내 문구고, S0는 정확히 한 번만 화면 텍스트에 남는다.
+    combined_text = "".join(chunk.text for chunk in chunks if chunk.disposition != "blocked")
+    assert combined_text.count(_RepeatsEarlierSentenceMidStreamProvider._S0) == 1
+    assert provider.last_result().ok is True
