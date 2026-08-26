@@ -1977,7 +1977,21 @@ async def _open_sketch_scene(
             actor_character_id=character_id,
             character_names=_character_names(party),
         )
-        situation = judge_opening_situation(
+        # **막는 AI 호출이 이벤트 루프 밖 작업 스레드로 나간다**(T-04-06,
+        # `declare()`/`confirm()`과 같은 이유·같은 패턴, verify-13-06 결함4).
+        # `judge_opening_situation`/`narrate()`는 둘 다 동기 블로킹 호출이다
+        # — 여기서 직접(await 없이) 부르면 uvicorn의 단일 이벤트 루프가
+        # 상황판단+서술 합산 시간(라이브 측정 최대 94초, seq38/39) 동안
+        # 통째로 멈춰 **다른 세 브라우저의 폴링까지 전부 정지한다.** 그 결과
+        # 오프닝을 실제로 호출한 브라우저만 먼저 게임 화면으로 넘어가고,
+        # 나머지는 그 폴링이 막혀 있던 시간만큼(=오프닝이 끝날 때까지)
+        # 캐릭터 생성 화면에 그대로 남는다 — 이것이 verify-13-06 결함4의
+        # 정확한 메커니즘이다. `narrate(...)` 호출 자체는 제너레이터를
+        # 만들 뿐이라(코드 실행이 아직 없다) 이벤트 루프에서 그대로 불러도
+        # 안전하다 — 실제로 블로킹하는 것은 **소비**(`_collect_narration_text`
+        # 안의 반복)이므로 그 소비만 스레드로 넘긴다.
+        situation = await asyncio.to_thread(
+            judge_opening_situation,
             provider=situation_provider,
             model=situation_choice.model,
             ctx=ctx,
@@ -1993,27 +2007,29 @@ async def _open_sketch_scene(
         )
 
         narration_start = time.monotonic()
-        generated = _collect_narration_text(
+        generated = await asyncio.to_thread(
+            _collect_narration_text,
             narrate(
                 provider=gm_provider,
                 model=gm_choice.model,
                 facts=facts,
                 rulebook_display_name=rulebook.display_name,
                 resource_axes=rulebook.resource_axes,
-            )
+            ),
         )
         violations = inspect_opening_completeness(generated, scenario.opening)
         if violations:
             # D-08 — 걸리면 한 번만 다시 만든다. 같은 facts로 narrate()를
             # 한 번 더 부른다(situation_judge는 다시 안 부른다).
-            generated = _collect_narration_text(
+            generated = await asyncio.to_thread(
+                _collect_narration_text,
                 narrate(
                     provider=gm_provider,
                     model=gm_choice.model,
                     facts=facts,
                     rulebook_display_name=rulebook.display_name,
                     resource_axes=rulebook.resource_axes,
-                )
+                ),
             )
             violations = inspect_opening_completeness(generated, scenario.opening)
         elapsed_ms = int((time.monotonic() - narration_start) * 1000)
