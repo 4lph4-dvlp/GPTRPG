@@ -13,7 +13,7 @@ from gptrpg.agents.action_classifier import classify
 from gptrpg.agents.context import ClockState, NarrationFacts, TurnContext
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.invoke import CLASSIFIER_TIMEOUT_S, GM_TIMEOUT_S, MAX_ATTEMPTS, call_with_one_retry
-from gptrpg.agents.master_gm import narrate
+from gptrpg.agents.master_gm import STREAM_STALL_TIMEOUT_S, narrate
 from gptrpg.rulebooks.moves import DUNGEONWORLD_LIKE_MOVES
 
 
@@ -51,8 +51,25 @@ def test_constants_match_locked_decisions() -> None:
     # 아니라 그 전제가 두 번 연달아 무너진 것이다 — 처음엔 「분류기는 경량
     # 모델」이라는 전제, 이번엔 「분류기가 대상 지목까지 판단하지 않는다」는
     # 전제(13-05가 추가했다). 근거 표는 `invoke.CLASSIFIER_TIMEOUT_S`
-    # 도크스트링에 있다. GM_TIMEOUT_S(D-33)와 MAX_ATTEMPTS(D-28)는 그대로다.
-    assert (CLASSIFIER_TIMEOUT_S, GM_TIMEOUT_S, MAX_ATTEMPTS) == (30.0, 15.0, 2)
+    # 도크스트링에 있다.
+    #
+    # GM_TIMEOUT_S도 verify-13-06 결함2(제2차 플레이테스트) 재현 뒤
+    # 15.0 → 100.0으로 올랐다 — D-33("완결까지는 목표 없음")을 뒤집은 것이
+    # 아니라, 이 값이 실제로는 "완결까지"가 아니라 "다음 조각까지"를 잰다는
+    # 사실(httpx의 read 타임아웃 의미론)이 뒤늦게 밝혀졌기 때문이다. 근거
+    # 표는 `invoke.GM_TIMEOUT_S` 도크스트링에 있다. MAX_ATTEMPTS(D-28)는
+    # 그대로다.
+    assert (CLASSIFIER_TIMEOUT_S, GM_TIMEOUT_S, MAX_ATTEMPTS) == (30.0, 100.0, 2)
+
+
+def test_gm_timeout_exceeds_stream_stall_timeout() -> None:
+    """`GM_TIMEOUT_S`(httpx의 read 타임아웃)가 `STREAM_STALL_TIMEOUT_S`
+    (앱 계층 스톨 감시, 90초)보다 커야 한다 — 작거나 같으면 진짜 스톨
+    (완전 침묵)조차 `_drain_with_stall_timeout`의 `StreamStalled`가 발동할
+    기회를 얻기 전에 httpx 자신의 예외로 먼저 끊겨, 스톨 전용 갈래(재시도
+    안 함)가 아니라 일반 재시도 갈래를 타게 된다 — verify-13-06 결함2가
+    실제로 이 순서로 어긋나 있었다(15 < 90)."""
+    assert GM_TIMEOUT_S > STREAM_STALL_TIMEOUT_S
 
 
 def test_first_attempt_success_calls_provider_exactly_once() -> None:
@@ -298,6 +315,26 @@ def test_narrate_uses_gm_timeout() -> None:
         )
     )
     assert provider.timeouts and all(t == GM_TIMEOUT_S for t in provider.timeouts)
+
+
+def test_narrate_retries_exactly_once_on_zero_content_failure() -> None:
+    """조각이 하나도 안 나온 채(0토큰) 실패하면 재시도한다는 것을 호출
+    횟수로 직접 고정한다(verify-13-06 결함2 — "이미 조각이 나온 뒤에는
+    재시도하지 않는다"는 규칙과 반드시 구분돼야 하는, 그 반대쪽 규칙).
+    `MAX_ATTEMPTS == 2`이므로 `stream()`은 정확히 두 번 불려야 한다 —
+    한 번(재시도 없음)도, 세 번 이상(D-28의 "정확히 한 번 더"를 넘김)도
+    아니다."""
+    provider = _StreamThenFailProvider(chunks=())
+    list(
+        narrate(
+            provider=provider,
+            model="stub-model",
+            facts=_blank_facts(),
+            rulebook_display_name="던전월드 계열",
+        )
+    )
+    assert provider.stream_call_count == MAX_ATTEMPTS == 2
+    assert provider.last_result().ok is False
 
 
 def test_narrate_mid_stream_failure_keeps_emitted_chunks_and_marks_failure() -> None:
