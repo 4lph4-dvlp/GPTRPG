@@ -54,7 +54,7 @@ from gptrpg.rulebooks.scenarios import DEFAULT_SCENARIO_ID, UnknownScenario, get
 from gptrpg.rulebooks import threat_clocks
 from gptrpg.rulebooks.threat_clocks import WELL_BELOW
 from gptrpg.rules_core.entities import Entity
-from gptrpg.rules_core.scenario import ScenarioDecl, render_scripted_opening
+from gptrpg.rules_core.scenario import ScenarioDecl, normalize_entity_name, render_scripted_opening
 from gptrpg.rules_core.resource_change import (
     InvalidResourceChange,
     ResourceChangeDecl,
@@ -115,7 +115,7 @@ from gptrpg.session_actor.actor import SessionActor
 from gptrpg.session_actor.live_roller import LiveRoller
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
-from gptrpg.turn.emerged_entities import record_emerged_entities
+from gptrpg.turn.emerged_entities import apply_declared_target, record_emerged_entities
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
 from gptrpg.web.check_views import CheckCalculationView, calculation_view_for
 from gptrpg.web.cookie_auth import read_identity
@@ -217,6 +217,24 @@ def _character_names(party: tuple[Entity, ...]) -> dict[str, str]:
     였다. 「파티」의 정의가 세션마다 다른 「이 세션의 명단」으로 바뀌었으므로
     (D-01/D-12) 이름 사전도 더는 모듈 전역 상수일 수 없다."""
     return {entity.entity_id: entity.display_name for entity in party}
+
+
+def _current_scenario(actor: SessionActor) -> ScenarioDecl:
+    """이 세션이 쓰는 시나리오를 찾는다(Phase 13-05, SCENE-04) —
+    `GameState.session_scenario_id`(오프닝이 열렸으면 그 시나리오, 판 14
+    미만/오프닝 없는 옛 세션이면 `None`)가 없으면 `DEFAULT_SCENARIO_ID`
+    (13-03이 재판단한 `well_below`)로 떨어진다. 조용히 `None`을 「대상
+    검사 없음」으로 읽으면 이 폴백이 없는 세션에서만 SCENE-04가 통째로
+    사라진다 — 그래서 명시적으로 기본 시나리오를 조회한다.
+
+    `declare()`(대상 목록을 만드는 자리)와 `confirm()`/`proceed()`(대상의
+    열림/닫힘을 판단하는 자리) 셋이 이 함수를 공유한다 — 셋이 각자
+    다르게 시나리오를 찾으면 「분류 시점과 확인 시점이 다른 시나리오를
+    본다」는 어긋남이 생긴다.
+    """
+    scenario_id = actor.state.session_scenario_id or DEFAULT_SCENARIO_ID
+    return get_scenario(scenario_id)
+
 
 MAX_RAW_TEXT_LEN = 2000
 """플레이어가 친 자유 문장의 상한 — 이 자리가 처음으로 신뢰할 수 없는 HTTP
@@ -431,10 +449,19 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
         # (`test_prompt_carries_the_acting_character_real_stat_names`가
         # 잡는 회귀).
         party = _current_party_state(store, session_id)
+        # **시나리오를 여기서 처음으로 분류기 문맥에 들어오게 한다
+        # (Phase 13-05, SCENE-04) — 13-04가 이 자리를 의도적으로 안 건드리고
+        # 남겨 뒀다(13-04-SUMMARY.md "Next Phase Readiness").** `scenario=`·
+        # `emerged_entities=`를 넘겨야 `ctx.scene_entities`가 1층(시나리오
+        # 캐스트)+2층(확정 목록)을 모두 담고, 그 목록이 곧 대상 지목의
+        # 닫힌 목록이다.
+        scenario = _current_scenario(actor)
         ctx = build_turn_context(
             store,
             session_id,
             character.rulebook_id,
+            scenario=scenario,
+            emerged_entities=actor.state.scene_entities_emerged,
             party_state=party,
             actor_character_id=identity.character_id,
             character_names=_character_names(party),
@@ -442,6 +469,17 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
 
         rulebook = get_rulebook(character.rulebook_id)
         moves = get_moves(character.rulebook_id)
+
+        # 대상 닫힌 목록(SCENE-04, D-13①) — `ScenarioDecl.target_check`가
+        # `False`면 `None`을 넘겨 대상 칸 자체를 프롬프트에서 없앤다
+        # (D-22). 목록 내용은 `ctx.scene_entities`(1층+2층, 이미 위에서
+        # 조립됨)에서 만든다 — 같은 목록을 두 번 조립하지 않는다.
+        allowed_targets: dict[str, str] | None = None
+        if scenario.target_check:
+            allowed_targets = {
+                normalize_entity_name(entity.display_name): entity.display_name
+                for entity in ctx.scene_entities
+            }
 
         choices = load_config(request.app.state.agent_config_path)
         classifier_choice = choices["action_classifier"]
@@ -461,8 +499,9 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
             moves=moves,
             rulebook_display_name=rulebook.display_name,
             resource_axes=rulebook.resource_axes,
+            allowed_targets=allowed_targets,
         )
-    except (CommandRejected, UnknownRulebook) as exc:
+    except (CommandRejected, UnknownRulebook, UnknownScenario) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except SequenceConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -493,10 +532,15 @@ async def declare(session_id: str, request: Request, body: DeclareRequest) -> De
     # T-11-29(11-06 rework) — 분류 결정을 사건에 durable하게 남긴다.
     # `proceed()`의 서버 쪽 안전 검사(`VerifyProceedEligibility`)가 이 표를
     # 서버 재시작 뒤에도 다시 접어 읽는다 — 클라이언트가 보낸 `declare_seq`
-    # 하나만 믿고 판정을 건너뛰게 두지 않는다.
+    # 하나만 믿고 판정을 건너뛰게 두지 않는다. 판 14부터(SCENE-04, D-13①)
+    # 대상 세 칸도 같은 사건에 남는다 — 확인/진행 시점에 서버가
+    # `GameState.declare_targets`에서 다시 읽는다(ASVS V5).
     await actor.submit(
         RecordActionClassification(
             no_check=proposal.tier == "no_check",
+            target_name=proposal.target.name,
+            target_presence=proposal.target.presence,
+            target_kind=proposal.target.kind,
             caused_by_seq=declare_seq,
         )
     )
@@ -898,6 +942,7 @@ async def confirm(
     ) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    scenario = _current_scenario(actor)
     party = _current_party_state(store, session_id)
     ctx = build_turn_context(
         store,
@@ -1054,7 +1099,20 @@ async def confirm(
         actor_axes=character_axis_names(actor_stats(ctx)),
     )
 
-    facts = build_narration_facts(ctx=ctx, check_summary=check_summary, judgments=judgments)
+    # 층 밖 지목이 시나리오 선언대로 갈린다(Phase 13-05, SCENE-04, D-13①②)
+    # — 서버가 `GameState.declare_targets`에서 이 선언(`body.declare_seq`)이
+    # 실제로 지목한 대상을 다시 읽는다(클라이언트 값을 안 믿는다, ASVS
+    # V5). 허용이면 사건이 쌓이고(위 헬퍼가 제출), 금지면 사실 한 줄이
+    # `extra_facts`로 서술에 흘러 세계가 이야기로 돌려보낸다(D-15).
+    extra_facts = await apply_declared_target(
+        actor,
+        scenario=scenario,
+        declare_seq=body.declare_seq,
+        caused_by_seq=confirm_seq,
+    )
+    facts = build_narration_facts(
+        ctx=ctx, check_summary=check_summary, judgments=judgments, extra_facts=extra_facts
+    )
 
     # ⑤ 서사 — 판정 결과가 이미 기록된 뒤에야 시작한다.
     #
@@ -1575,6 +1633,7 @@ async def proceed(
     # 넘긴다(12-05, D-17/D-18) — **웹 안에서도 호출부가 둘이라는 것이 이
     # 함정이다.** 하나만 고치면 「굴린 턴은 파티를 보고 안 굴린 턴은 못
     # 보는」 어긋남이 생긴다.
+    scenario = _current_scenario(actor)
     party = _current_party_state(store, session_id)
     ctx = build_turn_context(
         store,
@@ -1699,7 +1758,19 @@ async def proceed(
         )
     )
 
-    facts = build_narration_facts(ctx=ctx, check_summary=NO_CHECK_SUMMARY, judgments=judgments)
+    # 층 밖 지목이 시나리오 선언대로 갈린다(Phase 13-05, SCENE-04, D-13①②)
+    # — `confirm()`과 같은 헬퍼·같은 판단이다. 이 경로에는 확인 사건이
+    # 없으므로 `caused_by_seq`는 `body.declare_seq`다(위 다른 사건 제출과
+    # 같은 값).
+    extra_facts = await apply_declared_target(
+        actor,
+        scenario=scenario,
+        declare_seq=body.declare_seq,
+        caused_by_seq=body.declare_seq,
+    )
+    facts = build_narration_facts(
+        ctx=ctx, check_summary=NO_CHECK_SUMMARY, judgments=judgments, extra_facts=extra_facts
+    )
 
     # 서사 — `confirm()`의 ⑤ 구간과 한 글자도 다르지 않다(예외 포착 범위·
     # 되감지 않음·narration_failed 규약 전부 동일). caused_by_seq만

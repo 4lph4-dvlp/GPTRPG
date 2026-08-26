@@ -31,6 +31,29 @@ D-10 ②갈래).
 플랫폼 고정 문장 하나를 쓴다. `web/routes_actions.py`의 `proceed()`와
 `cli/turn_flow.py`의 `no_check` 갈래가 이 상수를 그대로 넘긴다."""
 
+def TARGET_ABSENT_FACT(name: str) -> str:  # noqa: N802 - NO_CHECK_SUMMARY류 고정 문장 상수와 같은 명명 관례(대문자, 값을 담는 이름)
+    """대상 지목이 시나리오의 즉흥 금지 선언에 걸렸을 때 서술에 얹는
+    플랫폼 고정 사실 한 줄(Phase 13-05, SCENE-04, D-13①③/D-15).
+
+    `NO_CHECK_SUMMARY`/`OPENING_CHECK_SUMMARY`와 같은 성격이다 — 이름
+    하나를 끼워 넣어야 하므로 상수 문자열이 아니라 함수다.
+
+    **코드가 만들고 AI가 다시 판단하지 않는다.** 「이 대상은 여기 없다」는
+    분류 시점(D-13①)에 코드가 이미 확정한 사실이다. `situation_judge`에게
+    다시 물으면 판단이 흔들려 SCENE-04의 「결정론적으로」가 깨진다.
+
+    **거절 문구가 아니라 사실 문장이다.** 「여기 그런 건 없습니다」·「다시
+    입력해 주세요」·「혹시 …를 말씀하신 건가요?」 셋 다 아니다(D-15) —
+    서술이 이 사실을 받아 **세계의 목소리로** 돌려보낸다(예: 「그쪽을
+    더듬지만 손에 잡히는 건 젖은 돌뿐이었다」).
+
+    **진행자 지시문을 고치지 않는다.** 서술에게 「거절하라」고 시키는
+    순간 그것이 시스템의 목소리가 된다 — `agents/master_gm.py`는 이
+    사실 한 줄을 다른 사실과 똑같이(`turn/judgments.build_narration_facts`의
+    `extra_facts`로) 받을 뿐이다."""
+    return f"지목한 「{name}」은 이 장면에 없다."
+
+
 OPENING_CHECK_SUMMARY = "이번은 판정 없이 장면을 여는 오프닝이다."
 """오프닝(SCENE-01, Phase 13-03)에서 `check_summary` 자리에 넣는 플랫폼
 고정 문장 — `NO_CHECK_SUMMARY`와 같은 성격이다(플랫폼이 조립하는 고정

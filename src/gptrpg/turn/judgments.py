@@ -36,6 +36,7 @@ from gptrpg.agents.context import (
     NarrationFacts,
     OUTCOME_PICKER_RECENT_TURNS_LIMIT,
     OutcomePickerContext,
+    SITUATION_FACTS_LIMIT,
     TurnContext,
 )
 from gptrpg.agents.envelope import AgentResult
@@ -199,7 +200,11 @@ def empty_turn_judgments() -> TurnJudgments:
 
 
 def build_narration_facts(
-    *, ctx: TurnContext, check_summary: str, judgments: TurnJudgments
+    *,
+    ctx: TurnContext,
+    check_summary: str,
+    judgments: TurnJudgments,
+    extra_facts: tuple[str, ...] = (),
 ) -> NarrationFacts:
     """판단 결과 + `TurnContext`의 안전한 칸(장면 대상·파티 상태·최근 대화)만
     골라 `NarrationFacts`를 조립한다.
@@ -213,13 +218,26 @@ def build_narration_facts(
     다시 자르지 않는다. 시계 상태는 애초에 옮길 칸이 없다 — `NarrationFacts`가
     그 칸을 갖고 있지 않다(ARCH-02).
 
+    `extra_facts`(Phase 13-05, SCENE-04, D-13①③)는 플랫폼이 이번 턴에
+    이미 확정한 사실(예: `agents.context.TARGET_ABSENT_FACT`)이다 —
+    `facts`는 `extra_facts + judgments.situation.facts`를 **앞에서부터**
+    `SITUATION_FACTS_LIMIT`개로 자른 것이다. 플랫폼 사실이 앞에 오고
+    상한에 걸리면 모델이 만든 사실 쪽이 밀린다 — 플랫폼 사실은 **이번
+    턴의 결정론적 결과**이고 모델의 `facts`는 참고이기 때문이다. 기본값
+    `()`이라 기존 호출부의 결과가 한 글자도 안 바뀐다.
+
+    **`NarrationFacts`에 칸을 더하지 않는다** — `facts`는 이미 있는
+    칸이고, 여기 들어가는 것은 시나리오 원문이 아니라 이번 턴의 사실이라
+    ARCH-02와 무관하다.
+
     판정 없는 턴에서는 호출부가 `check_summary=agents.context.NO_CHECK_SUMMARY`를
     넘긴다(11-06) — 이 함수의 시그니처는 바뀌지 않는다.
     """
+    facts = (extra_facts + judgments.situation.facts)[:SITUATION_FACTS_LIMIT]
     return NarrationFacts(
         check_summary=check_summary,
         scene_summary=judgments.situation.scene_summary,
-        facts=judgments.situation.facts,
+        facts=facts,
         scene_entities=ctx.scene_entities,
         party_state=ctx.party_state,
         actor_character_id=ctx.actor_character_id,

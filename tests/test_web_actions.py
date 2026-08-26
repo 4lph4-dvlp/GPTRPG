@@ -17,7 +17,7 @@ from conftest import FakeProvider
 from conftest import seed_character_created as _seed_character_created
 from conftest import select_character as _select_character_at
 from gptrpg.agents import prompt_assembly
-from gptrpg.agents.context import ITEM_NOT_IN_INVENTORY, NO_CHECK_SUMMARY
+from gptrpg.agents.context import ITEM_NOT_IN_INVENTORY, NO_CHECK_SUMMARY, TARGET_ABSENT_FACT
 from gptrpg.agents.envelope import AgentResult
 from gptrpg.agents.prompt_assembly import fence_player_text
 from gptrpg.event_log.schema import (
@@ -1667,6 +1667,145 @@ def test_proceed_records_scene_entity_emerged_event(web_client_with_fake_provide
 
     assert len(events) == 1
     assert events[0]["name"] == "떠돌이 상인"
+
+
+# ---------------------------------------------------------------------------
+# 13-05 Task 2: 대상 지목이 시나리오 선언대로 갈린다(SCENE-04, D-13①②) —
+# 오프닝을 안 연 세션은 DEFAULT_SCENARIO_ID(well_below, improv_people=False /
+# improv_things=True)로 떨어진다(13-05-PLAN.md `_current_scenario`).
+# ---------------------------------------------------------------------------
+
+
+def test_declare_records_known_target_from_scenario_cast(web_client_with_fake_provider) -> None:
+    """분류기가 시나리오 캐스트 안 이름을 고르면 `action_classified` 사건에
+    `target_presence="known"`과 목록의 원본 이름이 남는다(D-19)."""
+    classifier = FakeProvider(
+        complete_value=json.dumps(
+            [{"move": "parley", "stat": "CHA", "target": "우물지기 이슬"}]
+        )
+    )
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        response = _declare(client, raw_text="이슬에게 말을 건다")
+        assert response.status_code == 200
+        classified = _events_of_type(client, "action_classified")
+
+    assert len(classified) == 1
+    assert classified[0]["target_presence"] == "known"
+    assert classified[0]["target_name"] == "우물지기 이슬"
+    assert classified[0]["target_kind"] is None
+
+
+def test_confirm_forbidden_improv_person_records_no_event_and_narrates_absent_fact(
+    web_client_with_fake_provider,
+) -> None:
+    """기본 시나리오(well_below)는 `improv_people=False`다 — 층 밖 사람
+    지목은 `scene_entity_emerged` 사건 없이 사실 한 줄만 서술로 흐른다
+    (D-15, 목록을 안 꺼내고 거절 문구도 안 쓴다)."""
+    classifier = FakeProvider(
+        complete_value=json.dumps(
+            [{"move": "parley", "stat": "CHA", "target": "검은 개", "target_kind": "person"}]
+        )
+    )
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(declare_seq),
+        )
+        assert response.status_code == 200
+        emerged = _events_of_type(client, "scene_entity_emerged")
+
+    assert emerged == []
+    turn_text = _last_turn_text(gm)
+    assert f"- {TARGET_ABSENT_FACT('검은 개')}" in turn_text
+    for banned in ("없습니다", "다시 입력", "혹시"):
+        assert banned not in turn_text
+
+
+def test_confirm_allowed_improv_thing_records_scene_entity_emerged(
+    web_client_with_fake_provider,
+) -> None:
+    """well_below는 `improv_things=True`다 — 층 밖 사물 지목은 사람에게
+    안 묻고 확정 목록에 쌓인다(D-14)."""
+    classifier = FakeProvider(
+        complete_value=json.dumps(
+            [{"move": "parley", "stat": "CHA", "target": "부서진 등불", "target_kind": "thing"}]
+        )
+    )
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/actions/confirm",
+            json=_confirm_body(declare_seq),
+        )
+        assert response.status_code == 200
+        emerged = _events_of_type(client, "scene_entity_emerged")
+
+    assert len(emerged) == 1
+    assert emerged[0]["name"] == "부서진 등불"
+
+
+def test_proceed_forbidden_improv_person_records_no_event_and_narrates_absent_fact(
+    web_client_with_fake_provider,
+) -> None:
+    """`proceed()`가 `confirm()`과 같은 갈래로 돈다 — 판정 없는 턴에도
+    같은 헬퍼가 같은 판단을 한다."""
+    classifier = FakeProvider(
+        complete_value=json.dumps(
+            [{"no_check": True, "target": "검은 개", "target_kind": "person"}]
+        )
+    )
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+        assert response.status_code == 200
+        emerged = _events_of_type(client, "scene_entity_emerged")
+
+    assert emerged == []
+    turn_text = _last_turn_text(gm)
+    assert f"- {TARGET_ABSENT_FACT('검은 개')}" in turn_text
+
+
+def test_proceed_allowed_improv_thing_records_scene_entity_emerged(
+    web_client_with_fake_provider,
+) -> None:
+    classifier = FakeProvider(
+        complete_value=json.dumps(
+            [{"no_check": True, "target": "부서진 등불", "target_kind": "thing"}]
+        )
+    )
+    gm = FakeProvider(stream_text=_NARRATION_TEXT)
+    with web_client_with_fake_provider(action_classifier=classifier, master_gm=gm) as client:
+        declare_seq = _declare_first(client)
+        response = client.post(
+            f"/api/sessions/{SESSION_ID}/proceed", json=_proceed_body(declare_seq)
+        )
+        assert response.status_code == 200
+        emerged = _events_of_type(client, "scene_entity_emerged")
+
+    assert len(emerged) == 1
+    assert emerged[0]["name"] == "부서진 등불"
+
+
+def test_declare_silent_target_yields_none_presence(web_client_with_fake_provider) -> None:
+    """모델이 대상 칸을 아예 안 채우면 침묵을 「대상 없음」으로 읽는다 —
+    `target_check=False` 시나리오의 프롬프트 부재 자체는
+    `tests/test_action_classifier.py`가 단위 시험으로 이미 고정했다(이
+    파일은 등록된 시나리오만 쓸 수 있어 `target_check=False` 시나리오를
+    새로 만들지 않는다)."""
+    classifier = FakeProvider(complete_value=json.dumps([{"move": "parley", "stat": "CHA"}]))
+    with web_client_with_fake_provider(action_classifier=classifier) as client:
+        response = _declare(client, raw_text="아무 말이나 한다")
+        assert response.status_code == 200
+        classified = _events_of_type(client, "action_classified")
+
+    assert len(classified) == 1
+    assert classified[0]["target_presence"] == "none"
 
 
 # ---------------------------------------------------------------------------
