@@ -7,6 +7,8 @@ D-13①②, D-14/D-15/D-16).
 시작한다(서버가 실제로 확인/진행 시점에 하는 일과 같은 진입점).
 """
 
+import json
+
 import pytest
 
 from gptrpg.agents.context import TARGET_ABSENT_FACT
@@ -338,3 +340,136 @@ def test_build_narration_facts_default_extra_facts_is_byte_identical_regression(
         ctx=ctx, check_summary="아무 판정", judgments=empty_turn_judgments(), extra_facts=()
     )
     assert without_kwarg == with_empty_kwarg
+
+
+# ---------------------------------------------------------------------------
+# 13-05 Task 3: 명령줄이 웹과 같은 갈래로 간다 — CLI는 오프닝을 안 열므로
+# `session_scenario_id`가 `None`이라 `DEFAULT_SCENARIO_ID`(well_below,
+# improv_people=False / improv_things=True)로 떨어진다.
+#
+# `tests/test_cli.py`의 `_install_provider`/`_run_turn_with_fake`/
+# `_read_events` 패턴을 그대로 빌린다(같은 파일을 import하지 않는다 —
+# 이 저장소에 시험 파일 간 직접 import 선례가 없다).
+# ---------------------------------------------------------------------------
+
+
+def _install_provider(monkeypatch, provider, *, name: str, env_var: str) -> None:
+    from gptrpg.agents import providers as providers_module
+
+    monkeypatch.setitem(providers_module.PROVIDER_ENV_VARS, name, env_var)
+    monkeypatch.setitem(providers_module.PROVIDER_FACTORIES, name, lambda api_key: provider)
+    monkeypatch.setenv(env_var, "test-key")
+
+
+def _run_turn_with_fake(db, session, text, *, monkeypatch, fake_provider, input_answers=()):
+    from gptrpg.cli.main import main
+
+    _install_provider(monkeypatch, fake_provider, name="fake", env_var="FAKE_API_KEY")
+    answers = iter(input_answers)
+    monkeypatch.setattr("builtins.input", lambda *_args: next(answers))
+    return main(
+        [
+            "turn",
+            "--db",
+            db,
+            "--session",
+            session,
+            "--player",
+            "p1",
+            "--text",
+            text,
+            "--provider",
+            "fake",
+            "--model",
+            "fake-model",
+        ]
+    )
+
+
+def _read_events(db: str, session: str):
+    from gptrpg.event_log.store import EventStore
+
+    store = EventStore(db)
+    store.initialize()
+    try:
+        return store.read_events(session)
+    finally:
+        store.close()
+
+
+def test_cli_declare_records_known_target_from_default_scenario_cast(
+    tmp_db_path, monkeypatch, fake_provider
+):
+    """명령줄 세션은 오프닝이 없어 `DEFAULT_SCENARIO_ID`(well_below)로
+    떨어진다 — 그래도 그 시나리오의 캐스트가 닫힌 목록이 된다(D-19)."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps(
+        [{"move": "parley", "stat": "CHA", "target": "우물지기 이슬"}]
+    )
+    exit_code = _run_turn_with_fake(
+        db, "s1", "이슬에게 말을 건다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+        input_answers=["y"],
+    )
+    assert exit_code == 0
+    classified = [e for e in _read_events(db, "s1") if e.event_type == "action_classified"]
+    assert len(classified) == 1
+    assert classified[0].target_presence == "known"
+    assert classified[0].target_name == "우물지기 이슬"
+
+
+def test_cli_forbidden_improv_person_records_no_event_and_narrates_absent_fact(
+    tmp_db_path, monkeypatch, fake_provider
+):
+    """well_below는 `improv_people=False`다 — 명령줄에서도 층 밖 사람
+    지목은 사건 없이 사실 한 줄만 서술로 흐른다(웹과 같은 갈래). 진행자
+    (`narrate()`)에게 실제로 넘어간 프롬프트에서 그 사실 줄을 확인한다 —
+    화면 출력(`stream_text`)은 이 대역 제공자가 고정으로 돌려주는 값일
+    뿐이라 여기서는 대조 대상이 아니다."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps(
+        [{"no_check": True, "target": "검은 개", "target_kind": "person"}]
+    )
+    exit_code = _run_turn_with_fake(
+        db, "s1", "문을 연다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+    )
+    assert exit_code == 0
+    emerged = [e for e in _read_events(db, "s1") if e.event_type == "scene_entity_emerged"]
+    assert emerged == []
+    _system, messages = fake_provider.calls[-1]
+    assert f"- {TARGET_ABSENT_FACT('검은 개')}" in messages[-1]["content"]
+
+
+def test_cli_allowed_improv_thing_records_scene_entity_emerged(
+    tmp_db_path, monkeypatch, fake_provider
+):
+    """well_below는 `improv_things=True`다 — 명령줄에서도 층 밖 사물
+    지목은 사람에게 안 묻고 확정 목록에 쌓인다(웹과 같은 갈래)."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps(
+        [{"no_check": True, "target": "부서진 등불", "target_kind": "thing"}]
+    )
+    exit_code = _run_turn_with_fake(
+        db, "s1", "문을 연다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+    )
+    assert exit_code == 0
+    emerged = [e for e in _read_events(db, "s1") if e.event_type == "scene_entity_emerged"]
+    assert len(emerged) == 1
+    assert emerged[0].name == "부서진 등불"
+
+
+def test_cli_action_classified_carries_target_three_fields(
+    tmp_db_path, monkeypatch, fake_provider
+):
+    """명령줄이 `action_classified`에 대상 세 칸을 남긴다(웹과 같은
+    사건 모양)."""
+    db = str(tmp_db_path)
+    fake_provider.complete_value = json.dumps([{"no_check": True}])
+    exit_code = _run_turn_with_fake(
+        db, "s1", "문을 연다", monkeypatch=monkeypatch, fake_provider=fake_provider,
+    )
+    assert exit_code == 0
+    classified = [e for e in _read_events(db, "s1") if e.event_type == "action_classified"]
+    assert len(classified) == 1
+    assert classified[0].target_presence == "none"
+    assert classified[0].target_name is None
+    assert classified[0].target_kind is None

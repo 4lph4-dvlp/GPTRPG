@@ -24,6 +24,7 @@ from gptrpg.agents.providers.base import Provider
 from gptrpg.event_log.store import EventStore
 from gptrpg.rulebooks import get_rulebook, threat_clocks
 from gptrpg.rulebooks.moves import get_moves
+from gptrpg.rulebooks.scenarios import DEFAULT_SCENARIO_ID, get_scenario
 from gptrpg.rules_core.rulebook import (
     GradeBand,
     OutcomeList,
@@ -31,6 +32,7 @@ from gptrpg.rules_core.rulebook import (
     ordered_categories,
     require_band,
 )
+from gptrpg.rules_core.scenario import ScenarioDecl, normalize_entity_name
 from gptrpg.session_actor.actor import (
     AppendNarration,
     ConfirmAction,
@@ -46,7 +48,7 @@ from gptrpg.session_actor.actor import (
 )
 from gptrpg.turn.clock_condition import build_clock_judge_context, run_clock_condition_check
 from gptrpg.turn.context import CLOCK_SEGMENT_COUNT, build_turn_context
-from gptrpg.turn.emerged_entities import record_emerged_entities
+from gptrpg.turn.emerged_entities import apply_declared_target, record_emerged_entities
 from gptrpg.turn.judgments import build_narration_facts, empty_turn_judgments, gather_turn_judgments
 
 _T = TypeVar("_T")
@@ -63,6 +65,19 @@ _NO_CHECK_GRADE_BAND = GradeBand(
 자리표시자(12-06) — `web/routes_actions.py`의 같은 이름 상수와 같은
 이유·같은 값이다. 판정이 없는 경로에는 태울 결과 목록이 없고,
 `costs=False`가 `pick_outcome`의 조기 반환을 걸어 모델을 아예 안 부른다."""
+
+
+def _current_scenario(actor: SessionActor) -> ScenarioDecl:
+    """이 세션이 쓰는 시나리오를 찾는다(Phase 13-05, SCENE-04) —
+    `web/routes_actions.py`의 `_current_scenario`와 같은 자리·같은 폴백
+    이다. `GameState.session_scenario_id`가 `None`인 명령줄 세션(오프닝이
+    없다, `session_scenario_id`는 `scene_opened` 사건에서만 채워진다)에서는
+    `DEFAULT_SCENARIO_ID`(13-03이 재판단한 `well_below`)로 떨어진다.
+
+    **이 폴백을 명시적으로 적는다** — 조용히 `None`을 「대상 검사 없음」
+    으로 읽으면 명령줄에서만 SCENE-04가 통째로 사라진다."""
+    scenario_id = actor.state.session_scenario_id or DEFAULT_SCENARIO_ID
+    return get_scenario(scenario_id)
 
 
 async def _submit_narration_chunk(
@@ -231,6 +246,7 @@ async def _proceed_without_check(
     *,
     declare_seq: int,
     rulebook,
+    scenario: ScenarioDecl,
 ) -> int:
     """굴릴 필요가 없다고 분류된 행동(`tier == "no_check"`)을 판정 없이
     서술로 잇는다(D-10 ②갈래, RULE-15, 11-06).
@@ -275,6 +291,14 @@ async def _proceed_without_check(
     # 앉을 자리가 없다. 그래서 12.1의 예외 판단이 12.3에서도 그대로
     # 유지된다 — 그것을 바꾸려면 명령줄에 신원 개념을 먼저 만들어야 하고,
     # 그것은 계정이 생기는 다음 마일스톤의 몫이다.
+    #
+    # **대상 지목(Phase 13-05, SCENE-04)은 그 예외에 해당하지 않는다** —
+    # 오프닝(13-01/13-03)은 세션 시작이라 캐릭터 선택·신원 개념과 묶여
+    # 있어 같은 예외를 물려받지만, 대상 지목은 판정 턴 **안**이고 그 두
+    # 개념을 안 쓴다. 그래서 웹의 `confirm()`/`proceed()`와 같은 헬퍼
+    # (`turn.emerged_entities.apply_declared_target`)를 아래에서 그대로
+    # 부른다 — 조용히 한쪽만 고치는 것이 이 저장소의 알려진 실패 모양이다
+    # (바로 위 문단과 같은 경고).
     ctx = _build_turn_context(
         store, args.session, args.rulebook, emerged_entities=actor.state.scene_entities_emerged
     )
@@ -385,7 +409,15 @@ async def _proceed_without_check(
         )
     )
 
-    facts = build_narration_facts(ctx=ctx, check_summary=NO_CHECK_SUMMARY, judgments=judgments)
+    # 층 밖 지목이 시나리오 선언대로 갈린다(Phase 13-05, SCENE-04, D-13①②)
+    # — 웹의 `confirm()`/`proceed()`와 같은 헬퍼·같은 판단이다. 이 경로에는
+    # 확인·판정 사건이 없으므로 `caused_by_seq`는 `declare_seq`다.
+    extra_facts = await apply_declared_target(
+        actor, scenario=scenario, declare_seq=declare_seq, caused_by_seq=declare_seq
+    )
+    facts = build_narration_facts(
+        ctx=ctx, check_summary=NO_CHECK_SUMMARY, judgments=judgments, extra_facts=extra_facts
+    )
 
     gm_choice = _resolve_role_choice(args, "master_gm")
     gm_provider = resolve_provider("master_gm", {"master_gm": gm_choice}, os.environ)
@@ -501,7 +533,28 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     # 파티 인자를 안 넘긴다(12-05) — 명령줄에는 캐릭터 선택·신원 개념이 없다
     # (아래 person_id=args.player, character_id=args.player 전제와 같은
     # 이유). 기본값이 예시 개체 하나짜리 파티를 채운다.
-    ctx = _build_turn_context(store, args.session, args.rulebook)
+    #
+    # **시나리오·2층을 여기서 처음으로 분류기 문맥에 들어오게 한다
+    # (Phase 13-05, SCENE-04)** — 웹의 `declare()`와 같은 방식으로
+    # `ctx.scene_entities`(1층+2층)가 곧 대상 지목의 닫힌 목록이 된다.
+    scenario = _current_scenario(actor)
+    ctx = _build_turn_context(
+        store,
+        args.session,
+        args.rulebook,
+        scenario=scenario,
+        emerged_entities=actor.state.scene_entities_emerged,
+    )
+
+    # 대상 닫힌 목록(SCENE-04, D-13①) — 웹의 `declare()`와 같은 방식으로
+    # 만든다. `ScenarioDecl.target_check`가 `False`면 `None`을 넘겨 대상
+    # 칸 자체를 프롬프트에서 없앤다(D-22).
+    allowed_targets: dict[str, str] | None = None
+    if scenario.target_check:
+        allowed_targets = {
+            normalize_entity_name(entity.display_name): entity.display_name
+            for entity in ctx.scene_entities
+        }
 
     classifier_choice = _resolve_role_choice(args, "action_classifier")
     # WR-03 리뷰 발견: 실제 호출 경로가 `resolve_provider`를 쓰지 않고
@@ -522,6 +575,7 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             moves=moves,
             rulebook_display_name=rulebook.display_name,
             resource_axes=rulebook.resource_axes,
+            allowed_targets=allowed_targets,
         ),
         threshold_s=args.progress_after,
         tick_s=args.progress_tick,
@@ -543,9 +597,14 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     # 똑같은 이유로 분류 결정을 사건에 durable하게 남긴다. CLI가 직접 계산한
     # `tier`를 그대로 믿지 않고, `_proceed_without_check`가 이 표를 다시
     # 접어 확인하게 한다(웹/CLI 어느 쪽도 「직접 찾아야 함」 우회가 없다).
+    # 판 14부터(SCENE-04, D-13①) 대상 세 칸도 같은 사건에 남는다 — 웹과
+    # 같은 값·같은 조건이다.
     await actor.submit(
         RecordActionClassification(
             no_check=proposal.tier == "no_check",
+            target_name=proposal.target.name,
+            target_presence=proposal.target.presence,
+            target_kind=proposal.target.kind,
             caused_by_seq=declare_seq,
         )
     )
@@ -581,7 +640,9 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
     # 있을 때만 의미가 있고, 이 갈래는 애초에 후보가 0개다.
     if tier == "no_check":
         print("판정 없이 이야기를 이어갑니다.")
-        return await _proceed_without_check(store, actor, args, declare_seq=declare_seq, rulebook=rulebook)
+        return await _proceed_without_check(
+            store, actor, args, declare_seq=declare_seq, rulebook=rulebook, scenario=scenario
+        )
 
     if tier == "single":
         (candidate,) = proposal.candidates
@@ -842,7 +903,14 @@ async def _turn_flow(store: EventStore, actor: SessionActor, args: argparse.Name
             f"(가능한 축: {', '.join(eligible_axes) if eligible_axes else '없음'})."
         )
 
-    facts = build_narration_facts(ctx=ctx, check_summary=check_summary, judgments=judgments)
+    # 층 밖 지목이 시나리오 선언대로 갈린다(Phase 13-05, SCENE-04, D-13①②)
+    # — 웹의 `confirm()`과 같은 헬퍼·같은 판단이다.
+    extra_facts = await apply_declared_target(
+        actor, scenario=scenario, declare_seq=declare_seq, caused_by_seq=confirm_seq
+    )
+    facts = build_narration_facts(
+        ctx=ctx, check_summary=check_summary, judgments=judgments, extra_facts=extra_facts
+    )
 
     gm_choice = _resolve_role_choice(args, "master_gm")
     gm_provider = resolve_provider("master_gm", {"master_gm": gm_choice}, os.environ)
