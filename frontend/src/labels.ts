@@ -201,6 +201,16 @@ export const COPY = {
   openingRetry: "오프닝을 다시 불러오기",
   turnFailed: "이번 턴을 처리하지 못했어요. 다시 시도해 주세요",
   narrationFailed: "이번 턴의 이야기를 쓰지 못했어요. 주사위 결과는 그대로예요",
+  /**
+   * 서사만 실패한 내 턴을 다시 시도하는 단추(verify-13-06 결함1). 누르면
+   * 새 선언을 만들지 않는다 — 같은 판정(주사위가 이미 굴러 있으면 그
+   * 결과)을 그대로 두고 이야기만 다시 쓴다(`openingRetry`/
+   * `creationAnnounceRetry`와 같은 모양의 재시도 단추).
+   */
+  turnRetryButton: "다시 시도",
+  /** 재시도 단추를 누른 뒤, 응답이 올 때까지 잠깐 보이는 상태 표시 —
+   * 새 단추를 만들지 않고 문구만 바꾼다. */
+  turnRetrying: "다시 시도하는 중…",
   serverConfigFailed: "서버 설정 문제로 처리하지 못했어요. 관리자에게 알려 주세요",
   noActionRecognized: "인식된 행동이 없어요. 다른 문장으로 다시 말해 보세요",
   noCheckNeeded: "굴릴 필요 없는 행동이에요",

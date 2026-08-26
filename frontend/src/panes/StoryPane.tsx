@@ -49,6 +49,14 @@ interface StoryPaneProps {
   segmentCount: number;
   justRevealedSeq: number | null;
   failedDeclareSeqs: Set<number>;
+  /** 지금 이 캐릭터(나)의 식별자 — 어느 턴이 「내 턴」인지(재시도 단추가
+   * 뜨는 조건, verify-13-06 결함1) 가리는 유일한 근거다. */
+  myCharacterId: string;
+  /** 지금 재시도가 도는 중인 턴의 declareSeq — `null`이면 아무 재시도도
+   * 안 도는 중이다. */
+  retryingDeclareSeq: number | null;
+  /** 실패한 내 턴의 재시도 단추가 부르는 콜백. */
+  onRetryTurn: (turn: Turn) => void;
   /** 판정 사건의 `seq`로 찾는 계산 줄(Phase 12.2) — `TurnCard`가 이것으로
    * 검산 줄을 그린다(자체 산수 없음). */
   calculations: Map<number, CheckCalculationView>;
@@ -73,6 +81,9 @@ export function StoryPane({
   segmentCount,
   justRevealedSeq,
   failedDeclareSeqs,
+  myCharacterId,
+  retryingDeclareSeq,
+  onRetryTurn,
   calculations,
   opening,
   openingPending,
@@ -161,6 +172,15 @@ export function StoryPane({
                     isLatest={turnIndex === visible.length - 1}
                     justRevealed={justRevealedSeq === turn.check?.seq}
                     failed={failedDeclareSeqs.has(turn.declareSeq)}
+                    mine={turn.playerId === myCharacterId}
+                    onRetry={
+                      failedDeclareSeqs.has(turn.declareSeq) &&
+                      turn.playerId === myCharacterId &&
+                      (retryingDeclareSeq === null || retryingDeclareSeq === turn.declareSeq)
+                        ? () => onRetryTurn(turn)
+                        : null
+                    }
+                    retrying={retryingDeclareSeq === turn.declareSeq}
                     imageUrl={turn.illustration?.image_path ?? null}
                     calculation={
                       turn.check === null ? null : (calculations.get(turn.check.seq) ?? null)

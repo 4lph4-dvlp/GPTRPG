@@ -9,7 +9,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, fetchCharacterSheet, fetchCharacters, openScene } from "../api/client.ts";
+import {
+  ApiError,
+  confirmAction,
+  fetchCharacterSheet,
+  fetchCharacters,
+  openScene,
+  proceed,
+} from "../api/client.ts";
 import { changeIntensity } from "../components/ResourceChangeBadge.tsx";
 import { DiceModal } from "../components/DiceModal.tsx";
 import { COPY } from "../labels.ts";
@@ -18,11 +25,12 @@ import type { RecentResourceChange } from "../panes/StatusPane.tsx";
 import { StatusPane } from "../panes/StatusPane.tsx";
 import { StoryPane } from "../panes/StoryPane.tsx";
 import { indexCalculations } from "../session/checkSummary.ts";
-import { groupTurns } from "../session/groupTurns.ts";
+import { groupTurns, type Turn } from "../session/groupTurns.ts";
 // 발동 조건을 다시 쓰지 않고 `openingView.ts`의 순수 함수 하나만 부른다
 // (D-06/G-12.3-5와 같은 규율) — 별칭은 이 effect의 조건절이 그 함수를
 // 부르는 유일한 자리임을 grep 한 줄로 확인할 수 있게 한다.
 import { hasLockedRoster, shouldOpenScene as canOpenScene } from "../session/openingView.ts";
+import { buildRetryRequest } from "../session/turnRetry.ts";
 import { usePolling } from "../session/usePolling.ts";
 import type {
   CharacterSheet,
@@ -59,6 +67,10 @@ export function SessionScreen({ sessionId, characterId }: SessionScreenProps) {
   const [justRevealedSeq, setJustRevealedSeq] = useState<number | null>(null);
   const [clockPulsing, setClockPulsing] = useState(false);
   const [failedDeclareSeqs, setFailedDeclareSeqs] = useState<Set<number>>(new Set());
+  // 지금 재시도가 도는 중인 턴(verify-13-06 결함1) — `null`이면 아무
+  // 재시도도 안 도는 중이다. 동시에 두 재시도가 겹치지 않게 막는 유일한
+  // 값이다.
+  const [retryingDeclareSeq, setRetryingDeclareSeq] = useState<number | null>(null);
   const shownRef = useRef<Set<number>>(new Set());
 
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
@@ -292,6 +304,60 @@ export function SessionScreen({ sessionId, characterId }: SessionScreenProps) {
     setFailedDeclareSeqs((previous) => new Set(previous).add(declareSeq));
   }, []);
 
+  const onTurnRetried = useCallback((declareSeq: number) => {
+    setFailedDeclareSeqs((previous) => {
+      if (!previous.has(declareSeq)) {
+        return previous;
+      }
+      const next = new Set(previous);
+      next.delete(declareSeq);
+      return next;
+    });
+  }, []);
+
+  // 재시도(verify-13-06 결함1) — `session/turnRetry.ts`가 사건에 이미
+  // 적힌 값만으로 요청을 조립한다. 새 선언(declareAction)을 부르지
+  // 않는다 — 판정 경로는 같은 declare_seq로 confirm()을 다시 불러 서버의
+  // 기존 재사용 경로(D-09, `AlreadyConfirmed`)를 타고, 그 경로가 이미
+  // 굴린 주사위를 다시 굴리지 않고 서사만 다시 쓴다. `retryingDeclareSeq`
+  // 하나로 동시에 두 재시도가 겹치지 않게 막는다(`ChatPane`의 `busy`와
+  // 같은 규율).
+  const retryTurn = useCallback(
+    async (turn: Turn) => {
+      if (retryingDeclareSeq !== null) {
+        return;
+      }
+      setRetryingDeclareSeq(turn.declareSeq);
+      try {
+        const request = buildRetryRequest(turn);
+        const response =
+          request.kind === "confirm"
+            ? await confirmAction(
+                sessionId,
+                characterId,
+                characterId,
+                request.declareSeq,
+                request.chosen,
+                request.suggestion,
+                request.confirmed,
+              )
+            : await proceed(sessionId, characterId, characterId, request.declareSeq);
+        if (response.narration_failed) {
+          onTurnFailed(turn.declareSeq);
+        } else {
+          onTurnRetried(turn.declareSeq);
+        }
+      } catch {
+        // 403/409/503 등 — 실패 표시를 그대로 둔다(다시 재시도할 수 있다).
+        onTurnFailed(turn.declareSeq);
+      } finally {
+        setRetryingDeclareSeq(null);
+        feed.pollNow();
+      }
+    },
+    [sessionId, characterId, retryingDeclareSeq, onTurnFailed, onTurnRetried, feed.pollNow],
+  );
+
   // 끊긴 동안에는 폴링이 상태를 갱신하지 못하므로 "마지막 갱신 N초 전"이 그
   // 자리에 얼어붙는다. 멈춘 숫자는 끊겼다는 사실보다 더 헷갈리게 만든다.
   const [tick, setTick] = useState(0);
@@ -348,6 +414,9 @@ export function SessionScreen({ sessionId, characterId }: SessionScreenProps) {
           segmentCount={feed.state?.clock_segment_count ?? 4}
           justRevealedSeq={justRevealedSeq}
           failedDeclareSeqs={failedDeclareSeqs}
+          myCharacterId={characterId}
+          retryingDeclareSeq={retryingDeclareSeq}
+          onRetryTurn={(turn) => void retryTurn(turn)}
           calculations={feed.calculations}
           opening={opening}
           openingPending={openingPending}

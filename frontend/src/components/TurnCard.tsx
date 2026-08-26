@@ -30,6 +30,18 @@ interface TurnCardProps {
   justRevealed: boolean;
   /** 이 턴의 서사 요청이 실패했다고 내 브라우저가 아는 경우. */
   failed: boolean;
+  /** 이 턴을 낸 사람이 나인가 — 재시도 단추는 남의 턴에는 안 뜬다
+   * (서버가 그 캐릭터의 쿠키를 든 브라우저만 확인/진행을 받아들이므로,
+   * 남에게 단추를 보여 봤자 403만 받는다, verify-13-06 결함1). */
+  mine: boolean;
+  /** 재시도 단추의 콜백 — `null`이면 단추를 안 그린다. `failed && mine`
+   * 일 때만 실제 함수가 온다(호출부가 그 조합을 판단한다, D-04 — 판단은
+   * 한 자리). */
+  onRetry: (() => void) | null;
+  /** 지금 이 턴을 재시도하는 요청이 도는 중인가 — 단추를 비활성화하고
+   * 문구를 바꾼다(사라지게 하지 않는다, 단추가 있다가 없어지면 다시
+   * 시도할 방법을 잃은 것처럼 보인다). */
+  retrying: boolean;
   imageUrl?: string | null;
   /** 이 턴의 판정 계산 줄(Phase 12.2) — `null`이면 판 10 미만 기록이라
    * `COPY.checkTotalMissing`을 보인다(D-05). */
@@ -143,7 +155,18 @@ function CheckLine({
   );
 }
 
-export function TurnCard({ turn, actorName, isLatest, justRevealed, failed, imageUrl, calculation }: TurnCardProps) {
+export function TurnCard({
+  turn,
+  actorName,
+  isLatest,
+  justRevealed,
+  failed,
+  mine,
+  onRetry,
+  retrying,
+  imageUrl,
+  calculation,
+}: TurnCardProps) {
   const confirmed = turn.confirmed;
   const hasNarration = turn.narration.length > 0;
 
@@ -200,9 +223,25 @@ export function TurnCard({ turn, actorName, isLatest, justRevealed, failed, imag
       ) : null}
 
       {failed ? (
-        <p className="turn__error">
-          이번 턴을 처리하지 못했어요. 다시 시도해 주세요
-        </p>
+        <>
+          <p className="turn__error">{COPY.turnFailed}</p>
+          {/* 재시도는 이 턴을 낸 사람만 누를 수 있다(mine) — 서버가 남의
+              캐릭터로 온 확인/진행 요청을 403으로 거절하므로, 남에게
+              단추를 보여 봤자 실패만 한다. 누르면 새 선언(declareAction)이
+              아니라 같은 declare_seq로 confirm()/proceed()를 다시
+              부른다(`session/turnRetry.ts`) — 이미 굴린 주사위가 있으면
+              그것을 그대로 두고 이야기만 다시 쓴다(verify-13-06 결함1). */}
+          {mine && onRetry !== null ? (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={retrying}
+              onClick={onRetry}
+            >
+              {retrying ? COPY.turnRetrying : COPY.turnRetryButton}
+            </button>
+          ) : null}
+        </>
       ) : null}
     </article>
   );
