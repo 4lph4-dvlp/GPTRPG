@@ -156,7 +156,7 @@ Phase 8(신원 검증), 9(멱등성), 10(출력검증/탈옥방어), 15(위협 �
 ## Sources
 
 ### Primary (HIGH confidence)
-- `/home/alpha-pi/GPTRPG/src/gptrpg/**` 전체 — 아키텍처·핏폴 리서치의 1차 근거, 함수·줄 번호 단위 직접 확인
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/**` 전체 — 아키텍처·핏폴 리서치의 1차 근거, 함수·줄 번호 단위 직접 확인
 - `docs/session1-code-review.md` — C1~C4, H1~H2, M1~M8 세션1 실전 사고 감사 원본
 - `.planning/PROJECT.md` — D1~D33, D-59~D-63 잠금 결정, 다섯 아키텍처 불변식
 - Extended thinking / Streaming messages — Claude Platform Docs (platform.claude.com/docs/en/build-with-claude/extended-thinking)

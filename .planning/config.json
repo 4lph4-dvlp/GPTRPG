@@ -1,5 +1,6 @@
 {
   "workflow": {
-    "_auto_chain_active": false
+    "_auto_chain_active": false,
+    "test_command": ".venv/bin/python -m pytest -q --tb=short"
   }
 }

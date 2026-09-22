@@ -511,15 +511,15 @@ def write_report(state: GameState, base_dir: Path = Path(".gptrpg/reports")) -> 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `/home/alpha-pi/GPTRPG/src/gptrpg/event_log/store.py` — read in full this session, lines cited inline
-- `/home/alpha-pi/GPTRPG/src/gptrpg/event_log/schema.py` — read in full this session, lines cited inline
-- `/home/alpha-pi/GPTRPG/src/gptrpg/rules_core/reducer.py` — read in full this session, lines cited inline
-- `/home/alpha-pi/GPTRPG/src/gptrpg/rules_core/entities.py` — read in full this session, lines cited inline
-- `/home/alpha-pi/GPTRPG/src/gptrpg/session_actor/actor.py` — read in full this session, lines cited inline
-- `/home/alpha-pi/GPTRPG/src/gptrpg/cli/main.py`, `src/gptrpg/cli/turn_flow.py` — read in full this session, lines cited inline
-- `/home/alpha-pi/GPTRPG/src/gptrpg/agents/context.py` — read in full this session, lines cited inline
-- `/home/alpha-pi/GPTRPG/.importlinter`, `/home/alpha-pi/GPTRPG/pyproject.toml` — read in full this session, lines cited inline
-- `/home/alpha-pi/GPTRPG/tests/test_reducer_failure_count.py`, `tests/test_session_actor.py` — read this session to confirm no existing reset/auto-advance test coverage
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/event_log/store.py` — read in full this session, lines cited inline
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/event_log/schema.py` — read in full this session, lines cited inline
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/rules_core/reducer.py` — read in full this session, lines cited inline
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/rules_core/entities.py` — read in full this session, lines cited inline
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/session_actor/actor.py` — read in full this session, lines cited inline
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/cli/main.py`, `src/gptrpg/cli/turn_flow.py` — read in full this session, lines cited inline
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/agents/context.py` — read in full this session, lines cited inline
+- `/home/alpha-pi/dev/GPTRPG/.importlinter`, `/home/alpha-pi/dev/GPTRPG/pyproject.toml` — read in full this session, lines cited inline
+- `/home/alpha-pi/dev/GPTRPG/tests/test_reducer_failure_count.py`, `tests/test_session_actor.py` — read this session to confirm no existing reset/auto-advance test coverage
 - `pip index versions fastapi/uvicorn/httpx`, `npm view vite/typescript version + time.created` — run live this session against PyPI/npm
 
 ### Secondary (MEDIUM confidence)

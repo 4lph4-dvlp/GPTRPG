@@ -319,20 +319,20 @@ TURN_CONTEXT_FIELD_NAMES = frozenset(f.name for f in fields(TurnContext))
 
 ## Sources
 
-- `/home/alpha-pi/GPTRPG/.planning/PROJECT.md` — 잠금 결정 D1~D33, D-59~D-63, 다섯 불변식, D-20/D-31 재논의 예고
-- `/home/alpha-pi/GPTRPG/docs/session1-code-review.md` — C1~C4, H1~H2, M1~M8 감사 원본(2026-08-04/05)
-- `/home/alpha-pi/GPTRPG/docs/PIPELINE.md` — 층 구조, 파이프라인 A~F, §9 설계 의도-코드 괴리 목록
-- `/home/alpha-pi/GPTRPG/src/gptrpg/event_log/schema.py` — 이벤트 봉투, 7종 사건, `EVENT_SCHEMA_VERSION` 이력
-- `/home/alpha-pi/GPTRPG/src/gptrpg/rules_core/reducer.py` — `GameState`, `apply_event`, `fold`
-- `/home/alpha-pi/GPTRPG/src/gptrpg/rules_core/entities.py` — `StatEntry`/`Entity` (4칸 고정)
-- `/home/alpha-pi/GPTRPG/src/gptrpg/rules_core/resolution.py` — `resolve_2d6`, `Modifier`, `_flat_total`
-- `/home/alpha-pi/GPTRPG/src/gptrpg/session_actor/actor.py` — `SessionActor`, `_process`, `_maybe_auto_advance`, `_validate_caused_by`, `SessionRegistry`
-- `/home/alpha-pi/GPTRPG/src/gptrpg/turn/context.py` — `build_turn_context`
-- `/home/alpha-pi/GPTRPG/src/gptrpg/agents/context.py` — `TurnContext`(4칸 고정), `ClockState`
-- `/home/alpha-pi/GPTRPG/src/gptrpg/agents/prompt_assembly.py` — 캐시 순서, `build_gm_prompt`/`build_classifier_prompt`
-- `/home/alpha-pi/GPTRPG/src/gptrpg/agents/master_gm.py` — `narrate()`, `chunk_sentences`, 재시도/스톨 규칙
-- `/home/alpha-pi/GPTRPG/src/gptrpg/web/routes_actions.py` — `declare()`, `confirm()`, 명령 조립 지점
-- `/home/alpha-pi/GPTRPG/src/gptrpg/web/routes_characters.py` — 캐릭터 시트 GET 전용, 쿠키 신뢰 모델
+- `/home/alpha-pi/dev/GPTRPG/.planning/PROJECT.md` — 잠금 결정 D1~D33, D-59~D-63, 다섯 불변식, D-20/D-31 재논의 예고
+- `/home/alpha-pi/dev/GPTRPG/docs/session1-code-review.md` — C1~C4, H1~H2, M1~M8 감사 원본(2026-08-04/05)
+- `/home/alpha-pi/dev/GPTRPG/docs/PIPELINE.md` — 층 구조, 파이프라인 A~F, §9 설계 의도-코드 괴리 목록
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/event_log/schema.py` — 이벤트 봉투, 7종 사건, `EVENT_SCHEMA_VERSION` 이력
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/rules_core/reducer.py` — `GameState`, `apply_event`, `fold`
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/rules_core/entities.py` — `StatEntry`/`Entity` (4칸 고정)
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/rules_core/resolution.py` — `resolve_2d6`, `Modifier`, `_flat_total`
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/session_actor/actor.py` — `SessionActor`, `_process`, `_maybe_auto_advance`, `_validate_caused_by`, `SessionRegistry`
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/turn/context.py` — `build_turn_context`
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/agents/context.py` — `TurnContext`(4칸 고정), `ClockState`
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/agents/prompt_assembly.py` — 캐시 순서, `build_gm_prompt`/`build_classifier_prompt`
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/agents/master_gm.py` — `narrate()`, `chunk_sentences`, 재시도/스톨 규칙
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/web/routes_actions.py` — `declare()`, `confirm()`, 명령 조립 지점
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/web/routes_characters.py` — 캐릭터 시트 GET 전용, 쿠키 신뢰 모델
 
 ---
 *Architecture research for: v1.1 하드닝 마일스톤*

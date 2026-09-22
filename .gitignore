@@ -18,3 +18,4 @@ __pycache__/
 !**/.gptrpg/agents.example.md
 .env.local
 nohup.out
+node_modules/

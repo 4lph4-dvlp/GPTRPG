@@ -196,7 +196,7 @@ src/gptrpg/
 └── session_actor/             # unchanged — RecordAiCall/ConfirmAction already accept AI output
 ```
 
-**`.importlinter` update required:** the existing layers contract is `gptrpg.cli → gptrpg.session_actor → gptrpg.rulebooks → (gptrpg.rules_core | gptrpg.event_log)` [VERIFIED: `/home/alpha-pi/GPTRPG/.importlinter:16-21`, quoted: `layers =\n    gptrpg.cli\n    gptrpg.session_actor\n    gptrpg.rulebooks\n    gptrpg.rules_core | gptrpg.event_log`]. `gptrpg.agents` must be added as a layer **above `gptrpg.cli`** (i.e. `cli` may import `agents`, `agents` may import `session_actor`/`rulebooks` to build commands, but nothing below may import `agents`) — this keeps `rules_core` provably AI-ignorant (success criterion 2, D14) and matches the CONTEXT.md guidance that "AI 호출 코드는 이 세 폴더 중 어디에도 속하지 않는 바깥 층이어야 한다."
+**`.importlinter` update required:** the existing layers contract is `gptrpg.cli → gptrpg.session_actor → gptrpg.rulebooks → (gptrpg.rules_core | gptrpg.event_log)` [VERIFIED: `/home/alpha-pi/dev/GPTRPG/.importlinter:16-21`, quoted: `layers =\n    gptrpg.cli\n    gptrpg.session_actor\n    gptrpg.rulebooks\n    gptrpg.rules_core | gptrpg.event_log`]. `gptrpg.agents` must be added as a layer **above `gptrpg.cli`** (i.e. `cli` may import `agents`, `agents` may import `session_actor`/`rulebooks` to build commands, but nothing below may import `agents`) — this keeps `rules_core` provably AI-ignorant (success criterion 2, D14) and matches the CONTEXT.md guidance that "AI 호출 코드는 이 세 폴더 중 어디에도 속하지 않는 바깥 층이어야 한다."
 
 ### Pattern 1: Provider abstraction via a narrow protocol, not a shared base class hierarchy
 **What:** Define one `Provider` protocol with 3 methods (`list_models`, `complete`, `stream`) that every one of the 5 adapters implements independently. `NimProvider`/`OpenRouterProvider` may internally construct an `openai.OpenAI(base_url=...)` client and delegate, but they are still separate `Provider` implementations selected by name.
@@ -501,11 +501,11 @@ def with_progress_dots(fn, *, threshold_s: float = 5.0):
 
 ### Primary (HIGH confidence)
 - Bundled `claude-api` skill reference (Anthropic Python SDK: `python/claude-api/README.md`, `python/claude-api/streaming.md`, `shared/prompt-caching.md`, `shared/models.md`) — read in full this session; this is Anthropic's own maintained skill content mirroring first-party docs, used as the authoritative source for all Anthropic-specific claims in this document.
-- `/home/alpha-pi/GPTRPG/src/gptrpg/event_log/schema.py` — read in full this session, lines cited inline.
-- `/home/alpha-pi/GPTRPG/src/gptrpg/session_actor/actor.py` — read in full this session, lines cited inline.
-- `/home/alpha-pi/GPTRPG/src/gptrpg/cli/main.py` — read in full this session, lines cited inline.
-- `/home/alpha-pi/GPTRPG/.importlinter` — read in full this session, lines cited inline.
-- `/home/alpha-pi/GPTRPG/pyproject.toml` — read in full this session, lines cited inline.
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/event_log/schema.py` — read in full this session, lines cited inline.
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/session_actor/actor.py` — read in full this session, lines cited inline.
+- `/home/alpha-pi/dev/GPTRPG/src/gptrpg/cli/main.py` — read in full this session, lines cited inline.
+- `/home/alpha-pi/dev/GPTRPG/.importlinter` — read in full this session, lines cited inline.
+- `/home/alpha-pi/dev/GPTRPG/pyproject.toml` — read in full this session, lines cited inline.
 - `pip index versions <pkg>` for `anthropic`, `openai`, `google-genai`, `httpx`, `openrouter` — run this session against live PyPI.
 - `gsd-tools query package-legitimacy check` — run this session for all 5 candidate packages.
 

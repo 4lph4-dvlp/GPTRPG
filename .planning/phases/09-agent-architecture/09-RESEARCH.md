@@ -110,7 +110,7 @@
 네 번째 발견은 **레이어 계약이 이미 "어디에 무엇을 두어야 하는가"를 강제하고 있다**는
 것이다. `.importlinter` contract:2/3이 `gptrpg.agents`(그리고 co-equal `gptrpg.imagery`)를
 `gptrpg.session_actor` 위 계층에 두고, `gptrpg.agents`가 `event_log`/`session_actor`를
-import하는 것을 금지한다[VERIFIED: /home/alpha-pi/GPTRPG/.importlinter:9-33]. 그 결과 새
+import하는 것을 금지한다[VERIFIED: /home/alpha-pi/dev/GPTRPG/.importlinter:9-33]. 그 결과 새
 판단 조각(장면 신규 대상 판단·시계 영향 판단)은 `agents` 패키지 안에 "판단만 하고 값을
 돌려주는" 함수로 살아야 하고, 그 판단 결과를 실제 `AdvanceClock`/`AppendNarration` 등의
 명령으로 바꿔 `actor.submit()`하는 코드는 지금 `RecordSceneIllustration`이 그렇듯
@@ -145,13 +145,13 @@ import하는 것을 금지한다[VERIFIED: /home/alpha-pi/GPTRPG/.importlinter:9
 
 이 단계는 **새 외부 패키지를 설치하지 않는다.** 필요한 동시성 도구는 Python 3.11 표준
 라이브러리 `asyncio`(이미 `pyproject.toml`의 `requires-python = ">=3.11"`
-[VERIFIED: /home/alpha-pi/GPTRPG/pyproject.toml:9]과 프로젝트 전역의 `async def` 구조에
+[VERIFIED: /home/alpha-pi/dev/GPTRPG/pyproject.toml:9]과 프로젝트 전역의 `async def` 구조에
 이미 쓰이고 있다)로 전부 해결된다.
 
 | Library | Version | Purpose | Why Standard |
 |---------|---------|---------|--------------|
 | `asyncio` (표준 라이브러리) | Python 3.11+ 내장 | `asyncio.gather` + `asyncio.to_thread`로 동기 `Provider.complete()` 호출 두 개를 동시에 굴린다 | 이미 `cli/turn_flow.py`·`web/routes_actions.py` 전체가 `async def`이고, 웹 경로는 이미 `asyncio.to_thread`로 막는 AI 호출을 작업 스레드로 내보내고 있다[VERIFIED: src/gptrpg/web/routes_actions.py:234-242,482,500] — 같은 패턴의 확장일 뿐 새 개념이 아니다 |
-| `fastapi.BackgroundTasks` (기존 의존성) | `fastapi>=0.141.1`[VERIFIED: /home/alpha-pi/GPTRPG/pyproject.toml:12] | 응답을 보낸 뒤 배경에서 시계 조건 검사를 실행 | 이미 `_illustrate_scene`이 정확히 이 용도로 쓰고 있다[VERIFIED: src/gptrpg/web/routes_actions.py:551-563] — 새 의존성이 아니라 기존 것의 두 번째 사용처 |
+| `fastapi.BackgroundTasks` (기존 의존성) | `fastapi>=0.141.1`[VERIFIED: /home/alpha-pi/dev/GPTRPG/pyproject.toml:12] | 응답을 보낸 뒤 배경에서 시계 조건 검사를 실행 | 이미 `_illustrate_scene`이 정확히 이 용도로 쓰고 있다[VERIFIED: src/gptrpg/web/routes_actions.py:551-563] — 새 의존성이 아니라 기존 것의 두 번째 사용처 |
 
 ### Supporting
 
@@ -176,7 +176,7 @@ import하는 것을 금지한다[VERIFIED: /home/alpha-pi/GPTRPG/.importlinter:9
 
 **이 단계는 새 외부 패키지를 설치하지 않는다.** `pyproject.toml`의 기존 여섯 개 의존성
 (`anthropic`, `fastapi`, `google-genai`, `openai`, `pydantic`, `uvicorn`)과 표준 라이브러리
-`asyncio`만으로 충분하다[VERIFIED: /home/alpha-pi/GPTRPG/pyproject.toml:10-17]. Package
+`asyncio`만으로 충분하다[VERIFIED: /home/alpha-pi/dev/GPTRPG/pyproject.toml:10-17]. Package
 Legitimacy Gate 프로토콜은 스킵한다 — 검사할 신규 패키지가 없다.
 
 **Packages removed due to [SLOP] verdict:** 없음 (신규 패키지 없음)
@@ -628,15 +628,15 @@ self._clock_segment_count`)는 `_maybe_auto_advance`에만 있다
 ## Validation Architecture
 
 `.planning/config.json`에 `workflow.nyquist_validation` 키가 없으므로 기본값(활성)을
-따른다[VERIFIED: /home/alpha-pi/GPTRPG/.planning/config.json 전체 — `workflow` 아래
+따른다[VERIFIED: /home/alpha-pi/dev/GPTRPG/.planning/config.json 전체 — `workflow` 아래
 `_auto_chain_active`만 있고 `nyquist_validation` 키 없음].
 
 ### Test Framework
 
 | Property | Value |
 |----------|-------|
-| Framework | pytest 9.1.1+ / pytest-asyncio 1.4.0+ (`asyncio_mode = "auto"`) [VERIFIED: /home/alpha-pi/GPTRPG/pyproject.toml:46-47,53] |
-| Config file | `pyproject.toml` `[tool.pytest.ini_options]` (`testpaths = ["tests"]`) [VERIFIED: /home/alpha-pi/GPTRPG/pyproject.toml:51-52] |
+| Framework | pytest 9.1.1+ / pytest-asyncio 1.4.0+ (`asyncio_mode = "auto"`) [VERIFIED: /home/alpha-pi/dev/GPTRPG/pyproject.toml:46-47,53] |
+| Config file | `pyproject.toml` `[tool.pytest.ini_options]` (`testpaths = ["tests"]`) [VERIFIED: /home/alpha-pi/dev/GPTRPG/pyproject.toml:51-52] |
 | Quick run command | `uv run pytest tests/test_master_gm.py tests/test_action_classifier.py tests/test_session_actor_auto_advance.py -x` |
 | Full suite command | `uv run pytest` |
 

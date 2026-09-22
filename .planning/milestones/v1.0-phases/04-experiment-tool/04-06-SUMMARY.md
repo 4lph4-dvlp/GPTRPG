@@ -211,7 +211,7 @@ See `key-decisions` in frontmatter. Summary: `renderInlineNotice`/`NARRATION_FEE
 
 ## Issues Encountered
 
-- The `.env.local`/`.gptrpg/agents.json` needed for live NIM calls exist only in the main checkout (`/home/alpha-pi/GPTRPG`), not in this fresh worktree. Copied `.gptrpg/agents.json` (the user's own prior agent-role selection from Phase 3) into this worktree and sourced the two API keys from the main checkout's `.env.local` (values never echoed to any log) to run the server with real provider calls for automated repro. Both files stay gitignored (`.gptrpg/` is in `.gitignore`) — nothing secret was committed.
+- The `.env.local`/`.gptrpg/agents.json` needed for live NIM calls exist only in the main checkout (`/home/alpha-pi/dev/GPTRPG`), not in this fresh worktree. Copied `.gptrpg/agents.json` (the user's own prior agent-role selection from Phase 3) into this worktree and sourced the two API keys from the main checkout's `.env.local` (values never echoed to any log) to run the server with real provider calls for automated repro. Both files stay gitignored (`.gptrpg/` is in `.gitignore`) — nothing secret was committed.
 - The first server start used the API keys with their surrounding double-quotes still attached (naive `cut -d= -f2-` doesn't strip quoting), producing a 401 from NIM. Fixed by stripping leading/trailing `"` before exporting; second start succeeded and all live calls (`declare`/`confirm`) returned real classifications and real narration text.
 
 ## User Setup Required
